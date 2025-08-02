@@ -16,7 +16,7 @@ connectDB();
 // Initialize Express app
 const app = express();
 
-// Middleware
+// Middlewaremm
 // app.use(cors());
 app.use(express.json());
 app.use(cookieParser());
