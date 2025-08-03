@@ -23,6 +23,7 @@ app.use(cookieParser());
 
 
 // Use CORS middleware to allow requests from the frontend
+console.log("CLIENT_URL : ",process.env.CLIENT_URL)
 app.use(cors({
   origin: process.env.CLIENT_URL, // Allow frontend URL
   methods: ['GET', 'POST', 'PUT', 'DELETE'],

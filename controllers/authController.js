@@ -34,7 +34,7 @@ export async function signup(req, res) {
       ip: req.ip,
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
     });
-
+    console.log("NODE_ENV : ", process.env.NODE_ENV)
     res.cookie('accessToken', accessToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
