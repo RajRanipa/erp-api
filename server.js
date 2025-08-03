@@ -24,7 +24,7 @@ app.use(cookieParser());
 
 // Use CORS middleware to allow requests from the frontend
 app.use(cors({
-  origin: 'http://localhost:3000', // Allow frontend URL
+  origin: process.env.CLIENT_URL, // Allow frontend URL
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   credentials: true,
 }));
