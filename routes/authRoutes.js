@@ -24,7 +24,7 @@ router.get('/check-auth', Auth.checkAuth);
 router.put('/change-preferences', protect, Auth.changePreferences);
 
 router.get('/api/test', (req, res) => {
-  res.json({ message: 'Test route working' });
+  res.json({ message: 'Test route working added' });
 });
 
 // module.exports = router;
