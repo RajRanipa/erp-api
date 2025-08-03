@@ -19,16 +19,15 @@ const app = express();
 // Middlewaremm
 // app.use(cors());
 app.use(express.json());
-app.use(cookieParser());
-
 
 // Use CORS middleware to allow requests from the frontend
-console.log("CLIENT_URL : ",process.env.CLIENT_URL)
+console.log(chalk.green("CLIENT_URL ***** : ",process.env.CLIENT_URL));
 app.use(cors({
   origin: process.env.CLIENT_URL, // Allow frontend URL
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   credentials: true,
 }));
+app.use(cookieParser());
 
 // Basic test route in server.js
 app.get('/', (req, res) => {

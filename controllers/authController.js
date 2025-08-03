@@ -38,14 +38,16 @@ export async function signup(req, res) {
     res.cookie('accessToken', accessToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'Strict',
+      sameSite: 'None',
+      domain: '.orientfibertech.com',
       maxAge: 15 * 60 * 1000, // 15 minutes
     });
 
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'Strict',
+      sameSite: 'None',
+      domain: '.orientfibertech.com',
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     });
 
@@ -104,14 +106,16 @@ export async function login(req, res) {
     res.cookie('accessToken', accessToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'Strict',
+      sameSite: 'None',
+      domain: '.orientfibertech.com',
       maxAge: 15 * 60 * 1000, // 15 minutes
     });
 
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'Strict',
+      sameSite: 'None',
+      domain: '.orientfibertech.com',
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     });
 
@@ -189,14 +193,16 @@ export async function refreshToken(req, res) {
     res.cookie('accessToken', accessToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'Strict',
+      sameSite: 'None',
+      domain: '.orientfibertech.com',
       maxAge: 15 * 60 * 1000, // 15 minutes
     });
 
     res.cookie('refreshToken', newRefreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'Strict',
+      sameSite: 'None',
+      domain: '.orientfibertech.com',
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     });
 
@@ -260,12 +266,14 @@ export function logout(req, res) {
   res.clearCookie('accessToken', {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'Strict',
+    sameSite: 'None',
+      domain: '.orientfibertech.com',
   });
   res.clearCookie('refreshToken', {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'Strict',
+    sameSite: 'None',
+      domain: '.orientfibertech.com',
   });
 
   // Send response confirming the logout
