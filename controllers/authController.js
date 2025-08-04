@@ -2,8 +2,7 @@ import User from '../models/User.js';
 import jwt from 'jsonwebtoken';
 import { generateAccessToken, generateRefreshToken } from '../utils/tokenUtils.js';
 import RefreshToken from '../models/RefreshToken.js';
-import crypto from 'crypto';
-import bcrypt from 'bcrypt';
+import { error } from 'console';
 
 
 // @desc    Register new user
@@ -25,32 +24,32 @@ export async function signup(req, res) {
 
     const accessToken = generateAccessToken(newUser._id);
     const refreshToken = generateRefreshToken(newUser);
-    const hashedRefreshToken = crypto.createHash('sha256').update(refreshToken).digest('hex');
 
     await RefreshToken.create({
       userId: newUser._id,
-      token: hashedRefreshToken,
+      token: refreshToken,
       userAgent: req.headers['user-agent'],
       ip: req.ip,
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
     });
-    console.log("NODE_ENV : ", process.env.NODE_ENV) //production
+
+    console.log("NODE_ENV : ", process.env.NODE_ENV, process.env.NODE_ENV === 'production')
+
     res.cookie('accessToken', accessToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'None',
-      domain: '.orientfibertech.com',
+      sameSite: process.env.Strict_Mode,
+      domain: process.env.Domain_Name.includes('localhost') ? '' : process.env.Domain_Name,
       maxAge: 15 * 60 * 1000, // 15 minutes
     });
 
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'None',
-      domain: '.orientfibertech.com',
+      sameSite: process.env.Strict_Mode,
+      domain: process.env.Domain_Name.includes('localhost') ? '' : process.env.Domain_Name,
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     });
-
 
     res.status(200).json({
       status: true,
@@ -80,42 +79,43 @@ export async function login(req, res) {
     console.log("hit the log in ", email, password)
     // Find user and explicitly select password
     const user = await User.findOne({ email }).select('+password');
-    console.log("user ",user)
+    console.log("user ", user)
     if (!user) {
       return res.status(401).json({ status: false, message: 'Invalid credentials' });
     }
-    
+
     const isMatch = await user.comparePassword(password);
-    console.log("isMatch ",isMatch)
+    console.log("isMatch ", isMatch)
     if (!isMatch) {
       return res.status(401).json({ status: false, message: 'Invalid credentials' });
     }
 
     const accessToken = generateAccessToken(user._id);
     const refreshToken = generateRefreshToken(user);
-    const hashedRefreshToken = crypto.createHash('sha256').update(refreshToken).digest('hex');
 
     await RefreshToken.create({
       userId: user._id,
-      token: hashedRefreshToken,
+      token: refreshToken,
       userAgent: req.headers['user-agent'],
       ip: req.ip,
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
     });
 
+    console.log("Domain_Name : ", process.env.Domain_Name, process.env.Domain_Name.includes('localhost') ? '' : process.env.Domain_Name,)
+
     res.cookie('accessToken', accessToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'None',
-      domain: '.orientfibertech.com',
+      sameSite: process.env.Strict_Mode,
+      domain: process.env.Domain_Name.includes('localhost') ? '' : process.env.Domain_Name,
       maxAge: 15 * 60 * 1000, // 15 minutes
     });
 
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'None',
-      domain: '.orientfibertech.com',
+      sameSite: process.env.Strict_Mode,
+      domain: process.env.Domain_Name.includes('localhost') ? '' : process.env.Domain_Name,
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     });
 
@@ -144,72 +144,103 @@ export async function login(req, res) {
 // @access  Public (uses HttpOnly cookie)
 export async function refreshToken(req, res) {
   const token = req.cookies.refreshToken;
-  console.log("refreshToken token at refreshToken ::-- ", token, !token);
+  const aToken = req.cookies.accessToken;
+  const now = new Date();
+  const timestamp = now.toLocaleString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true
+  });
+  console.log("refreshToken token at refreshToken ::-- ", timestamp, token, aToken);
 
   if (!token) {
     return res.status(401).json({ status: false, message: 'No refresh token found' });
   }
 
   try {
-    // Decode the token to get the user ID (and other data if needed)
+    // ✅ If access token is still valid, just return user data
+    if (aToken) {
+      try {
+        const decoded_access = jwt.verify(aToken, process.env.JWT_ACCESS_SECRET);
+        const user_access = await User.findById(decoded_access.id).select('preferences role');
+
+        if (user_access) {
+          return res.status(200).json({
+            status: true,
+            user: {
+              id: user_access._id,
+              preferences: user_access.preferences,
+              role: user_access.role,
+            }
+          });
+        }
+      } catch (err) {
+        if (err.name !== 'TokenExpiredError') {
+          // Only return 401 if it's an actual verification error
+          console.warn("Access token invalid:", err);
+          return res.status(401).json({ status: false, message: 'Invalid access token', error: err });
+        }
+        // If token expired, continue refresh flow
+        console.log("Access token expired, continuing refresh");
+      }
+    }
+
+    // ✅ Decode refresh token
     const decoded = jwt.verify(token, process.env.JWT_REFRESH_SECRET);
-    console.log("Decoded token:", decoded); // Check if { id, email, iat, exp } are in the decoded payload
-    // here id is still not coming after 15 min of expiring accestoken untill that id is coming 
+    console.log("Decoded token:", decoded);
 
-    // Hash the refresh token
-    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
-    console.log("hashedToken - ", hashedToken);
-
-    // Check the stored refresh token in the database
-    const existingToken = await RefreshToken.findOne({ token: hashedToken });
-    if (!existingToken || existingToken.userId.toString() !== decoded.id) {
+    // ✅ Use model method to find matching hashed token
+    const existingToken = await RefreshToken.findMatchingToken(token, decoded.id);
+    if (!existingToken) {
       return res.status(403).json({ status: false, message: 'Invalid refresh token' });
     }
 
-    // Revoke the old refresh token
-    await RefreshToken.deleteOne({ token: hashedToken });
-    // Fetch user from DB first
+    // ❌ Delete old token
+    await RefreshToken.deleteOne({ _id: existingToken._id });
+
+    // ✅ Generate new tokens
     const user = await User.findById(decoded.id);
     if (!user) {
       return res.status(404).json({ status: false, message: 'User not found' });
     }
 
-    // Now generate new tokens with full user data
     const accessToken = generateAccessToken(user._id);
     const newRefreshToken = generateRefreshToken(user);
-    
-    const hashedNewRefreshToken = crypto.createHash('sha256').update(newRefreshToken).digest('hex');
 
-    // Store the new refresh token in the database
     await RefreshToken.create({
-      userId: decoded.id,
-      token: hashedNewRefreshToken,
+      userId: user._id,
+      token: newRefreshToken, // ⚠ Model should auto-hash this
       userAgent: req.headers['user-agent'],
       ip: req.ip,
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
     });
 
-    // Set cookies for the new tokens
+    // ✅ Set cookies again
     res.cookie('accessToken', accessToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'None',
-      domain: '.orientfibertech.com',
-      maxAge: 15 * 60 * 1000, // 15 minutes
+      sameSite: process.env.Strict_Mode,
+      domain: process.env.Domain_Name.includes('localhost') ? '' : process.env.Domain_Name,
+      maxAge: 15 * 60 * 1000,
     });
 
     res.cookie('refreshToken', newRefreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'None',
-      domain: '.orientfibertech.com',
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      sameSite: process.env.Strict_Mode,
+      domain: process.env.Domain_Name.includes('localhost') ? '' : process.env.Domain_Name,
+      maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
-    res.status(200).json({ status: true, message: 'Access token refreshed' });
+    return res.status(200).json({ status: true, message: 'Access token refreshed' });
   } catch (err) {
     console.error('Refresh Token Error:', err);
-    res.status(403).json({ status: false, message: 'Invalid refresh token' });
+    return res.status(403).json({ status: false, message: 'Invalid or expired refresh token' });
   }
 };
 
@@ -238,7 +269,6 @@ export async function checkAuth(req, res) {
     }
 
     // Attach the decoded user info to the request object for further use if needed
-    req.user = decoded;
     console.log("decoded at checkAuth :- ", decoded)
 
     res.status(200).json({
@@ -266,14 +296,14 @@ export function logout(req, res) {
   res.clearCookie('accessToken', {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'None',
-      domain: '.orientfibertech.com',
+    sameSite: process.env.Strict_Mode,
+    domain: process.env.Domain_Name.includes('localhost') ? '' : process.env.Domain_Name,
   });
   res.clearCookie('refreshToken', {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    sameSite: 'None',
-      domain: '.orientfibertech.com',
+    sameSite: process.env.Strict_Mode,
+    domain: process.env.Domain_Name.includes('localhost') ? '' : process.env.Domain_Name,
   });
 
   // Send response confirming the logout
