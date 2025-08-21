@@ -36,11 +36,15 @@ refreshTokenSchema.pre('save', function (next) {
 
 // 💡 You can even add a static method to compare later if needed
 refreshTokenSchema.statics.hashToken = function (plainToken) {
-  return crypto.createHash('sha256').update(plainToken).digest('hex');
+  console.log('plainToken in hashToken', plainToken);
+  let hextoken = crypto.createHash('sha256').update(plainToken).digest('hex');
+  return hextoken
 };
 
 refreshTokenSchema.statics.findMatchingToken = async function (plainToken, userId) {
+  console.log('plainToken in findMatchingToken', plainToken);
   const hashed = this.hashToken(plainToken);
+  console.log('plainToken in hashed', hashed);
   return await this.findOne({ token: hashed, userId });
 };
 

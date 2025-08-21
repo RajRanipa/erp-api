@@ -4,6 +4,8 @@ import { generateAccessToken, generateRefreshToken } from '../utils/tokenUtils.j
 import RefreshToken from '../models/RefreshToken.js';
 import { error } from 'console';
 
+const ACCESS_TOKEN_EXPIRE_MINUTES = 15;
+const REFRESH_TOKEN_EXPIRE_DAYS = 7;
 
 // @desc    Register new user
 // @route   POST /signup
@@ -25,12 +27,13 @@ export async function signup(req, res) {
     const accessToken = generateAccessToken(newUser._id);
     const refreshToken = generateRefreshToken(newUser);
 
+    const refreshTokenExpireAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60 * 1000);
     await RefreshToken.create({
       userId: newUser._id,
       token: refreshToken,
       userAgent: req.headers['user-agent'],
       ip: req.ip,
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+      expiresAt: refreshTokenExpireAt,
     });
 
     console.log("NODE_ENV : ", process.env.NODE_ENV, process.env.NODE_ENV === 'production')
@@ -40,7 +43,7 @@ export async function signup(req, res) {
       secure: process.env.NODE_ENV === 'production',
       sameSite: process.env.Strict_Mode,
       domain: process.env.Domain_Name.includes('localhost') ? '' : process.env.Domain_Name,
-      maxAge: 15 * 60 * 1000, // 15 minutes
+      maxAge: ACCESS_TOKEN_EXPIRE_MINUTES * 60 * 1000,
     });
 
     res.cookie('refreshToken', refreshToken, {
@@ -48,7 +51,7 @@ export async function signup(req, res) {
       secure: process.env.NODE_ENV === 'production',
       sameSite: process.env.Strict_Mode,
       domain: process.env.Domain_Name.includes('localhost') ? '' : process.env.Domain_Name,
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      maxAge: REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60 * 1000,
     });
 
     res.status(200).json({
@@ -79,36 +82,42 @@ export async function login(req, res) {
     console.log("hit the log in ", email, password)
     // Find user and explicitly select password
     const user = await User.findOne({ email }).select('+password');
-    console.log("user ", user)
+    // console.log("user ", user)
     if (!user) {
       return res.status(401).json({ status: false, message: 'Invalid credentials' });
     }
 
     const isMatch = await user.comparePassword(password);
-    console.log("isMatch ", isMatch)
+    // console.log("isMatch ", isMatch)
     if (!isMatch) {
       return res.status(401).json({ status: false, message: 'Invalid credentials' });
     }
 
     const accessToken = generateAccessToken(user._id);
     const refreshToken = generateRefreshToken(user);
+    console.log("refreshToken ", refreshToken)
+
+    const refreshTokenExpireAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60 * 1000);
+
+    const accessTokenExpireAt = new Date(Date.now() + ACCESS_TOKEN_EXPIRE_MINUTES * 60 * 1000);
 
     await RefreshToken.create({
       userId: user._id,
       token: refreshToken,
       userAgent: req.headers['user-agent'],
       ip: req.ip,
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+      expiresAt: refreshTokenExpireAt,
     });
 
-    console.log("Domain_Name : ", process.env.Domain_Name, process.env.Domain_Name.includes('localhost') ? '' : process.env.Domain_Name,)
+    // console.log("Domain_Name : ", process.env.Domain_Name, process.env.Domain_Name.includes('localhost') ? '' : process.env.Domain_Name,)
 
+    
     res.cookie('accessToken', accessToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: process.env.Strict_Mode,
       domain: process.env.Domain_Name.includes('localhost') ? '' : process.env.Domain_Name,
-      maxAge: 15 * 60 * 1000, // 15 minutes
+      maxAge: ACCESS_TOKEN_EXPIRE_MINUTES * 60 * 1000, 
     });
 
     res.cookie('refreshToken', refreshToken, {
@@ -116,7 +125,7 @@ export async function login(req, res) {
       secure: process.env.NODE_ENV === 'production',
       sameSite: process.env.Strict_Mode,
       domain: process.env.Domain_Name.includes('localhost') ? '' : process.env.Domain_Name,
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      maxAge: REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60 * 1000,
     });
 
     res.status(200).json({
@@ -129,6 +138,7 @@ export async function login(req, res) {
         role: user.role,
         companyId: user.companyId || null,
       },
+      accessTokenExpireAt
     });
   } catch (error) {
     console.error('Login Error:', error);
@@ -143,6 +153,7 @@ export async function login(req, res) {
 // @route   POST /refresh-token
 // @access  Public (uses HttpOnly cookie)
 export async function refreshToken(req, res) {
+  console.log("Attempting to refresh token..");
   const token = req.cookies.refreshToken;
   const aToken = req.cookies.accessToken;
   const now = new Date();
@@ -156,77 +167,59 @@ export async function refreshToken(req, res) {
     second: '2-digit',
     hour12: true
   });
-  console.log("refreshToken token at refreshToken ::-- ", timestamp, token, aToken);
+  console.log("refreshToken token at refreshToken ::-- ", timestamp, token, !aToken);
 
   if (!token) {
+    console.error("No refresh token found.");
     return res.status(401).json({ status: false, message: 'No refresh token found' });
   }
 
   try {
-    // ✅ If access token is still valid, just return user data
-    if (aToken) {
-      try {
-        const decoded_access = jwt.verify(aToken, process.env.JWT_ACCESS_SECRET);
-        const user_access = await User.findById(decoded_access.id).select('preferences role');
-
-        if (user_access) {
-          return res.status(200).json({
-            status: true,
-            user: {
-              id: user_access._id,
-              preferences: user_access.preferences,
-              role: user_access.role,
-            }
-          });
-        }
-      } catch (err) {
-        if (err.name !== 'TokenExpiredError') {
-          // Only return 401 if it's an actual verification error
-          console.warn("Access token invalid:", err);
-          return res.status(401).json({ status: false, message: 'Invalid access token', error: err });
-        }
-        // If token expired, continue refresh flow
-        console.log("Access token expired, continuing refresh");
-      }
-    }
-
-    // ✅ Decode refresh token
+    console.log("Verifying refresh token...");
     const decoded = jwt.verify(token, process.env.JWT_REFRESH_SECRET);
-    console.log("Decoded token:", decoded);
+    console.log("Refresh token decoded:", decoded );
+    console.log("Refresh token :", token);
 
     // ✅ Use model method to find matching hashed token
     const existingToken = await RefreshToken.findMatchingToken(token, decoded.id);
     if (!existingToken) {
+      console.error("No matching refresh token found in database.");
       return res.status(403).json({ status: false, message: 'Invalid refresh token' });
     }
 
-    // ❌ Delete old token
+    // ❌ Delete old toke
+    console.log("Deleting old refresh token from database.");
     await RefreshToken.deleteOne({ _id: existingToken._id });
 
     // ✅ Generate new tokens
     const user = await User.findById(decoded.id);
     if (!user) {
+      console.error("User not found for decoded refresh token.");
       return res.status(404).json({ status: false, message: 'User not found' });
     }
 
-    const accessToken = generateAccessToken(user._id);
-    const newRefreshToken = generateRefreshToken(user);
+    // Generate tokens with shorter expiry for testing
+    console.log("Generating new access and refresh tokens with short expiry for testing.");
+    const accessToken = generateAccessToken(user._id); // 1 minute expiry
+    const newRefreshToken = generateRefreshToken(user); // 2 minutes expiry
 
+    const refreshTokenExpireAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60 * 1000);
     await RefreshToken.create({
       userId: user._id,
       token: newRefreshToken, // ⚠ Model should auto-hash this
       userAgent: req.headers['user-agent'],
       ip: req.ip,
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      expiresAt: refreshTokenExpireAt,
     });
 
-    // ✅ Set cookies again
+    // ✅ Set cookies againn
+    console.log("Setting new cookies for access and refresh tokens.");
     res.cookie('accessToken', accessToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: process.env.Strict_Mode,
       domain: process.env.Domain_Name.includes('localhost') ? '' : process.env.Domain_Name,
-      maxAge: 15 * 60 * 1000,
+      maxAge: ACCESS_TOKEN_EXPIRE_MINUTES * 60 * 1000,
     });
 
     res.cookie('refreshToken', newRefreshToken, {
@@ -234,10 +227,18 @@ export async function refreshToken(req, res) {
       secure: process.env.NODE_ENV === 'production',
       sameSite: process.env.Strict_Mode,
       domain: process.env.Domain_Name.includes('localhost') ? '' : process.env.Domain_Name,
-      maxAge: 7 * 24 * 60 * 60 * 1000,
+      maxAge: REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60 * 1000,
     });
 
-    return res.status(200).json({ status: true, message: 'Access token refreshed' });
+    console.log("Token refresh successful, returning response.");
+
+    // 📅 Calculate and send the new access token expiry time
+    const accessTokenExpireAt = new Date(Date.now() + ACCESS_TOKEN_EXPIRE_MINUTES * 60 * 1000);
+    return res.status(200).json({ 
+      status: true, 
+      message: 'Access token refreshed',
+      accessTokenExpireAt
+    });
   } catch (err) {
     console.error('Refresh Token Error:', err);
     return res.status(403).json({ status: false, message: 'Invalid or expired refresh token' });

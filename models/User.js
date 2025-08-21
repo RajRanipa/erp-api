@@ -71,11 +71,11 @@ userSchema.pre('save', async function (next) {
 });
 
 userSchema.methods.comparePassword = async function (inputPassword) {
-  console.log('🔐 Hashed password:', this.password);
-  console.log('🔑 Input password:', inputPassword);
+  // console.log('🔐 Hashed password:', this.password);
+  // console.log('🔑 Input password:', inputPassword);
   
   const isMatch = await bcrypt.compare(inputPassword, this.password);
-  console.log('✅ Password match:', isMatch);
+  // console.log('✅ Password match:', isMatch);
 
   return isMatch;
 };

@@ -6,19 +6,15 @@ const verifyAccessToken = (req, res, next) => {
 
   console.log("authMiddleware file here ")
   console.log(!token)
-  console.log(token)
 
   if (!token) {
-    console.log(" authMiddleware file here ")
-    console.log(!token)
+    console.log(" authMiddleware file here false ")
     return res.status(401).json({ message: 'Unauthorized: No access token provided.' });
   }
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_ACCESS_SECRET);
     console.log("Decoded of Middleware")
-    // 0] Decoded of Middleware
-    // { iat: 1745828714, exp: 1745829614 } i am not geeting any id in decoded
     console.log(decoded)
     req.user = decoded;
     next();
