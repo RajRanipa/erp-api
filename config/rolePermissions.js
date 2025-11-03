@@ -1,6 +1,6 @@
 export const rolePermissions = {
   owner: [
-    'company:manage',
+    'company:full',
     'users:manage',
     'items:full',
     'inventory:full',
