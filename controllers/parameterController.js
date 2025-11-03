@@ -10,7 +10,7 @@ const mapDimension = (dm) => {
   const l = dm.length ?? '';
   const w = dm.width ?? '';
   const th = dm.thickness ?? '';
-  return { label: `${l} x ${w} x ${th}${unit}`.trim(), value: String(dm._id) };
+  return { label: `${l} × ${w} × ${th}${unit}`.trim(), value: String(dm._id) };
 };
 const mapPacking = (p) => ({ label: p.productName, value: String(p._id) });
 
@@ -216,7 +216,75 @@ export const createTemperature = async (req, res) => {
 export const createDimension = async (req, res) => {
   try {
     const body = req.body || {};
+
+    // Normalize inputs
+    const rawLength = body.length;
+    const rawWidth = body.width;
+    const rawThickness = body.thickness;
+    const unit = (body.unit || '').toString().trim();
+
+    const hasLength = rawLength !== undefined && rawLength !== null && String(rawLength).trim() !== '';
+    const hasWidth = rawWidth !== undefined && rawWidth !== null && String(rawWidth).trim() !== '';
+    const hasThickness = rawThickness !== undefined && rawThickness !== null && String(rawThickness).trim() !== '';
+
+    // At least one dimension must be provided
+    if (!hasLength && !hasWidth && !hasThickness) {
+      return res.status(400).json({ message: 'At least one of length, width or thickness must be provided' });
+    }
+
+    // Unit is required
+    if (!unit) {
+      return res.status(400).json({ message: 'Unit is required for dimension' });
+    }
+
+    // Convert provided values to numbers and default missing ones to 0
+    const length = hasLength ? Number(rawLength) : 0;
+    const width = hasWidth ? Number(rawWidth) : 0;
+    const thickness = hasThickness ? Number(rawThickness) : 0;
+
+    // Build payload for creation
+    const payload = {
+      length,
+      width,
+      thickness,
+      unit,
+      // preserve optional fields if provided (productType, category)
+      ...(body.productType ? { productType: body.productType } : {}),
+      ...(body.category ? { category: body.category } : {}),
+    };
+
+    try {
+      const docCreated = await Dimension.create(payload);
+      const doc = docCreated.toObject();
+      return res.status(201).json({ success: true, data: doc, message: 'Dimension created successfully' });
+    } catch (err) {
+      // If duplicate, fetch and return existing
+      if (err?.code === 11000) {
+        const existing = await Dimension.findOne({ length, width, thickness, unit }).lean();
+        if (existing) {
+          return res.status(409).json({
+            success: false,
+            data: existing,
+            option: mapDimension(existing),
+            message: 'This dimension already exists, add a new one.'
+          });
+        }
+      }
+      console.error('Failed to create dimension', err);
+      return res.status(500).json({ message: 'Failed to create dimension' });
+    }
+  } catch (err) {
+    console.error('createDimension error', err);
+    return res.status(500).json({ message: 'Failed to create dimension' });
+  }
+};
+
+export const createDi_old_mension = async (req, res) => {
+  try {
+    const body = req.body || {};
     console.log("Dimension body ", body)
+    // create validation here there should be any one value needed from length , width and thickness , what ever value is not present make it 0 and unit required 
+    
     // Just attempt to create; let Mongo unique index enforce duplicates
     try {
       const docCreated = await Dimension.create(body);

@@ -27,9 +27,10 @@ export const createPacking = async (req, res) => {
 // Get all packing materials
 export const getAllPacking = async (req, res) => {
   try {
+
     const packings = await Packing.find();
     // Map packings to desired format
-    // console.log("packings ", packings)
+    console.log("packings ", packings)
     const mapped = packings.map(packing => (
       {
         value: packing._id,

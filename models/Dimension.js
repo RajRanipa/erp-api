@@ -25,6 +25,7 @@ const DimensionSchema = new mongoose.Schema(
 );
 
 DimensionSchema.index({
+  productType: 1,
   'length': 1,
   'width': 1,
   'thickness': 1,

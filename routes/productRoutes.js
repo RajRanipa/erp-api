@@ -10,18 +10,18 @@ import {
   getUniqueTemperatures,
   getUniquePackings
 } from '../controllers/productController.js';
-import verifyAccessToken from '../middleware/authMiddleware.js';
+import auth from '../middleware/authMiddleware.js';
 const router = express.Router();
 
-// router.get('/', verifyAccessToken, authorizeRoles('admin'), getProducts);
-router.get('/', verifyAccessToken, getProducts);
-router.get('/names', verifyAccessToken, getUniqueProductNames);
-router.get('/dimensions', verifyAccessToken, getUniqueDimensions);
-router.get('/densities', verifyAccessToken, getUniqueDensities);
-router.get('/temperatures', verifyAccessToken, getUniqueTemperatures);
-router.get('/packings', verifyAccessToken, getUniquePackings);
-router.post('/create', verifyAccessToken, createProduct);
-router.put('/:id', verifyAccessToken, updateProduct);
-router.delete('/:id', verifyAccessToken, deleteProduct);
+// router.get('/', auth, authorizeRoles('admin'), getProducts);
+router.get('/', auth, getProducts);
+router.get('/names', auth, getUniqueProductNames);
+router.get('/dimensions', auth, getUniqueDimensions);
+router.get('/densities', auth, getUniqueDensities);
+router.get('/temperatures', auth, getUniqueTemperatures);
+// router.get('/packings', auth, getUniquePackings);
+router.post('/create', auth, createProduct);
+router.put('/:id', auth, updateProduct);
+router.delete('/:id', auth, deleteProduct);
 
 export default router;

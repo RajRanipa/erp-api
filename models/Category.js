@@ -7,7 +7,8 @@ const Category = new mongoose.Schema(
       trim: true,
       unique: true,
       required: true,
-      lowercase: true
+      enum: ['raw material','finished goods','packing material', 'non-conformance'],
+      lowercase: true,
     }
   },
   { timestamps: true }

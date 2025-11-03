@@ -12,7 +12,9 @@ function normalizeDate(d) {
   return x;
 }
 
-function validatePayload({ name, startDate, endDate, status }) {
+export function validateCampaign(req, res, next) {
+  const { name, startDate, endDate, status } = req.body || {};
+
   const errors = {};
   const start = normalizeDate(startDate);
   const end = normalizeDate(endDate);
@@ -26,17 +28,63 @@ function validatePayload({ name, startDate, endDate, status }) {
     errors.status = `Status must be one of: ${allowedStatuses.join(', ')}`;
   }
 
+  // Basic presence/validity
   if (!startDate) errors.startDate = 'Start Date is required';
   else if (!start) errors.startDate = 'Start Date is invalid';
-  else if (start.getTime() < today.getTime()) errors.startDate = 'Start Date cannot be in the past';
 
-  if (endDate) {
-    if (!end) errors.endDate = 'End Date is invalid';
-    else if (end.getTime() < today.getTime()) errors.endDate = 'End Date cannot be in the past';
-    else if (start && end.getTime() < start.getTime()) errors.endDate = 'End Date cannot be before Start Date';
+  if (endDate && !end) {
+    errors.endDate = 'End Date is invalid';
   }
 
-  return { ok: Object.keys(errors).length === 0, errors };
+  if (Object.keys(errors).length) {
+    return res.status(400).json({ success: false, errors });
+  }
+
+  const isPast = (d) => d && d.getTime() < today.getTime();
+  const isFuture = (d) => d && d.getTime() > today.getTime();
+
+  // Cross-field rule
+  if (start && end && end.getTime() < start.getTime()) {
+    return res.status(400).json({ success: false, errors: { endDate: 'End Date cannot be before Start Date' } });
+  }
+
+  const mode = req.method === 'POST' ? 'create' : 'edit';
+
+  if (mode === 'create') {
+    // On create we enforce PLANNED-like rules by default
+    if (isPast(start)) {
+      return res.status(400).json({ success: false, errors: { startDate: 'Start Date cannot be in the past' } });
+    }
+    // End date allowed in future on create; if provided, it must be >= start (already checked)
+  } else {
+    // mode === 'edit' : rules differ by target status
+    if (status === 'PLANNED') {
+      if (isPast(start)) {
+        return res.status(400).json({ success: false, errors: { startDate: 'Start Date cannot be in the past for PLANNED' } });
+      }
+      // end can be today/future; already validated vs start
+    } else if (status === 'RUNNING') {
+      if (isFuture(start)) {
+        return res.status(400).json({ success: false, errors: { startDate: 'Running campaign cannot start in the future' } });
+      }
+      // end may be empty or today/future (planning finish)
+    } else if (status === 'COMPLETED') {
+      if (isFuture(start)) {
+        return res.status(400).json({ success: false, errors: { startDate: 'Completed campaign cannot start in the future' } });
+      }
+      if (!end) {
+        return res.status(400).json({ success: false, errors: { endDate: 'End Date required for COMPLETED' } });
+      }
+      if (isFuture(end)) {
+        return res.status(400).json({ success: false, errors: { endDate: 'Completed campaign cannot end in the future' } });
+      }
+      if (end.getTime() < start.getTime()) {
+        return res.status(400).json({ success: false, errors: { endDate: 'End Date cannot be before Start Date' } });
+      }
+    }
+  }
+
+  return next();
 }
 
 function pickCampaign(dto = {}) {
@@ -61,9 +109,6 @@ export const createCampaign = async (req, res) => {
   try {
     const { name, startDate, endDate, status, remarks, totalRawIssued, totalFiberProduced, meltReturns } = req.body || {};
 
-    const v = validatePayload({ name, startDate, endDate, status });
-    if (!v.ok) return res.status(400).json({ success: false, errors: v.errors });
-
     const doc = new Campaign({
       name: String(name).trim(),
       startDate: normalizeDate(startDate),
@@ -85,10 +130,9 @@ export const createCampaign = async (req, res) => {
 };
 
 export const listCampaigns = async (req, res) => {
-  console.log('listCampaigns called');
   try {
     const rows = await Campaign.find({}).sort({ startDate: -1, createdAt: -1 }).lean();
-    console.log(rows);
+    // console.log(rows);
     return res.status(200).json(rows);
   } catch (err) {
     console.error('listCampaigns error:', err);
@@ -101,7 +145,7 @@ export const getCampaignById = async (req, res) => {
     const { id } = req.params;
     const row = await Campaign.findById(id).lean();
     if (!row) return res.status(404).json({ success: false, message: 'Campaign not found' });
-    return res.status(200).json({ success: true, data: pickCampaign(row) });
+    return res.status(200).json(pickCampaign(row));
   } catch (err) {
     console.error('getCampaignById error:', err);
     return res.status(500).json({ success: false, message: 'Failed to fetch campaign', error: err.message });
@@ -112,9 +156,6 @@ export const updateCampaign = async (req, res) => {
   try {
     const { id } = req.params;
     const { name, startDate, endDate, status, remarks, totalRawIssued, totalFiberProduced, meltReturns } = req.body || {};
-
-    const v = validatePayload({ name, startDate, endDate, status });
-    if (!v.ok) return res.status(400).json({ success: false, errors: v.errors });
 
     const patch = {
       name: String(name).trim(),

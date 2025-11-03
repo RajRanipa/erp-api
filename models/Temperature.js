@@ -5,7 +5,6 @@ const TemperatureSchema = new mongoose.Schema(
     value: {
       type: Number,
       required: true,
-      unique: true
     },
     unit: {
       type: String,
@@ -21,4 +20,8 @@ const TemperatureSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+TemperatureSchema.index(
+  { productType: 1, value: 1},
+  { unique: true, }
+);
 export default mongoose.model('Temperature', TemperatureSchema);

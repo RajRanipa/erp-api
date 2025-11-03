@@ -7,24 +7,25 @@ import {
   getCampaignById,
   updateCampaign,
   deleteCampaign,
+  validateCampaign
 } from '../controllers/campaignController.js';
-import auth from '../middleware/authMiddleware.js';
+import auth, { roleAuth } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
-
+router.use(auth);
 // GET /api/campaigns
-router.get('/', auth, listCampaigns);
+router.get('/', roleAuth('campaigns:read'), listCampaigns);
 
 // GET /api/campaigns/:id
-router.get('/:id', auth, getCampaignById);
+router.get('/:id', roleAuth('campaigns:read'), getCampaignById);
 
 // POST /api/campaigns
-router.post('/', auth, createCampaign);
+router.post('/', roleAuth('campaigns:create'), validateCampaign, createCampaign);
 
 // PUT /api/campaigns/:id
-router.put('/:id', auth, updateCampaign);
+router.put('/:id', roleAuth('campaigns:update'), validateCampaign, updateCampaign);
 
 // DELETE /api/campaigns/:id
-router.delete('/:id', auth, deleteCampaign);
+router.delete('/:id', roleAuth('campaigns:delete'), deleteCampaign);
 
 export default router;

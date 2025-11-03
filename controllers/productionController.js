@@ -2,7 +2,7 @@
 import Product from '../models/Product.js';
 import RawMaterial from '../models/Rawmaterial.js';
 import BOM from '../models/BOM.js';
-import Inventory from '../models/InventoryMove.js';
+// import Inventory from '../models/InventoryMove.js';
 import WorkOrder from '../models/WorkOrder.js'; // Import the new WorkOrder model
 
 export const createWorkOrder = async (req, res) => {

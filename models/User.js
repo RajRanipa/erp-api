@@ -22,14 +22,14 @@ const userSchema = new mongoose.Schema(
       minlength: [6, 'Password must be at least 6 characters'],
       select: false,
     },
-    role: { 
-      type: String, 
-      enum: ['admin', 'manager', 'employee'], 
-      default: 'employee' 
+    role: {
+      type: String,
+      enum: ['owner','admin','manager','employee','accountant', 'store_operator', 'production_manager','viewer'],
+      required: [true, 'Role is required'],
     },
-    companyId: { 
-      type: mongoose.Schema.Types.ObjectId, 
-      ref: 'Company' 
+    companyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Company'
     },
     preferences: {
       theme: {
@@ -57,6 +57,12 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    isSetupCompleted: {
+      type: Boolean,
+      default: false,
+    },
+    createdBy: { type: mongoose.Schema.Types.ObjectId,  ref: 'User', default: null, timestamps: true },
+    status: { type: String, enum: ['pending', 'active', 'suspended'], default: 'active' },
   },
   { timestamps: true }
 );
@@ -64,7 +70,7 @@ const userSchema = new mongoose.Schema(
 userSchema.pre('save', async function (next) {
   if (!this.isModified('password')) return next();
 
-  const rounds = 10;
+  const rounds = 12;
   const salt = await bcrypt.genSalt(rounds);
   this.password = await bcrypt.hash(this.password, salt);
   next();
@@ -73,7 +79,7 @@ userSchema.pre('save', async function (next) {
 userSchema.methods.comparePassword = async function (inputPassword) {
   // console.log('🔐 Hashed password:', this.password);
   // console.log('🔑 Input password:', inputPassword);
-  
+
   const isMatch = await bcrypt.compare(inputPassword, this.password);
   // console.log('✅ Password match:', isMatch);
 

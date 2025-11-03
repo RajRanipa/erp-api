@@ -25,7 +25,7 @@ const BomSchema = new Schema({
 
   revision: { type: String, default: 'v1' },            // future-proofing
   effectiveFrom: { type: Date },                        // optional effectivity window
-  effectiveTo:   { type: Date },
+  effectiveTo: { type: Date },
 
   items: { type: [BomItemSchema], default: [], validate: v => Array.isArray(v) },
 

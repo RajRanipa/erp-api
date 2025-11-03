@@ -31,10 +31,27 @@ export const createRawMaterial = async (req, res) => {
 };
 
 // Get all Raw Materials
+export const getAllRawMaterialsOptions = async (req, res) => {
+  try {
+    const rawMaterials = await RawMaterial.find();
+    // console.log("rawMaterials ", rawMaterials)
+    const options = rawMaterials.map((rw) => (
+      {
+        label : rw.productName,
+        value : String(rw._id),
+      }
+    ))
+    
+    res.status(200).json(options);
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to fetch raw materials', error: error.message });
+  }
+};
 export const getAllRawMaterials = async (req, res) => {
   try {
     const rawMaterials = await RawMaterial.find();
-    res.status(200).json({ data: rawMaterials });
+    // console.log("rawMaterials ", rawMaterials)
+    res.status(200).json(rawMaterials);
   } catch (error) {
     res.status(500).json({ message: 'Failed to fetch raw materials', error: error.message });
   }

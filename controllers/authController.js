@@ -1,11 +1,10 @@
 import User from '../models/User.js';
+import Company from '../models/Company.js';
 import jwt from 'jsonwebtoken';
-import { generateAccessToken, generateRefreshToken } from '../utils/tokenUtils.js';
+import { generateAccessToken, generateRefreshToken, ACCESS_TOKEN_EXPIRE_MINUTES, REFRESH_TOKEN_EXPIRE_DAYS } from '../utils/tokenUtils.js';
 import RefreshToken from '../models/RefreshToken.js';
-import { error } from 'console';
-
-const ACCESS_TOKEN_EXPIRE_MINUTES = 15;
-const REFRESH_TOKEN_EXPIRE_DAYS = 7;
+import { handleError } from '../utils/errorHandler.js';
+import { rolePermissions } from '../config/rolePermissions.js';
 
 // @desc    Register new user
 // @route   POST /signup
@@ -22,9 +21,18 @@ export async function signup(req, res) {
     }
 
     // Create user with hashed password
-    const newUser = await User.create({ fullName, email, password }); // No manual hash
+    const newUser = await User.create({ fullName, email, password, role: 'owner' }); // No manual hash
+    console.log('newUser', newUser);
 
-    const accessToken = generateAccessToken(newUser._id);
+
+    const tokenPayload = {
+      id: String(newUser._id),
+      companyId: null,
+      role: newUser.role,
+      isSetupCompleted : false,
+    };
+
+    const accessToken = generateAccessToken(tokenPayload);
     const refreshToken = generateRefreshToken(newUser);
 
     const refreshTokenExpireAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60 * 1000);
@@ -65,10 +73,7 @@ export async function signup(req, res) {
     });
   } catch (error) {
     console.error('Signup Error:', error);
-    res.status(500).json({
-      status: false,
-      message: 'Server error during signup',
-    });
+    return handleError(res, error);
   }
 };
 
@@ -79,27 +84,52 @@ export async function login(req, res) {
   try {
     const { email, password } = req.body;
 
-    console.log("hit the log in ", email, password)
+    console.log("hit the log in ", email, password, Date.now())
     // Find user and explicitly select password
     const user = await User.findOne({ email }).select('+password');
     // console.log("user ", user)
     if (!user) {
-      return res.status(401).json({ status: false, message: 'Invalid credentials' });
+      return res.status(400).json({ status: false, message: 'Invalid credentials' });
     }
 
     const isMatch = await user.comparePassword(password);
     // console.log("isMatch ", isMatch)
     if (!isMatch) {
-      return res.status(401).json({ status: false, message: 'Invalid credentials' });
+      return res.status(400).json({ status: false, message: 'Invalid credentials' });
+    }
+    // after password check and before token generation
+    // derive company/setup values (do NOT mutate DB unless you mean to persist)
+    const companyId = user.companyId || null;
+
+    // If you track isSetupCompleted on Company, fetch it. If you store on user, fallback:
+    let isSetupCompleted = !!user.isSetupCompleted; // boolean
+
+    // Prefer authoritative source: if you have a Company model, fetch company setup status
+    if (companyId) {
+      const company = await Company.findById(companyId).select('isSetupCompleted').lean();
+      isSetupCompleted = !!(company && company.isSetupCompleted);
+    } else {
+      isSetupCompleted = false; // no company => setup not complete
     }
 
-    const accessToken = generateAccessToken(user._id);
+    console.log('login payload values -> companyId:', companyId, 'isSetupCompleted:', isSetupCompleted);
+
+    // now generate tokens using a payload object (not the raw user doc)
+    const tokenPayload = {
+      id: String(user._id),
+      companyId,
+      role: user.role,
+      isSetupCompleted
+    };
+    console.log("tokenPayload ", tokenPayload);
+    // return;
+    const accessToken = generateAccessToken(tokenPayload);
     const refreshToken = generateRefreshToken(user);
-    console.log("refreshToken ", refreshToken)
+    // console.log("refreshToken ", refreshToken)
 
     const refreshTokenExpireAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60 * 1000);
 
-    const accessTokenExpireAt = new Date(Date.now() + ACCESS_TOKEN_EXPIRE_MINUTES * 60 * 1000);
+    const accessTokenExpireAt = Date.now() + ACCESS_TOKEN_EXPIRE_MINUTES * 60 * 1000;
 
     await RefreshToken.create({
       userId: user._id,
@@ -111,13 +141,12 @@ export async function login(req, res) {
 
     // console.log("Domain_Name : ", process.env.Domain_Name, process.env.Domain_Name.includes('localhost') ? '' : process.env.Domain_Name,)
 
-    
     res.cookie('accessToken', accessToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: process.env.Strict_Mode,
       domain: process.env.Domain_Name.includes('localhost') ? '' : process.env.Domain_Name,
-      maxAge: ACCESS_TOKEN_EXPIRE_MINUTES * 60 * 1000, 
+      maxAge: ACCESS_TOKEN_EXPIRE_MINUTES * 60 * 1000,
     });
 
     res.cookie('refreshToken', refreshToken, {
@@ -131,21 +160,19 @@ export async function login(req, res) {
     res.status(200).json({
       status: true,
       message: 'Login successful',
-      user: {
-        id: user._id,
-        fullName: user.fullName,
-        email: user.email,
-        role: user.role,
-        companyId: user.companyId || null,
-      },
-      accessTokenExpireAt
+      // user: {
+      //   id: user._id,
+      //   fullName: user.fullName,
+      //   email: user.email,
+      //   role: user.role,
+      //   companyId: user.companyId || null,
+      //   isSetupCompleted
+      // },
+      accessTokenExpireAt: accessTokenExpireAt
     });
   } catch (error) {
     console.error('Login Error:', error);
-    res.status(500).json({
-      status: false,
-      message: 'Server error during login',
-    });
+    return handleError(res, error);
   }
 };
 
@@ -177,11 +204,13 @@ export async function refreshToken(req, res) {
   try {
     console.log("Verifying refresh token...");
     const decoded = jwt.verify(token, process.env.JWT_REFRESH_SECRET);
-    console.log("Refresh token decoded:", decoded );
+    console.log("Refresh token decoded:", decoded);
     console.log("Refresh token :", token);
-
+    
     // ✅ Use model method to find matching hashed token
+    console.log("************* token, decoded.id:", token, decoded, decoded.id);
     const existingToken = await RefreshToken.findMatchingToken(token, decoded.id);
+    console.log("************* existingToken :", existingToken);
     if (!existingToken) {
       console.error("No matching refresh token found in database.");
       return res.status(403).json({ status: false, message: 'Invalid refresh token' });
@@ -199,8 +228,8 @@ export async function refreshToken(req, res) {
     }
 
     // Generate tokens with shorter expiry for testing
-    console.log("Generating new access and refresh tokens with short expiry for testing.");
-    const accessToken = generateAccessToken(user._id); // 1 minute expiry
+    console.log("Generating new access and refresh tokens with short expiry for testing. user = ", user);
+    const accessToken = generateAccessToken(user); // when we send this user there should be isSetupCompleted key 
     const newRefreshToken = generateRefreshToken(user); // 2 minutes expiry
 
     const refreshTokenExpireAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60 * 1000);
@@ -233,11 +262,12 @@ export async function refreshToken(req, res) {
     console.log("Token refresh successful, returning response.");
 
     // 📅 Calculate and send the new access token expiry time
-    const accessTokenExpireAt = new Date(Date.now() + ACCESS_TOKEN_EXPIRE_MINUTES * 60 * 1000);
-    return res.status(200).json({ 
-      status: true, 
+    const accessTokenExpireAt = Date.now() + ACCESS_TOKEN_EXPIRE_MINUTES * 60 * 1000;
+
+    return res.status(200).json({
+      status: true,
       message: 'Access token refreshed',
-      accessTokenExpireAt
+      accessTokenExpireAt: accessTokenExpireAt
     });
   } catch (err) {
     console.error('Refresh Token Error:', err);
@@ -261,7 +291,7 @@ export async function checkAuth(req, res) {
     const decoded = jwt.verify(token, process.env.JWT_ACCESS_SECRET);
 
     // Fetch user preferences
-    const user = await User.findById(decoded.id).select('preferences role');
+    const user = await User.findById(decoded.id).populate('companyId','companyName');
     if (!user) {
       return res.status(404).json({
         status: false,
@@ -271,14 +301,20 @@ export async function checkAuth(req, res) {
 
     // Attach the decoded user info to the request object for further use if needed
     console.log("decoded at checkAuth :- ", decoded)
+    console.log("user at checkAuth :- ", user)
 
     res.status(200).json({
       status: true,
       user: {
-        id: req.user.id,
-        preferences: user.preferences,
+        id: user._id,
+        userName: user.fullName,
+        companyName: user.companyId.companyName,
+        email: user.email,
         role: user.role,
-      }
+        companyId: user.companyId._id || null,
+        isSetupCompleted: user.isSetupCompleted || false,
+        permissions: rolePermissions[user.role],
+      },
     });
   } catch (error) {
     console.error('Error verifying token:', error);
@@ -294,6 +330,7 @@ export async function checkAuth(req, res) {
 // @access  Public (cookies will be cleared)
 export function logout(req, res) {
   // Clear cookies for both accessToken and refreshToken
+  console.log("req.cookies", req.cookies)
   res.clearCookie('accessToken', {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
