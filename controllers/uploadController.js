@@ -56,7 +56,7 @@ export async function uploadCompanyLogo(req, res) {
     }
 
     // Build public URL
-    const baseUrl = process.env.PUBLIC_BASE_URL ||'http://localhost:1122';
+    const baseUrl = process.env.BASE_URL ||'http://localhost:1122';
     const publicUrl = `${baseUrl}/uploads/${req.file.filename}`;
 
     // Persist on company immediately
