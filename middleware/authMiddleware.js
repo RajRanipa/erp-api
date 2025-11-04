@@ -77,6 +77,7 @@ export const roleAuth = (...requiredPerms) => (req, res, next) => {
   console.log('[RBAC] user:', { id: user.id || user._id, role: user.role });
   console.log('[RBAC] required:', required);
   console.log('[RBAC] allowed:', allowed);
+  console.log('[RBAC] decision:', ok );
   console.log('[RBAC] decision:', ok ? 'ALLOW' : 'DENY');
 
   if (!ok) {

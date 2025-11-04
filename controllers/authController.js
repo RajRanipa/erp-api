@@ -24,47 +24,9 @@ export async function signup(req, res) {
     const newUser = await User.create({ fullName, email, password, role: 'owner' }); // No manual hash
     console.log('newUser', newUser);
 
-
-    const tokenPayload = {
-      id: String(newUser._id),
-      companyId: null,
-      role: newUser.role,
-      isSetupCompleted : false,
-    };
-
-    const accessToken = generateAccessToken(tokenPayload);
-    const refreshToken = generateRefreshToken(newUser);
-
-    const refreshTokenExpireAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60 * 1000);
-    await RefreshToken.create({
-      userId: newUser._id,
-      token: refreshToken,
-      userAgent: req.headers['user-agent'],
-      ip: req.ip,
-      expiresAt: refreshTokenExpireAt,
-    });
-
-    console.log("NODE_ENV : ", process.env.NODE_ENV, process.env.NODE_ENV === 'production')
-
-    res.cookie('accessToken', accessToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.Strict_Mode,
-      domain: process.env.Domain_Name.includes('localhost') ? '' : process.env.Domain_Name,
-      maxAge: ACCESS_TOKEN_EXPIRE_MINUTES * 60 * 1000,
-    });
-
-    res.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.Strict_Mode,
-      domain: process.env.Domain_Name.includes('localhost') ? '' : process.env.Domain_Name,
-      maxAge: REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60 * 1000,
-    });
-
-    res.status(200).json({
+    return res.status(201).json({
       status: true,
-      message: 'User registered successfully',
+      message: 'User registered successfully. Please log in.',
       user: {
         id: newUser._id,
         fullName: newUser.fullName,
@@ -308,11 +270,11 @@ export async function checkAuth(req, res) {
       user: {
         id: user._id,
         userName: user.fullName,
-        companyName: user.companyId.companyName,
+        companyName: user?.companyId?.companyName || null,
         email: user.email,
         role: user.role,
-        companyId: user.companyId._id || null,
-        isSetupCompleted: user.isSetupCompleted || false,
+        companyId: user?.companyId?._id || null,
+        isSetupCompleted: user?.isSetupCompleted || false,
         permissions: rolePermissions[user.role],
       },
     });
