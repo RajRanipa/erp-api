@@ -14,8 +14,8 @@ const auth = (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_ACCESS_SECRET);
-    console.log("Decoded of Middleware")
-    console.log(decoded)
+    // console.log("Decoded of Middleware")
+    // console.log(decoded)
     req.user = decoded;
     next();
   } catch (err) {
@@ -75,10 +75,10 @@ export const roleAuth = (...requiredPerms) => (req, res, next) => {
 
   // Debug logs (optional)
   console.log('[RBAC] user:', { id: user.id || user._id, role: user.role });
-  console.log('[RBAC] required:', required);
-  console.log('[RBAC] allowed:', allowed);
-  console.log('[RBAC] decision:', ok );
-  console.log('[RBAC] decision:', ok ? 'ALLOW' : 'DENY');
+  // console.log('[RBAC] required:', required);
+  // console.log('[RBAC] allowed:', allowed);
+  // console.log('[RBAC] decision:', ok );
+  console.log('[RBAC] decision:', ok ? 'ALLOW' : 'DENY', ' / [RBAC] required:', required);
 
   if (!ok) {
     return res.status(403).json({ error: 'Forbidden: insufficient permissions' });

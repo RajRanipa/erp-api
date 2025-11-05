@@ -18,6 +18,7 @@ const asNumber = (v) => {
 
 async function getProductType(itemId) {
   const item = await Item.findById(itemId).select('productType').lean();
+  console.log('item getProductType -- > ', item, itemId);
   if (!item) throw new Error('Item not found');
   return item.productType;
 }
@@ -133,6 +134,7 @@ export async function receive(params) {
 export async function issue(params) {
   // expects: qty > 0 (we convert to negative)
   const qty = -Math.abs(asNumber(params.qty));
+  console.log("qty", qty);
   return postMovement({ ...params, qty, txnType: 'ISSUE' });
 }
 

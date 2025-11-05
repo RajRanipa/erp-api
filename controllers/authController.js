@@ -13,7 +13,7 @@ export async function signup(req, res) {
   try {
     const { fullName, email, password } = req.body;
     console.log(" signup hit _ ")
-    console.log(fullName, email, password)
+    // console.log(fullName, email, password)
     // Check if user exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {
@@ -22,7 +22,7 @@ export async function signup(req, res) {
 
     // Create user with hashed password
     const newUser = await User.create({ fullName, email, password, role: 'owner' }); // No manual hash
-    console.log('newUser', newUser);
+    // console.log('newUser', newUser);
 
     return res.status(201).json({
       status: true,
@@ -46,7 +46,7 @@ export async function login(req, res) {
   try {
     const { email, password } = req.body;
 
-    console.log("hit the log in ", email, password, Date.now())
+    console.log("hit the log in ")
     // Find user and explicitly select password
     const user = await User.findOne({ email }).select('+password');
     // console.log("user ", user)
@@ -74,7 +74,7 @@ export async function login(req, res) {
       isSetupCompleted = false; // no company => setup not complete
     }
 
-    console.log('login payload values -> companyId:', companyId, 'isSetupCompleted:', isSetupCompleted);
+    console.log('login payload values -> ');
 
     // now generate tokens using a payload object (not the raw user doc)
     const tokenPayload = {
@@ -83,7 +83,7 @@ export async function login(req, res) {
       role: user.role,
       isSetupCompleted
     };
-    console.log("tokenPayload ", tokenPayload);
+    // console.log("tokenPayload ", tokenPayload);
     // return;
     const accessToken = generateAccessToken(tokenPayload);
     const refreshToken = generateRefreshToken(user);
@@ -142,7 +142,7 @@ export async function login(req, res) {
 // @route   POST /refresh-token
 // @access  Public (uses HttpOnly cookie)
 export async function refreshToken(req, res) {
-  console.log("Attempting to refresh token..");
+  // console.log("Attempting to refresh token..");
   const token = req.cookies.refreshToken;
   const aToken = req.cookies.accessToken;
   const now = new Date();
@@ -156,7 +156,7 @@ export async function refreshToken(req, res) {
     second: '2-digit',
     hour12: true
   });
-  console.log("refreshToken token at refreshToken ::-- ", timestamp, token, !aToken);
+  // console.log("refreshToken token at refreshToken ::-- ", timestamp, token, !aToken);
 
   if (!token) {
     console.error("No refresh token found.");
@@ -164,22 +164,22 @@ export async function refreshToken(req, res) {
   }
 
   try {
-    console.log("Verifying refresh token...");
+    // console.log("Verifying refresh token...");
     const decoded = jwt.verify(token, process.env.JWT_REFRESH_SECRET);
-    console.log("Refresh token decoded:", decoded);
-    console.log("Refresh token :", token);
+    // console.log("Refresh token decoded:", decoded);
+    // console.log("Refresh token :", token);
     
     // ✅ Use model method to find matching hashed token
-    console.log("************* token, decoded.id:", token, decoded, decoded.id);
+    // console.log("************* token, decoded.id:", token, decoded, decoded.id);
     const existingToken = await RefreshToken.findMatchingToken(token, decoded.id);
-    console.log("************* existingToken :", existingToken);
+    // console.log("************* existingToken :", existingToken);
     if (!existingToken) {
       console.error("No matching refresh token found in database.");
       return res.status(403).json({ status: false, message: 'Invalid refresh token' });
     }
 
     // ❌ Delete old toke
-    console.log("Deleting old refresh token from database.");
+    // console.log("Deleting old refresh token from database.");
     await RefreshToken.deleteOne({ _id: existingToken._id });
 
     // ✅ Generate new tokens
@@ -190,7 +190,7 @@ export async function refreshToken(req, res) {
     }
 
     // Generate tokens with shorter expiry for testing
-    console.log("Generating new access and refresh tokens with short expiry for testing. user = ", user);
+    // console.log("Generating new access and refresh tokens with short expiry for testing. user = ", user);
     const accessToken = generateAccessToken(user); // when we send this user there should be isSetupCompleted key 
     const newRefreshToken = generateRefreshToken(user); // 2 minutes expiry
 
@@ -204,7 +204,7 @@ export async function refreshToken(req, res) {
     });
 
     // ✅ Set cookies againn
-    console.log("Setting new cookies for access and refresh tokens.");
+    // console.log("Setting new cookies for access and refresh tokens.");
     res.cookie('accessToken', accessToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
@@ -239,8 +239,8 @@ export async function refreshToken(req, res) {
 
 export async function checkAuth(req, res) {
   const token = req.cookies.accessToken; // Get access token from cookies
-  console.log("accessToken token at checkAuth :- ", !req.cookies.accessToken) // i am geeting this token here 
-  console.log("refreshToken token at checkAuth :- ", !req.cookies.refreshToken) // i am geeting this token here
+  // console.log("accessToken token at checkAuth :- ", !req.cookies.accessToken) // i am geeting this token here 
+  // console.log("refreshToken token at checkAuth :- ", !req.cookies.refreshToken) // i am geeting this token here
   if (!token) {
     return res.status(401).json({
       status: false,
@@ -262,8 +262,8 @@ export async function checkAuth(req, res) {
     }
 
     // Attach the decoded user info to the request object for further use if needed
-    console.log("decoded at checkAuth :- ", decoded)
-    console.log("user at checkAuth :- ", user)
+    // console.log("decoded at checkAuth :- ", decoded)
+    // console.log("user at checkAuth :- ", user)
 
     res.status(200).json({
       status: true,
@@ -314,7 +314,7 @@ export function logout(req, res) {
 export async function changePreferences(req, res) {
   const userId = req.user?.id;
   const { theme, language, notifications } = req.body;
-  console.log("req.user", req.user.id) // this is undefine becuse middleware set req.user to this json { iat: 1745828714, exp: 1745829614 }
+  // console.log("req.user", req.user.id) // this is undefine becuse middleware set req.user to this json { iat: 1745828714, exp: 1745829614 }
   if (!userId) {
     return res.status(401).json({ status: false, message: 'Unauthorized: No user found in request.' });
   }
@@ -340,7 +340,7 @@ export async function changePreferences(req, res) {
       },
       { new: true, runValidators: true }
     );
-    console.log("Updated user preferences:", user);
+    // console.log("Updated user preferences:", user);
     if (!user) {
       return res.status(404).json({ status: false, message: 'User not found.' });
     }

@@ -157,7 +157,7 @@ export const getAllItems = async (req, res) => {
     .populate('dimension', 'width length thickness unit')
     .lean();
 
-    console.log('items in getAllItems (count)', items?.length || 0, 'items', items);
+    // console.log('items in getAllItems (count)', items?.length || 0, 'items', items);
     return res.json(items);
   } catch (err) {
     return res.status(500).json({ error: 'Server error' });
@@ -188,7 +188,7 @@ export const getAllItemsOptions = async (req, res) => {
     }
 
     const items = await Item.find(filter).lean();
-    console.log('items in getAllItems (count)', items?.length || 0, 'items', items[0]);
+    // console.log('items in getAllItems (count)', items?.length || 0, 'items', items[0]);
     return res.json(items);
   } catch (err) {
     return res.status(500).json({ error: 'Server error' });
@@ -288,13 +288,8 @@ export const getPackingItems = async (req, res) => {
       .populate('productType', 'name')
       .populate('dimension', 'width length thickness unit')
       .lean();
-    const mapedpacking = packings.map((p) => ({
-      ...p,
-      'dimension': { _id: p._id, value: mapDimension(p.dimension) }
-    }))
-    // mapDimension(packings[0].dimension);
-    // console.log('mapedpacking', mapedpacking[0]); // i need to give productType name or i need to populate name of productType
-    return res.status(200).json(mapedpacking);
+    // console.log('packings', packings[0]); // i need to give productType name or i need to populate name of productType
+    return res.status(200).json(packings);
 
   } catch (error) {
     return handleError(res, error);
@@ -311,19 +306,9 @@ export const getFinishedItems = async (req, res) => {
       .populate('temperature', 'value unit')
       .populate('packing', 'name brandType productColor')
       .lean();
-    // ✅ Correct & Readable
-    const mapFG = FG.map((f) => {
-      if(!f.dimension) return f;
-      if (f.dimension) {
-        return {
-          ...f, // Copy all original properties from f
-          // Overwrite the 'dimension' property
-          dimension: { _id: f.dimension._id, value: mapDimension(f.dimension) }
-        }
-      }
-    });
+
     // console.log('FG', mapFG[0]); // i need to give productType name or i need to populate name of productType
-    return res.status(200).json(mapFG);
+    return res.status(200).json(FG);
 
   } catch (error) {
     return handleError(res, error);
