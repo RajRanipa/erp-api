@@ -5,9 +5,30 @@ import User from '../models/User.js';
 import Company from '../models/Company.js';
 import sendMail from '../utils/sendMail.js'; // your nodemailer/helper
 import {rolePermissions} from '../config/rolePermissions.js';
+import mongoose from 'mongoose';
 
 const hash = (s) => crypto.createHash('sha256').update(s).digest('hex');
 const genToken = () => crypto.randomBytes(32).toString('hex');
+
+/**
+ * Force logout across all devices:
+ * - Bumps tokenVersion so existing JWTs become invalid (server must check tokenVersion on each request).
+ * - Deletes refresh tokens if a RefreshToken model exists.
+ */
+async function forceLogoutEverywhere(userId) {
+  // Ensure any existing tokens become invalid
+  await User.updateOne({ _id: userId }, { $inc: { tokenVersion: 1 } });
+
+  // If you keep refresh tokens, clear them (works only if model is registered)
+  try {
+    const RT = mongoose.models?.RefreshToken;
+    if (RT) {
+      await RT.deleteMany({ userId });
+    }
+  } catch (e) {
+    // ignore if model isn't present
+  }
+}
 
 export async function createInvite(req, res) {
   console.log('createInvite hit', req.user);
@@ -51,10 +72,10 @@ export async function createInvite(req, res) {
 
   await sendMail({
     to: email,
-    subject: `You're invited to ${company?.name || 'our ERP'}`,
+    subject: `You're invited to ${company?.companyName || 'our ERP'}`,
     html: `
       <p>Hello,</p>
-      <p>You’ve been invited to join <b>${company?.name || 'our ERP'}</b> as <b>${role}</b>.</p>
+      <p>You’ve been invited to join <b>${company?.companyName || 'our ERP'}</b> as <b>${role}</b>.</p>
       <p><a href="${link}">Accept your invite</a> (valid for 7 days)</p>
     `
   });
@@ -66,8 +87,9 @@ export async function resendInvite(req, res) {
   // requirePerm('users:invite')
   const { id } = req.params;
   const invite = await Invite.findOne({ _id: id, companyId: req.user.companyId });
+  console.log('resendInvite hit', invite);
   if (!invite || invite.status !== 'pending') return res.status(404).json({ status:false, message:'Invite not found' });
-
+  
   // rotate token
   const token = genToken();
   invite.tokenHash = hash(token);
@@ -121,6 +143,7 @@ export async function acceptInvite(req, res) {
     fullName :name,
     password,
     companyId: invite.companyId,
+    isSetupCompleted:  invite.companyId ? true : false,
     role: invite.role,
     permissions: rolePermissions[invite.role], // your helper
     status: 'active'
@@ -184,7 +207,7 @@ export const declineInviteByToken = async (req, res) => {
     invite.status = 'declined';
     invite.declinedAt = new Date();
     // Optional: rotate/clear token so it can’t be reused
-    invite.token = undefined;
+    invite.tokenHash = undefined;
     await invite.save();
     console.log('invite', invite);
 
@@ -193,3 +216,137 @@ export const declineInviteByToken = async (req, res) => {
     return res.status(500).json({ status: false, message: 'Failed to decline invite' });
   }
 };
+
+// controllers/userController.js
+// Optional: only if you store refresh tokens
+// import RefreshToken from '../models/RefreshToken.js';
+
+export async function removeUser(req, res) {
+  const actingUser = req.user; // populated by your auth middleware
+  const { id } = req.params;
+
+  try {
+    // 1) You cannot remove yourself
+    if (String(actingUser._id) === String(id)) {
+      return res.status(400).json({ status: false, message: 'You cannot remove yourself.' });
+    }
+
+    // 2) Find the user in the same company
+    const user = await User.findOne({ _id: id, companyId: actingUser.companyId });
+    if (!user) {
+      return res.status(404).json({ status: false, message: 'User not found in your company.' });
+    }
+
+    // 3) Prevent removing the last owner
+    if (user.role === 'owner') {
+      const ownerCount = await User.countDocuments({
+        companyId: user.companyId,
+        role: 'owner',
+        status: 'active',
+        _id: { $ne: user._id }
+      });
+      if (ownerCount === 0) {
+        return res.status(400).json({
+          status: false,
+          message: 'Cannot remove the last owner. Promote another user to owner first.'
+        });
+      }
+    }
+
+    // 4) Soft delete (disable the account) + bump tokenVersion
+    user.status = 'disabled';
+    user.disabledAt = new Date();
+    user.disabledBy = actingUser._id;
+    user.tokenVersion = (user.tokenVersion || 0) + 1;
+    await user.save();
+
+    // 5) Optional: clear refresh tokens if you store them
+    // await RefreshToken.deleteMany({ userId: user._id }).catch(() => {});
+
+    return res.json({
+      status: true,
+      message: 'User removed (disabled) successfully.',
+      data: { id: user._id }
+    });
+  } catch (err) {
+    console.error('removeUser error:', err);
+    return res.status(500).json({ status: false, message: 'Failed to remove user.' });
+  }
+}
+
+export async function updateUserRole(req, res) {
+  const actingUser = req.user; // set by auth middleware
+  const { id } = req.params;
+  const { role: nextRole } = req.body || {};
+
+  try {
+    // validate role
+    const allowedRoles = Object.keys(rolePermissions);
+    if (!nextRole || !allowedRoles.includes(nextRole)) {
+      return res.status(400).json({ status: false, message: 'Invalid role' });
+    }
+
+    // You cannot change your own role here (optional safety)
+    if (String(actingUser._id) === String(id)) {
+      return res.status(400).json({ status: false, message: 'You cannot change your own role.' });
+    }
+
+    // find target user in same company
+    const user = await User.findOne({ _id: id, companyId: actingUser.companyId });
+    if (!user) {
+      return res.status(404).json({ status: false, message: 'User not found in your company.' });
+    }
+
+    // prevent demoting the last owner
+    if (user.role === 'owner' && nextRole !== 'owner') {
+      const ownerCount = await User.countDocuments({ companyId: user.companyId, role: 'owner', status: 'active', _id: { $ne: user._id } });
+      if (ownerCount === 0) {
+        return res.status(400).json({ status: false, message: 'Cannot change role of the last owner.' });
+      }
+    }
+
+    user.role = nextRole;
+    // realign permissions with role map
+    user.permissions = rolePermissions[nextRole] || [];
+    await user.save();
+
+    // Invalidate all existing sessions (JWTs + refresh tokens if any)
+    await forceLogoutEverywhere(user._id);
+
+    return res.json({ status: true, message: 'Role updated; user must log in again.', data: { id: user._id, role: user.role } });
+  } catch (err) {
+    console.error('updateUserRole error:', err);
+    return res.status(500).json({ status: false, message: 'Failed to update role' });
+  }
+}
+
+export async function listUsers(req, res) {
+  try {
+    const { status } = req.query || {};
+    const filter = { companyId: req.user?.companyId };
+    if (status && typeof status === 'string') {
+      // allow comma-separated: pending,accepted
+      const statuses = status.split(',').map(s => s.trim().toLowerCase());
+      filter.status = { $in: statuses };
+    }
+
+    // Optional pagination
+    const limit = Math.min(Number(req.query.limit) || 100, 200);
+    const page = Math.max(Number(req.query.page) || 1, 1);
+    const skip = (page - 1) * limit;
+
+    const users = await User.find(filter)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .select('-token') // don't leak token in lists
+      .lean();
+
+    const total = await User.countDocuments(filter);
+
+    res.json({ status: true, data: users, meta: { total, page, limit } });
+  } catch (err) {
+    console.error('listUsers error:', err);
+    res.status(500).json({ status: false, message: 'Failed to list users' });
+  }
+}

@@ -1,3 +1,4 @@
+// backend-api/controllers/authController.js
 import User from '../models/User.js';
 import Company from '../models/Company.js';
 import jwt from 'jsonwebtoken';
@@ -166,13 +167,9 @@ export async function refreshToken(req, res) {
   try {
     // console.log("Verifying refresh token...");
     const decoded = jwt.verify(token, process.env.JWT_REFRESH_SECRET);
-    // console.log("Refresh token decoded:", decoded);
-    // console.log("Refresh token :", token);
     
     // ✅ Use model method to find matching hashed token
-    // console.log("************* token, decoded.id:", token, decoded, decoded.id);
     const existingToken = await RefreshToken.findMatchingToken(token, decoded.id);
-    // console.log("************* existingToken :", existingToken);
     if (!existingToken) {
       console.error("No matching refresh token found in database.");
       return res.status(403).json({ status: false, message: 'Invalid refresh token' });
@@ -239,8 +236,6 @@ export async function refreshToken(req, res) {
 
 export async function checkAuth(req, res) {
   const token = req.cookies.accessToken; // Get access token from cookies
-  // console.log("accessToken token at checkAuth :- ", !req.cookies.accessToken) // i am geeting this token here 
-  // console.log("refreshToken token at checkAuth :- ", !req.cookies.refreshToken) // i am geeting this token here
   if (!token) {
     return res.status(401).json({
       status: false,
@@ -262,9 +257,6 @@ export async function checkAuth(req, res) {
     }
 
     // Attach the decoded user info to the request object for further use if needed
-    // console.log("decoded at checkAuth :- ", decoded)
-    // console.log("user at checkAuth :- ", user)
-
     res.status(200).json({
       status: true,
       user: {
@@ -290,26 +282,77 @@ export async function checkAuth(req, res) {
 // @desc    Logout user
 // @route   POST /logout
 // @access  Public (cookies will be cleared)
-export function logout(req, res) {
-  // Clear cookies for both accessToken and refreshToken
-  console.log("req.cookies", req.cookies)
-  res.clearCookie('accessToken', {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: process.env.Strict_Mode,
-    domain: process.env.Domain_Name.includes('localhost') ? '' : process.env.Domain_Name,
-  });
-  res.clearCookie('refreshToken', {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: process.env.Strict_Mode,
-    domain: process.env.Domain_Name.includes('localhost') ? '' : process.env.Domain_Name,
-  });
+// @desc    Logout user
+// @route   POST /logout
+// @access  Public (cookies will be cleared)
+export async function logout(req, res) {
+  // Try to revoke the specific refresh token record first (best effort)
+  try {
+    const raw = req.cookies?.refreshToken;
+    if (raw) {
+      try {
+        const decoded = jwt.verify(raw, process.env.JWT_REFRESH_SECRET);
+        // Find the exact stored token using your model helper (hash-aware)
+        const existing = await RefreshToken.findMatchingToken(raw, decoded.id);
+        if (existing) {
+          await RefreshToken.deleteOne({ _id: existing._id });
+        }
+      } catch (e) {
+        // token may be expired/invalid — still proceed to clear cookies
+      }
+    }
+  } catch (e) {
+    // don’t block logout on DB issues
+    console.error('Logout revoke error:', e);
+  }
 
-  // Send response confirming the logout
-  res.status(200).json({ status: true, message: 'Successfully logged out' });
-};
-//
+  // Build cookie options that EXACTLY match how you set them
+  const baseCookie = {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',       // if sameSite:'none', secure MUST be true
+    sameSite: process.env.SAME_SITE || 'lax',            // 'lax' | 'strict' | 'none'
+    path: '/',                                          // match the default path used on set
+  };
+
+  // Only set domain when you actually have a non-localhost domain
+  const domain = process.env.Domain_Name;
+  if (domain && !domain.includes('localhost')) {
+    baseCookie.domain = domain;
+  }
+
+  // Overwrite with empty value + 0 maxAge (or expires in the past)
+  res.cookie('accessToken', '', { ...baseCookie, maxAge: 0 });
+  res.cookie('refreshToken', '', { ...baseCookie, maxAge: 0 });
+
+  return res.status(200).json({ status: true, message: 'Successfully logged out' });
+}
+
+// @route POST /logout-all
+export async function logoutAll(req, res) {
+  try {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ status: false, message: 'Unauthorized' });
+
+    await RefreshToken.deleteMany({ userId });
+
+    const baseCookie = {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.SAME_SITE || 'lax',
+      path: '/',
+    };
+    const domain = process.env.Domain_Name;
+    if (domain && !domain.includes('localhost')) baseCookie.domain = domain;
+
+    res.cookie('accessToken', '', { ...baseCookie, maxAge: 0 });
+    res.cookie('refreshToken', '', { ...baseCookie, maxAge: 0 });
+
+    return res.status(200).json({ status: true, message: 'Logged out from all devices' });
+  } catch (err) {
+    console.error('Logout all error:', err);
+    return res.status(500).json({ status: false, message: 'Server error during logout all' });
+  }
+}
 
 export async function changePreferences(req, res) {
   const userId = req.user?.id;

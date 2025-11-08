@@ -24,7 +24,7 @@ const userSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ['owner','admin','manager','store_operator', 'production_manager', 'employee','accountant', 'viewer', 'staff'],
+      enum: ['owner', 'admin', 'manager', 'store_operator', 'production_manager', 'employee', 'accountant', 'viewer', 'staff'],
       required: [true, 'Role is required'],
     },
     companyId: {
@@ -61,8 +61,12 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
-    createdBy: { type: mongoose.Schema.Types.ObjectId,  ref: 'User', default: null, timestamps: true },
-    status: { type: String, enum: ['pending', 'active', 'suspended'], default: 'active' },
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null, timestamps: true },
+    status: { type: String, enum: ['pending', 'active', 'suspended', 'disabled'], default: 'active' },
+    disabledAt: { type: Date },
+    disabledBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    // auth hygiene — bump to invalidate existing JWTs
+    tokenVersion: { type: Number, default: 0 },
   },
   { timestamps: true }
 );

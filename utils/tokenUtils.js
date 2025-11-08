@@ -1,4 +1,5 @@
 import jwt from 'jsonwebtoken';
+import { rolePermissions } from '../config/rolePermissions.js';
 
 export const ACCESS_TOKEN_EXPIRE_MINUTES = 15;
 export const REFRESH_TOKEN_EXPIRE_DAYS = 7;
@@ -21,6 +22,7 @@ export const generateAccessToken = (user) => {
     companyId: user.companyId || null,
     role: user.role || 'employee',
     isSetupCompleted: user.isSetupCompleted || false,
+    permissions: rolePermissions[user.role] || [],
   };
 
   return jwt.sign(payload, process.env.JWT_ACCESS_SECRET, {

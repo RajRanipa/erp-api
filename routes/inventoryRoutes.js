@@ -23,7 +23,7 @@ router.get('/stock',   roleAuth('inventory:read'), getStock);
 router.get('/ledger',  roleAuth('inventory:read'), getLedger);
 
 // WRITE: movements
-router.post('/receipt',   roleAuth('inventory:receive'),  receive);
+router.post('/receipt',   roleAuth('inventory:receipt'),  receive);
 router.post('/issue',     roleAuth('inventory:issue'),    issue);
 router.post('/adjust',    roleAuth('inventory:adjust'),   adjust);
 router.post('/transfer',  roleAuth('inventory:transfer'), transfer);

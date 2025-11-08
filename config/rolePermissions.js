@@ -1,3 +1,4 @@
+// backend-api/config/rolePermissions.js
 export const rolePermissions = {
   owner: [
     'companies:full',
@@ -13,29 +14,32 @@ export const rolePermissions = {
     'rawmterials:full',
     'batches:full',
     'parties:full',
-  ],
-  admin: [
-    'users:manage','items:full','inventory:full','reports:view'
+    'dashboard:full',
+    'manufacturing:full',
+    'crm:full',
+    'warehouses:full',
   ],
   manager: [
-    'items:read','items:update','inventory:read','inventory:issue','items:status:update',
-  ],
-  employee: [
-    'items:read','inventory:read'
+    'items:read','items:create','items:update', 'items:status:update',
+    'inventory:read', 'inventory:receipt', 'inventory:repack',
+    'users:invite:read', 'users:read', 'users:invite:create', 'users:invite:resend', 'users:invite:revoke','users:remove', 
+    'warehouses:read', 'warehouses:update', 'warehouses:create', 'warehouses:delete'
   ],
   store_operator: [
-    'items:read', 'items:cerate', 'items:update', 'inventory:receive','inventory:issue','inventory:read',
+    'items:read', 'items:create', 'items:update', 
+    'inventory:read', 'inventory:receipt', 'inventory:issue','inventory:adjust', 'inventory:repack',
+    'users:invite:read','users:invite:resend',
+    'warehouses:read', 'warehouses:update', 'warehouses:create', 'warehouses:delete'
   ],
   production_manager: [
-    'items:read','inventory:read','inventory:transfer'
+    'items:read','items:create','items:update', 
+    'inventory:read', 'inventory:receipt', 'inventory:repack','inventory:adjust',
+    'warehouses:read', 'warehouses:update', 'warehouses:create', 'warehouses:delete'
   ],
   accountant: [
-    'reports:view','transactions:approve'
+    'reports:view','transactions:approve', 'inventory:issue', 
   ],
-  viewer: [
-    'items:read','inventory:read'
+  investor: [
+    'items:read','inventory:read', 'users:read'
   ],
-  staff: [
-    'items:read','inventory:read'
-  ]
 };

@@ -5,18 +5,18 @@ import auth, { roleAuth } from '../middleware/authMiddleware.js';
 
 router.use(auth);
 // Create a new product type
-router.post('/', roleAuth('producttypes:create'), productTypeController.createProductType);
+router.post('/', roleAuth('items:producttypes:create'), productTypeController.createProductType);
 
 // Get all product types
-router.get('/', roleAuth('producttypes:read'), productTypeController.getProductTypes);
+router.get('/', roleAuth('items:producttypes:read'), productTypeController.getProductTypes);
 
 // Get a single product type by ID
-router.get('/:id', roleAuth('producttypes:read'), productTypeController.getProductTypeById);
+router.get('/:id', roleAuth('items:producttypes:read'), productTypeController.getProductTypeById);
 
 // Update a product type by ID
-router.put('/:id', roleAuth('producttypes:update'), productTypeController.updateProductType);
+router.put('/:id', roleAuth('items:producttypes:update'), productTypeController.updateProductType);
 
 // Delete a product type by ID
-router.delete('/:id', roleAuth('producttypes:delete'), productTypeController.deleteProductType);
+router.delete('/:id', roleAuth('items:producttypes:delete'), productTypeController.deleteProductType);
 
 export default router;

@@ -66,7 +66,12 @@ export const roleAuth = (...requiredPerms) => (req, res, next) => {
   // Helper to check a single permission with :full implication
   const hasPermission = (perm) => {
     if (allowed.includes(perm)) return true;
-    const [resource, action] = String(perm).split(':');
+    
+    const required = String(perm).split(':');
+    const l = required.length
+    if(l >= 3 && allowed.includes(`${required[0]}:${required[l-1]}`)) return true;
+    
+    const [resource, action] = required;
     if (resource && allowed.includes(`${resource}:full`)) return true;
     return false;
   };

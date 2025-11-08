@@ -22,7 +22,7 @@ import itemRoutes from './routes/itemsRoutes.js'
 import companyRoutes from './routes/companyRoutes.js'
 import uploadRoutes from './routes/uploadRoutes.js';
 import inventoryRoutes from './routes/inventoryRoutes.js';
-import { inviteRoutes, inviteAuthRoutes} from './routes/inviteRoutes.js';
+import { inviteRoutes, inviteAuthRoutes} from './routes/usersRoutes.js';
 import { fileURLToPath } from 'url';
 // import { initGlobalErrorHandlers, expressErrorHandler } from './utils/errorHandler.js';
 // initGlobalErrorHandlers({ logger: console, exitOnFatal: false });

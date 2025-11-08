@@ -10,8 +10,6 @@ router.post('/signup', Auth.signup);
 
 // Login
 router.post('/login', Auth.login);
-// auth/me
-router.post('/auth/me', Auth.login);
 
 // Logout (CLEAR JWT from cookies)
 router.post('/logout', Auth.logout);
