@@ -18,13 +18,13 @@ export const rolePermissions = {
     'users:manage','items:full','inventory:full','reports:view'
   ],
   manager: [
-    'items:read','items:update','inventory:read','inventory:issue'
+    'items:read','items:update','inventory:read','inventory:issue','items:status:update',
   ],
   employee: [
     'items:read','inventory:read'
   ],
   store_operator: [
-    'items:read','items:status:update','inventory:receive','inventory:issue'
+    'items:read', 'items:cerate', 'items:update', 'inventory:receive','inventory:issue','inventory:read',
   ],
   production_manager: [
     'items:read','inventory:read','inventory:transfer'
@@ -33,6 +33,9 @@ export const rolePermissions = {
     'reports:view','transactions:approve'
   ],
   viewer: [
+    'items:read','inventory:read'
+  ],
+  staff: [
     'items:read','inventory:read'
   ]
 };
