@@ -4,7 +4,7 @@ import mongoose, { Schema } from 'mongoose';
 const InviteSchema = new Schema({
   companyId: { type: Schema.Types.ObjectId, ref: 'Company', required: true, index: true },
   email: { type: String, required: true, lowercase: true, trim: true, index: true },
-  role: { type: String, enum: ['owner','admin','staff','viewer'], default: 'staff' },
+  role: { type: String, enum: ['owner', 'admin', 'manager', 'store_operator', 'production_manager', 'employee', 'accountant', 'viewer', 'staff'], default: 'staff' },
   inviterId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
 
   // security

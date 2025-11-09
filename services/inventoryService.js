@@ -84,14 +84,16 @@ export async function postMovement({
     }
     const productType = await getProductType(itemId);
     console.log("productType", productType);
+    console.log("enforceNonNegative", enforceNonNegative);
     // If enforcing non-negative, pre-check (for decreases)
     if (enforceNonNegative && signedQty < 0) {
       const { onHand } = await getCurrentBalances({ companyId, itemId, warehouseId, uom, bin, batchNo }, session);
+      console.log("onHand", onHand);
+      console.log("signedQty", signedQty);
       if (onHand + signedQty < 0) {
         throw new Error('Insufficient stock: onHand would go below zero');
       }
     }
-    console.log("enforceNonNegative", enforceNonNegative);
     // 1) Write ledger row
     const [ledger] = await InventoryLedger.create([{
       companyId, itemId, productType, warehouseId, bin, batchNo,
