@@ -10,12 +10,16 @@ const InviteSchema = new Schema({
   // security
   tokenHash: { type: String, required: true, unique: true }, // sha256(token)
   expiresAt: { type: Date, required: true, index: { expires: 0 } }, // TTL index auto-purges
-  status: { type: String, enum: ['pending','accepted','revoked','expired','declined'], default: 'pending', index: true },
+  status: { type: String, enum: ['pending', 'accepted', 'revoked', 'expired', 'declined'], default: 'pending', index: true },
 
   // audit
   acceptedAt: Date,
   revokedAt: Date,
   // optional company display
+  // bounce tracking
+  emailStatus: { type: String, enum: ['active', 'bounced', 'undeliverable'], default: 'active', index: true },
+  emailStatusCode: { type: String },
+  bouncedAt: { type: Date },
   companyName: String,
 }, { timestamps: true });
 

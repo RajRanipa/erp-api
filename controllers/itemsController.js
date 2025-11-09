@@ -23,7 +23,7 @@ export const createUser = async (req, res) => {
 function validateItemFields(data, categoryName) {
   // Common required fields
   if (!data.name || typeof data.name !== 'string' || !String(data.name).trim()) return 'Name is required.';
-  if (!data.product_unit || typeof data.product_unit !== 'string' || !String(data.product_unit).trim()) return 'Product unit is required.';
+  if (!data.UOM || typeof data.UOM !== 'string' || !String(data.UOM).trim()) return 'Product unit is required.';
   if (!data.category) return 'Category is required.';
   // productType is required for many FG items but optional for RAW depending on business rules
 
@@ -105,7 +105,7 @@ export const getItemById = async (req, res) => {
     console.log('getItemById id', id);
     const item = await Item.findById(
       id,
-      'name product_unit minimumStock description category productType temperature density dimension packing brandType productColor grade status'
+      'name UOM minimumStock description category productType temperature density dimension packing brandType productColor grade status'
     )
       // .populate('category', 'name')
       // .populate('productType', 'name')
@@ -407,5 +407,43 @@ export const getItemStatusHistory = async (req, res) => {
     return res.json(history);
   } catch (error) {
     return handleError(res, error);
+  }
+};
+
+// Get default UOM for a single item by id
+export const getItemUomById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id) {
+      return res.status(400).json({ status: false, message: 'Item id is required' });
+    }
+    // Multi-tenant safety: prefer companyId from auth if available
+    const companyId = req.user?.companyId || req.user?.company?._id || req.user?.company || null;
+    const query = companyId ? { _id: id, companyId } : { _id: id };
+        // Select a broad set of possible UOM fields to be safe with schema variants
+    const projection = {
+      UOM: 1,
+      _id: 0,
+    };
+        const doc = await Item.findOne(query).select(projection).lean();
+    if (!doc) {
+      return res.status(404).json({ status: false, message: 'Item not found' });
+    }
+
+    const uom =
+      doc.uom ??
+      doc.UOM ??
+      doc.baseUom ??
+      doc.defaultUom ??
+      doc.unit ??
+      null;
+
+    return res.status(200).json({
+      status: true,
+      message: 'UOM fetched',
+      data: { uom },
+    });
+  } catch (error) {
+    return handleError(res, error, 'Failed to fetch UOM');
   }
 };

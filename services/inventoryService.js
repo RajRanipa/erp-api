@@ -375,7 +375,7 @@ export async function getSnapshot(filter = {}, itemFilter = {}) {
       populate: [
         { path: 'density', select: 'value unit' },
         { path: 'temperature', select: 'value unit' },
-        { path: 'packing', select: 'name brandType productColor product_unit' },
+        { path: 'packing', select: 'name brandType productColor UOM' },
         { path: 'dimension', select: 'width length thickness unit' },
       ],
     })
@@ -428,7 +428,7 @@ export async function getLedger(filter = {}, opts = { limit: 100, sort: { at: -1
       populate: [
         { path: 'density', select: 'value unit' },
         { path: 'temperature', select: 'value unit' },
-        { path: 'packing', select: 'name brandType productColor product_unit' },
+        { path: 'packing', select: 'name brandType productColor UOM' },
         { path: 'dimension', select: 'width length thickness unit' },
       ],
     })

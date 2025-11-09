@@ -21,7 +21,7 @@ const WorkOrderSchema = new Schema({
         required: true,
         min: 1
     },
-    unit: { // e.g., 'rolls', 'kg', 'units' - should match product_unit
+    unit: { // e.g., 'rolls', 'kg', 'units' - should match UOM
         type: String,
         required: true
     },

@@ -23,6 +23,7 @@ import companyRoutes from './routes/companyRoutes.js'
 import uploadRoutes from './routes/uploadRoutes.js';
 import inventoryRoutes from './routes/inventoryRoutes.js';
 import { inviteRoutes, inviteAuthRoutes} from './routes/usersRoutes.js';
+import { startBounceWatcher } from './services/bounceWatcher.js';
 import { fileURLToPath } from 'url';
 // import { initGlobalErrorHandlers, expressErrorHandler } from './utils/errorHandler.js';
 // initGlobalErrorHandlers({ logger: console, exitOnFatal: false });
@@ -93,3 +94,16 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(chalk.green(`🚀 Server running on http://localhost:${PORT}`));
 });
+
+// Start IMAP bounce watcher (optional; runs only if creds are present)
+(async () => {
+  try {
+    if (process.env.MAIL_FROM && process.env.SMTP_PASS) {
+      await startBounceWatcher(console);
+    } else {
+      console.warn('IMAP credentials missing — bounce watcher not started.');
+    }
+  } catch (e) {
+    console.error('Bounce watcher failed to start:', e);
+  }
+})();

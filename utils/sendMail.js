@@ -20,7 +20,7 @@ export default async function sendMail({ to, subject, html, text }) {
       port: Number(process.env.SMTP_PORT) || 465,
       secure: true, // true for 465, false for 587
       auth: {
-        user: process.env.SMTP_USER, // full email address
+        user: process.env.MAIL_FROM, // full email address
         pass: process.env.SMTP_PASS, // app password or smtp token
       },
     });
@@ -29,7 +29,7 @@ export default async function sendMail({ to, subject, html, text }) {
     const mailOptions = {
       from: {
         name: process.env.MAIL_FROM_NAME || 'JNR ERP System',
-        address: process.env.MAIL_FROM || process.env.SMTP_USER,
+        address: process.env.MAIL_FROM || process.env.MAIL_FROM,
       },
       to,
       subject,

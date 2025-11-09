@@ -59,13 +59,13 @@ const validateProductInput = (input) => {
 
   // Normalize obvious string fields
   safe.productName = toTrimmed(safe.productName);
-  safe.product_unit = toTrimmed(safe.product_unit);
+  safe.UOM = toTrimmed(safe.UOM);
 
   if (!isNonEmptyString(safe.productName)) {
     errors.productName = 'productName is required';
   }
-  if (!isNonEmptyString(safe.product_unit)) {
-    errors.product_unit = 'product_unit is required';
+  if (!isNonEmptyString(safe.UOM)) {
+    errors.UOM = 'UOM is required';
   }
   // productType is required (ObjectId string)
   if (!isObjectIdLike(safe.productType)) {
@@ -141,7 +141,7 @@ const resolveAndVerifyRefs = async (safe) => {
 
   const out = {
     productName: safe.productName,
-    product_unit: safe.product_unit,
+    UOM: safe.UOM,
     productType: ptId,
     temperature: tId,
     packingType: pId,
@@ -168,7 +168,7 @@ export const getProducts = async (req, res) => {
       .populate({ path: 'temperature', select: 'value unit', strictPopulate: false })
       .populate({ path: 'density', select: 'value unit', strictPopulate: false })
       .populate({ path: 'dimension', select: 'length width thickness unit', strictPopulate: false })
-      .populate({ path: 'packingType', select: 'productName product_unit brandType currentStock purchasePrice minimumStock description', strictPopulate: false })
+      .populate({ path: 'packingType', select: 'productName UOM brandType currentStock purchasePrice minimumStock description', strictPopulate: false })
       .lean();
       console.log('Fetched products:', products[0]);
     res.status(200).json(products);
@@ -314,7 +314,7 @@ export const createProduct = async (req, res) => {
       .populate({ path: 'temperature', select: 'value unit', strictPopulate: false })
       .populate({ path: 'density', select: 'value unit', strictPopulate: false })
       .populate({ path: 'dimension', select: 'length width thickness unit', strictPopulate: false })
-      .populate({ path: 'packingType', select: 'productName product_unit brandType currentStock purchasePrice minimumStock description', strictPopulate: false });
+      .populate({ path: 'packingType', select: 'productName UOM brandType currentStock purchasePrice minimumStock description', strictPopulate: false });
 
     return res.status(201).json({
       success: true,

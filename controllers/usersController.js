@@ -31,7 +31,7 @@ async function forceLogoutEverywhere(userId) {
 }
 
 export async function createInvite(req, res) {
-  console.log('createInvite hit', req.user);
+  // console.log('createInvite hit', req.user);
   // requirePerm('users:invite')
   const { email, role = 'staff' } = req.body || {};
   const companyId = req.user.companyId;
@@ -72,10 +72,10 @@ export async function createInvite(req, res) {
 
   await sendMail({
     to: email,
-    subject: `You're invited to ${company?.companyName || 'our ERP'}`,
+    subject: `You're invited to ${company?.companyName || 'our JNR ERP'}`,
     html: `
       <p>Hello,</p>
-      <p>You’ve been invited to join <b>${company?.companyName || 'our ERP'}</b> as <b>${role}</b>.</p>
+      <p>You’ve been invited to join <b>${company?.companyName || 'our JNR ERP'}</b> as <b>${role}</b>.</p>
       <p><a href="${link}">Accept your invite</a> (valid for 7 days)</p>
     `
   });

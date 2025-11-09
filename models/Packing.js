@@ -20,7 +20,7 @@ const packingMaterial = new mongoose.Schema({
     required: true,
     trim: true,
   },
-  product_unit: {
+  UOM: {
     type: String,
     required: true
   },

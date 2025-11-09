@@ -39,7 +39,7 @@ const ItemSchema = new Schema({
   category: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', required: true },
   // denormalized category key for fast conditional indexing/validation
   categoryKey: { type: String, enum: ['RAW', 'FG', 'PACKING'], index: true },
-  product_unit: { type: String, required: true },
+  UOM: { type: String, required: true },
   currentStock: { type: Number, default: 0 },
   minimumStock: { type: Number, default: 0 },
   purchasePrice: { type: Number, default: 0 },

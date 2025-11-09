@@ -164,7 +164,7 @@ const assertSufficientInventory = async (rawMaterials = [], multiplier = 1) => {
   if (requiredG.size === 0) return;
   // Fetch stocks
   const ids = Array.from(requiredG.keys());
-  const docs = await RawMaterial.find({ _id: { $in: ids } }, 'productName currentStock product_unit').lean();
+  const docs = await RawMaterial.find({ _id: { $in: ids } }, 'productName currentStock UOM').lean();
   const byId = new Map(docs.map(d => [String(d._id), d]));
   // Compare
   for (const [id, needG] of requiredG.entries()) {
@@ -174,7 +174,7 @@ const assertSufficientInventory = async (rawMaterials = [], multiplier = 1) => {
       err.status = 400;
       throw err;
     }
-    const haveG = toGrams(doc.currentStock ?? 0, doc.product_unit || 'kg');
+    const haveG = toGrams(doc.currentStock ?? 0, doc.UOM || 'kg');
     if (!Number.isFinite(haveG)) {
       const err = new Error(`Invalid stock/UOM for raw material: ${doc.productName || id}`);
       err.status = 400;
@@ -182,10 +182,10 @@ const assertSufficientInventory = async (rawMaterials = [], multiplier = 1) => {
     }
     if (haveG < needG) {
       // Build a friendly message showing both in material's native UOM
-      const unitFactor = UOM_FACTORS_G[String(doc.product_unit || 'kg').toLowerCase()] || 1;
+      const unitFactor = UOM_FACTORS_G[String(doc.UOM || 'kg').toLowerCase()] || 1;
       const needInDocUom = needG / unitFactor;
       const haveInDocUom = doc.currentStock ?? 0;
-      const uomLabel = String(doc.product_unit || 'kg');
+      const uomLabel = String(doc.UOM || 'kg');
       const err = new Error(`${doc.productName || id}: required ${needInDocUom} ${uomLabel}, available ${haveInDocUom} ${uomLabel}`);
       err.status = 400;
       throw err;
@@ -213,7 +213,7 @@ const deductInventory = async (rawMaterials = [], multiplier = 1, session) => {
   const ids = Array.from(requiredG.keys());
   const docs = await RawMaterial.find(
     { _id: { $in: ids } },
-    'productName currentStock product_unit'
+    'productName currentStock UOM'
   ).session(session || null).lean();
   const byId = new Map(docs.map(d => [String(d._id), d]));
 
@@ -225,7 +225,7 @@ const deductInventory = async (rawMaterials = [], multiplier = 1, session) => {
       err.status = 400;
       throw err;
     }
-    const unitFactor = UOM_FACTORS_G[String(doc.product_unit || 'kg').toLowerCase()] || 1;
+    const unitFactor = UOM_FACTORS_G[String(doc.UOM || 'kg').toLowerCase()] || 1;
     const needInDocUom = needG / unitFactor;
 
     // Guard against concurrent negatives: only update if stock >= need
@@ -281,7 +281,7 @@ export const createBatch = async (req, res, next) => {
         await deductInventory(data.rawMaterials, data.numbersBatches, session);
         // Populate for response
         populated = await Batch.findById(created._id)
-          .populate({ path: 'rawMaterials.rawMaterial_id', select: 'productName product_unit' })
+          .populate({ path: 'rawMaterials.rawMaterial_id', select: 'productName UOM' })
           .session(session);
         if (created?.campaign) {
           await updateCampaignTotals(created.campaign, session);
@@ -309,7 +309,7 @@ export const createBatch = async (req, res, next) => {
       }
       // 4) Return populated batch
       const populatedFallback = await Batch.findById(created._id)
-        .populate({ path: 'rawMaterials.rawMaterial_id', select: 'productName product_unit' });
+        .populate({ path: 'rawMaterials.rawMaterial_id', select: 'productName UOM' });
       if (created?.campaign) {
         await updateCampaignTotals(created.campaign, null);
       }
@@ -340,7 +340,7 @@ export const listBatches = async (req, res, next) => {
 
     const [items, total] = await Promise.all([
       Batch.find(filter)
-        .populate({ path: 'rawMaterials.rawMaterial_id', select: 'productName product_unit' }),
+        .populate({ path: 'rawMaterials.rawMaterial_id', select: 'productName UOM' }),
       Batch.countDocuments(filter),
     ]);
 
@@ -362,7 +362,7 @@ export const getBatchById = async (req, res, next) => {
     }
     const doc = await Batch.findById(id).populate({
       path: 'rawMaterials.rawMaterial_id',
-      select: 'productName product_unit',
+      select: 'productName UOM',
     });
     if (!doc) {
       const err = new Error('Batch not found');
@@ -410,7 +410,7 @@ export const updateBatch = async (req, res, next) => {
       id,
       { $set: updates },
       { new: true, runValidators: true }
-    ).populate({ path: 'rawMaterials.rawMaterial_id', select: 'productName product_unit' });
+    ).populate({ path: 'rawMaterials.rawMaterial_id', select: 'productName UOM' });
 
     if (!doc) {
       const err = new Error('Batch not found');
@@ -494,7 +494,7 @@ export const addRawMaterial = async (req, res, next) => {
     batch.rawMaterials.push({ rawMaterial_id: rmId, weight: w, unit: unit || 'kg' });
     await batch.save();
 
-    const populated = await batch.populate({ path: 'rawMaterials.rawMaterial_id', select: 'productName product_unit' });
+    const populated = await batch.populate({ path: 'rawMaterials.rawMaterial_id', select: 'productName UOM' });
     res.status(201).json({ success: true, data: populated });
   } catch (err) {
     return sendHttpError(res, err);
@@ -527,7 +527,7 @@ export const removeRawMaterial = async (req, res, next) => {
     }
 
     await batch.save();
-    const populated = await batch.populate({ path: 'rawMaterials.rawMaterial_id', select: 'productName product_unit' });
+    const populated = await batch.populate({ path: 'rawMaterials.rawMaterial_id', select: 'productName UOM' });
     res.json({ success: true, data: populated });
   } catch (err) {
     return sendHttpError(res, err);

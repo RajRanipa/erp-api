@@ -11,7 +11,7 @@ const RawMaterialSchema = new Schema({
         trim: true
     },
     // The unit in which you measure this raw material
-    product_unit: {
+    UOM: {
         type: String,
         required: true,
     },

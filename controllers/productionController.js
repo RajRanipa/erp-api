@@ -210,7 +210,7 @@ export const rePackProduct = async (req, res) => {
 
         if (!originalInventory || originalInventory.quantity < quantity) {
             return res.status(400).json({
-                message: `Insufficient stock in '${originalPackingStatus}'. Available: ${originalInventory ? originalInventory.quantity : 0} ${product.product_unit}, Needed: ${quantity} ${product.product_unit}.`
+                message: `Insufficient stock in '${originalPackingStatus}'. Available: ${originalInventory ? originalInventory.quantity : 0} ${product.UOM}, Needed: ${quantity} ${product.UOM}.`
             });
         }
 
@@ -234,7 +234,7 @@ export const rePackProduct = async (req, res) => {
                 item: productId,
                 itemType: 'Product',
                 quantity: quantity,
-                unit: product.product_unit, // Use the unit from the product
+                unit: product.UOM, // Use the unit from the product
                 status: newPackingStatusName,
                 location: 'Finished Goods Warehouse' // Default location
             });
@@ -245,7 +245,7 @@ export const rePackProduct = async (req, res) => {
         const rePackingLog = new RePackingLog({
             product: productId,
             quantity: quantity,
-            unit: product.product_unit,
+            unit: product.UOM,
             originalPackingStatus: originalPackingStatus,
             newPackingStatus: newPackingStatusName, // Store the name for the log
             repackingCost: repackingCost || 0,

@@ -9,7 +9,8 @@ import {
   getPackingItems,
   getRawItems,
   getFinishedItems,
-  getPackingItemsByid
+  getPackingItemsByid,
+  getItemUomById
 } from '../controllers/itemsController.js'; 
 import auth, { roleAuth } from '../middleware/authMiddleware.js';
 
@@ -19,6 +20,8 @@ router.use(auth);
 router.get('/packings', roleAuth('items:read'), getPackingItems);
 router.get('/finished', roleAuth('items:read'), getFinishedItems);
 router.get('/raw', roleAuth('items:read'), getRawItems);
+router.get('/uom/:id', roleAuth('items:read'), getItemUomById);
+//  GET http://localhost:1122/api/items/uom/6909c8b… 404 (Not Found)
 router.get('/packings/by-id', roleAuth('items:read'), getPackingItemsByid);
 
 router.get('/by-id', roleAuth('items:read'),  getItemById); 

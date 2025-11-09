@@ -15,7 +15,7 @@ const { Schema } = mongoose;
 const BomItemSchema = new Schema({
   item: { type: Schema.Types.ObjectId, ref: 'Product', required: true }, // raw or semi-finished component
   qtyPer: { type: Number, required: true, min: 0 },                      // quantity per 1 finished unit
-  uom: { type: String, required: true },                                 // must be compatible/convertible with item.product_unit
+  uom: { type: String, required: true },                                 // must be compatible/convertible with item.UOM
   scrapPct: { type: Number, default: 0, min: 0, max: 100 },              // optional component scrap %
   notes: { type: String, trim: true },
 }, { _id: false });

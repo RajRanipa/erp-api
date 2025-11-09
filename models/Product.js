@@ -24,7 +24,7 @@ const ProductSchema = new Schema(
     purchasePrice: { type: Schema.Types.Decimal128, default: 0, get: toNumber, set: toDecimal },
     salePrice:     { type: Schema.Types.Decimal128, default: 0, get: toNumber, set: toDecimal },
 
-    product_unit: {
+    UOM: {
       type: String,
       required: true,
       trim: true,
@@ -168,7 +168,7 @@ export default mongoose.model('Product', ProductSchema);
 //     // Financial and stock-related fields
 //     purchasePrice: { type: Number, default: 0 },
 //     salePrice: { type: Number, default: 0 },
-//     product_unit: { type: String, required: true },
+//     UOM: { type: String, required: true },
 //     currentStock: { type: Number, default: 0 },
 //     minimumStock: { type: Number, default: 0 },
 //     description: { type: String },
