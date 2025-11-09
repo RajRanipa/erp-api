@@ -18,7 +18,7 @@ const asNumber = (v) => {
 
 async function getProductType(itemId) {
   const item = await Item.findById(itemId).select('productType').lean();
-  console.log('item getProductType -- > ', item, itemId);
+  // console.log('item getProductType -- > ', item, itemId);
   if (!item) throw new Error('Item not found');
   return item.productType;
 }
@@ -83,13 +83,13 @@ export async function postMovement({
       throw new Error('Invalid txnType');
     }
     const productType = await getProductType(itemId);
-    console.log("productType", productType);
-    console.log("enforceNonNegative", enforceNonNegative);
+    // console.log("productType", productType);
+    // console.log("enforceNonNegative", enforceNonNegative);
     // If enforcing non-negative, pre-check (for decreases)
     if (enforceNonNegative && signedQty < 0) {
       const { onHand } = await getCurrentBalances({ companyId, itemId, warehouseId, uom, bin, batchNo }, session);
-      console.log("onHand", onHand);
-      console.log("signedQty", signedQty);
+      // console.log("onHand", onHand);
+      // console.log("signedQty", signedQty);
       if (onHand + signedQty < 0) {
         throw new Error('Insufficient stock: onHand would go below zero');
       }
@@ -100,7 +100,7 @@ export async function postMovement({
       uom, quantity: signedQty, txnType, refType, refId, note, by, at: new Date(),
     }], { session });
     
-    console.log("ledger", ledger);
+    // console.log("ledger", ledger);
     // 2) Update snapshot (onHand)
     const snapshot = await InventorySnapshot.incOnHand(
       { companyId, itemId, productType, warehouseId, uom, bin, batchNo },
@@ -129,14 +129,14 @@ export async function postMovement({
 export async function receive(params) {
   // expects: qty > 0
   const qty = Math.abs(asNumber(params.qty));
-  console.log("qty", qty);
+  // console.log("qty", qty);
   return postMovement({ ...params, qty, txnType: 'RECEIPT' });
 }
 
 export async function issue(params) {
   // expects: qty > 0 (we convert to negative)
   const qty = -Math.abs(asNumber(params.qty));
-  console.log("qty", qty);
+  // console.log("qty", qty);
   return postMovement({ ...params, qty, txnType: 'ISSUE' });
 }
 

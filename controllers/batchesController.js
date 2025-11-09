@@ -253,7 +253,7 @@ const deductInventory = async (rawMaterials = [], multiplier = 1, session) => {
 export const createBatch = async (req, res, next) => {
   try {
     const data = normalizeBatchInput(req.body);
-    console.log('createBatch data', req.body); // here campaign is there and value is id of campaign
+    // // console.log('createBatch data', req.body); // here campaign is there and value is id of campaign
     if (!data.batche_id) {
       const err = new Error('batche_id is required');
       err.status = 400;
@@ -268,7 +268,7 @@ export const createBatch = async (req, res, next) => {
     assertNoDuplicateMaterials(data.rawMaterials);
     assertPositiveTotalWeight(data.rawMaterials);
     await assertSufficientInventory(data.rawMaterials, data.numbersBatches);
-    console.log("batch 1 data ",data); // but here campaign is not there it's removed why is this i need to update this because i have campaign in batch schema as below
+    // // console.log("batch 1 data ",data); // but here campaign is not there it's removed why is this i need to update this because i have campaign in batch schema as below
     let populated;
     // return;
     try {
@@ -291,11 +291,11 @@ export const createBatch = async (req, res, next) => {
       return res.status(201).json({ success: true, data: populated });
     } catch (txErr) {
       const msg = String(txErr?.message || '');
-      console.log('msg batches controller file ?', msg);
+      // console.log('msg batches controller file ?', msg);
       const noTxnEnv = msg.includes('Transaction numbers are only allowed on a replica set member or mongos');
       if (!noTxnEnv) throw txErr; // different error → bubble up
 
-      console.log("batch data ",data);
+      // console.log("batch data ",data);
       // Fallback path for standalone MongoDB (no transactions):
       // 1) Create the batch
       const created = await Batch.create(data);
@@ -344,7 +344,7 @@ export const listBatches = async (req, res, next) => {
       Batch.countDocuments(filter),
     ]);
 
-    console.log(items[0]);
+    // console.log(items[0]);
     res.json(items);
   } catch (err) {
     return sendHttpError(res, err);

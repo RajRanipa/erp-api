@@ -77,7 +77,7 @@ async function processMessage(msg, log) {
         if (!bounce) return;
 
         await handleBounce(bounce); // ← move to DB layer
-        log.info('Bounce processed:', bounce);
+        // log.info('Bounce processed:', bounce);
     } catch (e) {
         log.error('processMessage error:', e);
     }

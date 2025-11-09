@@ -4,18 +4,18 @@ import { rolePermissions } from '../config/rolePermissions.js';
 // authMiddleware file here
 const auth = (req, res, next) => {
   const token = req.cookies.accessToken;
-  // console.log("authMiddleware file here ")
-  // console.log(!token)
+  // // console.log("authMiddleware file here ")
+  // // console.log(!token)
 
   if (!token) {
-    console.log(" authMiddleware file here false ")
+    // console.log(" authMiddleware file here false ")
     return res.status(401).json({ message: 'Unauthorized: No access token provided.' });
   }
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_ACCESS_SECRET);
-    // console.log("Decoded of Middleware")
-    // console.log(decoded)
+    // // console.log("Decoded of Middleware")
+    // // console.log(decoded)
     req.user = decoded;
     next();
   } catch (err) {
@@ -79,11 +79,11 @@ export const roleAuth = (...requiredPerms) => (req, res, next) => {
   const ok = required.length === 0 ? true : required.every(hasPermission);
 
   // Debug logs (optional)
-  console.log('[RBAC] user:', { id: user.id || user._id, role: user.role });
-  // console.log('[RBAC] required:', required);
-  // console.log('[RBAC] allowed:', allowed);
-  // console.log('[RBAC] decision:', ok );
-  console.log('[RBAC] decision:', ok ? 'ALLOW' : 'DENY', ' / [RBAC] required:', required);
+  // console.log('[RBAC] user:', { id: user.id || user._id, role: user.role });
+  // // console.log('[RBAC] required:', required);
+  // // console.log('[RBAC] allowed:', allowed);
+  // // console.log('[RBAC] decision:', ok );
+  // console.log('[RBAC] decision:', ok ? 'ALLOW' : 'DENY', ' / [RBAC] required:', required);
 
   if (!ok) {
     return res.status(403).json({ error: 'Forbidden: insufficient permissions' });

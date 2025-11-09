@@ -49,14 +49,14 @@ export async function getStock(req, res) {
       packing,
       ...snapFilter
     } = filter;
-    console.log('snapFilter', snapFilter, {
-      categoryKey,
-      productType,
-      temperature,
-      density,
-      dimension,
-      packing,
-    });
+    // // console.log('snapFilter', snapFilter, {
+    //   categoryKey,
+    //   productType,
+    //   temperature,
+    //   density,
+    //   dimension,
+    //   packing,
+    // });
     const rows = await getSnapshot(snapFilter, {
       categoryKey,
       productType,
@@ -66,7 +66,7 @@ export async function getStock(req, res) {
       packing,
     });
 
-    console.log("inventory stock controller called ", rows[0]);
+    // console.log("inventory stock controller called ", rows[0]);
     res.json({ status: true, data: rows });
   } catch (err) {
     handleError(res, err, 'Failed to fetch stock snapshot');
@@ -100,7 +100,7 @@ export async function getLedger(req, res) {
  */
 export async function receive(req, res) {
   try {
-    console.log("inventory receive controller called ", req.body);
+    // console.log("inventory receive controller called ", req.body);
     const { itemId, warehouseId, qty, uom, note = '', bin = null, batchNo = null, refType = null, refId = null } = req.body || {};
     const { companyId, _id: userId } = req.user || {};
     if (!companyId) throw new Error('Missing companyId on user');
@@ -109,7 +109,7 @@ export async function receive(req, res) {
       companyId, itemId, warehouseId, uom,
       qty, by: userId, note, bin, batchNo, refType, refId
     });
-    console.log("result", result);
+    // console.log("result", result);
     res.json({ status: true, message: 'Stock received', data: result });
   } catch (err) {
     handleError(res, err, 'Failed to receive stock');

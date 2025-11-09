@@ -7,13 +7,13 @@ export const createPacking = async (req, res) => {
     // If productType is a string, look up the ProductType by name
     if (false && typeof req.body.productType === "string") {
       const productType = await ProductType.findOne({ name: req.body.productType });
-      console.log("productType ", productType)
+      // console.log("productType ", productType)
       if (!productType) {
         return res.status(400).json({ message: "Invalid productType" });
       }
       req.body.productType = productType._id;
     }
-    console.log("req.body ", req.body)
+    // console.log("req.body ", req.body)
     const packing = new Packing(req.body);
     await packing.save();
 
@@ -30,7 +30,7 @@ export const getAllPacking = async (req, res) => {
 
     const packings = await Packing.find();
     // Map packings to desired format
-    console.log("packings ", packings)
+    // console.log("packings ", packings)
     const mapped = packings.map(packing => (
       {
         value: packing._id,

@@ -6,7 +6,7 @@ export const REFRESH_TOKEN_EXPIRE_DAYS = 7;
 
 // Generate access token (short-lived)
 // export const generateAccessToken = (user) => {
-//   console.log("Generating Access Token for user:", user);
+//   // console.log("Generating Access Token for user:", user);
 //   return jwt.sign(
 //     { id: user._id ? user._id : user },
 //     process.env.JWT_ACCESS_SECRET,
@@ -15,7 +15,7 @@ export const REFRESH_TOKEN_EXPIRE_DAYS = 7;
 // };
 
 export const generateAccessToken = (user) => {
-  console.log("Generating Access Token for user:", user);
+  // console.log("Generating Access Token for user:", user);
 
   const payload = {
     id: user._id || user.id,
@@ -32,7 +32,7 @@ export const generateAccessToken = (user) => {
 
 // Generate refresh token (long-lived)
 export const generateRefreshToken = (user) => {
-  console.log("Generating Refresh Token for user:", 'user =');
+  // console.log("Generating Refresh Token for user:", 'user =');
   return jwt.sign(
     { id: user._id || user.id, email: user.email },
     process.env.JWT_REFRESH_SECRET,

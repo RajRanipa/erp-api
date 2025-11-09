@@ -31,7 +31,7 @@ async function forceLogoutEverywhere(userId) {
 }
 
 export async function createInvite(req, res) {
-  // console.log('createInvite hit', req.user);
+  // // console.log('createInvite hit', req.user);
   // requirePerm('users:invite')
   const { email, role = 'staff' } = req.body || {};
   const companyId = req.user.companyId;
@@ -57,7 +57,7 @@ export async function createInvite(req, res) {
   const token = genToken();
   const tokenHash = hash(token);
 
-  // return console.log('company', company);
+  // return // console.log('company', company);
   const invite = await Invite.create({
     companyId,
     email,
@@ -87,7 +87,7 @@ export async function resendInvite(req, res) {
   // requirePerm('users:invite')
   const { id } = req.params;
   const invite = await Invite.findOne({ _id: id, companyId: req.user.companyId });
-  console.log('resendInvite hit', invite);
+  // console.log('resendInvite hit', invite);
   if (!invite || invite.status !== 'pending') return res.status(404).json({ status:false, message:'Invite not found' });
   
   // rotate token
@@ -190,11 +190,11 @@ export async function listInvites(req, res) {
 // controllers/inviteController.js
 
 export const declineInviteByToken = async (req, res) => {
-  console.log('declineInviteByToken hit');
+  // console.log('declineInviteByToken hit');
   try {
     const { token } = req.body || {};
     if (!token) return res.status(400).json({ status: false, message: 'Missing token' });
-    console.log('token', token);
+    // console.log('token', token);
     const invite = await Invite.findOne({ tokenHash: hash(token) });
     if (!invite) return res.status(404).json({ status: false, message: 'Invalid invite token' });
     
@@ -209,7 +209,7 @@ export const declineInviteByToken = async (req, res) => {
     // Optional: rotate/clear token so it can’t be reused
     invite.tokenHash = undefined;
     await invite.save();
-    console.log('invite', invite);
+    // console.log('invite', invite);
 
     return res.json({ status: true, message: 'Invite declined' });
   } catch (err) {

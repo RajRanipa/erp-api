@@ -119,7 +119,7 @@ InventoryLedgerSchema.index({ companyId: 1, txnType: 1, at: -1 });
  * Ledger rows should be immutable; allow only creation.
  */
 InventoryLedgerSchema.pre('findOneAndUpdate', function disallowUpdate() {
-  console.log('InventoryLedger pre findOneAndUpdate');
+  // console.log('InventoryLedger pre findOneAndUpdate');
   // eslint-disable-next-line no-param-reassign
   const err = new Error('InventoryLedger rows are immutable. Insert a new row instead.');
   // Allow explicit override via option { runValidators: false, context: 'allowUpdate' } if you really must.
@@ -133,7 +133,7 @@ InventoryLedgerSchema.pre('findOneAndUpdate', function disallowUpdate() {
  * Accepts positive or negative qty; you should decide sign in the caller.
  */
 InventoryLedgerSchema.statics.record = async function recordMovement(doc, options = {}) {
-  console.log('InventoryLedger pre findOneAndUpdate');
+  // console.log('InventoryLedger pre findOneAndUpdate');
   const Model = this;
   return Model.create([doc], options).then(([row]) => row);
 };

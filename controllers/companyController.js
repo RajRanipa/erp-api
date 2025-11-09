@@ -50,7 +50,7 @@ function applyCompanyUpdates(company, body = {}) {
   if (taxInfo && typeof taxInfo === 'object') {
     company.taxInfo = { ...company.taxInfo?.toObject?.(), ...taxInfo };
   }
-  console.log('setupProgress', setupProgress);
+  // console.log('setupProgress', setupProgress);
   if (setupProgress && typeof setupProgress === 'object') {
     company.setupProgress = {
       ...(company.setupProgress || {}),
@@ -65,7 +65,7 @@ function applyCompanyUpdates(company, body = {}) {
 
 // GET /api/company/me — tenant-scoped fetch
 export async function getCompanyMe(req, res) {
-  console.log('getCompanyMe user');
+  // console.log('getCompanyMe user');
   try {
     const user = req.user;
     if (!user) {
@@ -306,7 +306,7 @@ export async function getCompanies(req, res) {
 
 // GET /api/company/:id
 export async function getCompanyById(req, res) {
-  console.log('getCompanyById', req.params); // getCompanyById [Object: null prototype] { id: 'me' }
+  // console.log('getCompanyById', req.params); // getCompanyById [Object: null prototype] { id: 'me' }
   if (req.params?.id === 'me') {
     return res.status(400).json({ status: false, message: 'Use /api/company/me for tenant-scoped access' });
   }
@@ -327,7 +327,7 @@ export async function getCompanyById(req, res) {
 
 // PATCH /api/company/:id  (or /api/company/me routed to this handler after resolving id)
 export async function updateCompany(req, res) {
-  console.log('updateCompany called', req.body); // updateCompany called [Object: null prototype] {}
+  // console.log('updateCompany called', req.body); // updateCompany called [Object: null prototype] {}
   try {
     const { companyId } = req.user;
     const company = await Company.findById(companyId);
@@ -378,8 +378,8 @@ export async function updateCompany(req, res) {
         ...(company.setupProgress || {}),
         ...Object.keys(setupProgress).reduce((acc, k) => ({ ...acc, [k]: !!setupProgress[k] }), {}),
       };
-      console.log('setupProgress', setupProgress); 
-      console.log('company.setupProgress', company.setupProgress); 
+      // console.log('setupProgress', setupProgress); 
+      // console.log('company.setupProgress', company.setupProgress); 
 
       // naive step counter: count true flags
       const completed = Object.values(company.setupProgress).filter(Boolean).length;
@@ -423,7 +423,7 @@ export async function deleteCompany(req, res) {
 export async function finishCompany(req, res) {
   try {
     const user = req.user;
-    console.log("user", user);
+    // console.log("user", user);
     // return; // <-- REMOVE this line so function continues
     if (!user) {
       return res.status(401).json({ status: false, message: 'Unauthorized' });

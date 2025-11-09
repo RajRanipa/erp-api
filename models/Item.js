@@ -277,7 +277,7 @@ ItemSchema.pre('save', async function (next) {
       let pt = false;
       if (this.productType) {
         pt = await mongoose.models.ProductType.findById(this.productType).select('name').lean();
-        console.log('pt', pt);
+        // console.log('pt', pt);
         if (pt && pt.name) pt.name === 'bulk' ? isBulk = true : isBulk = false;
       }
 
@@ -303,7 +303,7 @@ ItemSchema.pre('save', async function (next) {
       if (!isBulk) {
         // uniqueness: productType + dimension + density + temperature + packing
         baseQuery.dimension = this.dimension;
-        console.log('baseQuery.dimension', pt);
+        // console.log('baseQuery.dimension', pt);
         if(pt && pt.name === "board") baseQuery.density = this.density;
         baseQuery.temperature = this.temperature;
         baseQuery.packing = this.packing;
@@ -317,7 +317,7 @@ ItemSchema.pre('save', async function (next) {
       if (this._id) baseQuery._id = { $ne: this._id };
 
       const existingFG = await mongoose.models.Item.findOne(baseQuery).lean();
-      console.log('existingFG -->> ', existingFG);
+      // console.log('existingFG -->> ', existingFG);
       if (existingFG) {
         return next(new Error('Duplicate product item detected for the provided combination of fields'));
       }

@@ -45,7 +45,7 @@ const cwd = process.cwd();
 // If started from backend-api, use that; otherwise use <root>/backend-api
 const uploadsBase = path.basename(cwd) === 'backend-api' ? cwd : path.join(cwd, 'backend-api');
 const uploadsDir = path.join(uploadsBase, 'uploads');
-console.log('[Static] Serving /uploads from:', uploadsDir);
+// console.log('[Static] Serving /uploads from:', uploadsDir);
 app.use('/uploads', express.static(uploadsDir));
 
 // Middlewaremm

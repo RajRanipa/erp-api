@@ -29,7 +29,7 @@ export function handleError(res, err) {
             duplicateField.map((field, index) => {
                 msg += `${field} - "${err.keyValue[field]}" and `;
             })
-            console.log("err Rmsg :- ", msg, err.code)
+            // console.log("err Rmsg :- ", msg, err.code)
             // if (!msg.length > 0) return;
             appErr = new AppError(
                 `${msg} already exists`,
@@ -48,7 +48,7 @@ export function handleError(res, err) {
             field,
             message: err.errors[field].message
         }));
-        console.log("err Rmsg :- ", errors)
+        // console.log("err Rmsg :- ", errors)
         appErr = new AppError('Validation failed', {
             statusCode: 400,
             code: 'VALIDATION_ERROR',

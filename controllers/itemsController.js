@@ -71,8 +71,8 @@ export const createItem = async (req, res) => {
     const rest = { ...req.body };
     // Populate category to get name
     const cat = await Category.findById(category);
-    console.log('rest', rest); //  packing is here 
-    console.log('cat', cat); // but why it's not here
+    // console.log('rest', rest); //  packing is here 
+    // console.log('cat', cat); // but why it's not here
     // if (!cat) throw new AppError('Invalid category.', { statusCode: 400, code: 'INVALID_CATEGORY' });
     // Validate fields
     let payload = { ...rest, sku: rest.sku || sku || null, category };
@@ -82,15 +82,15 @@ export const createItem = async (req, res) => {
     // Apply audit fields from authenticated user (createdBy, updatedBy, companyId)
     payload =  applyAuditCreate(req, payload);
     const error = validateItemFields(payload, cat.name);
-    console.log('error', error);
+    // console.log('error', error);
     if (error) {
       throw new Error(String(error));
     }
     // Check unique SKU (only if provided)
-    console.log('payload.sku', payload);
+    // console.log('payload.sku', payload);
     // Create
     const item = new Item(payload);
-    console.log('item', item);
+    // console.log('item', item);
     await item.save();
     return res.status(201).json({ message: 'Item created', item });
   } catch (error) {
@@ -102,7 +102,7 @@ export const createItem = async (req, res) => {
 export const getItemById = async (req, res) => {
   try {
     const { id } = req.query;
-    console.log('getItemById id', id);
+    // console.log('getItemById id', id);
     const item = await Item.findById(
       id,
       'name UOM minimumStock description category productType temperature density dimension packing brandType productColor grade status'
@@ -115,7 +115,7 @@ export const getItemById = async (req, res) => {
       // .populate('packing', 'name brandType productColor')
       .lean();
     if (!item) return res.status(404).json({ error: 'Item not found' });
-    console.log('item getItemById', item);
+    // console.log('item getItemById', item);
     return res.json(item);
   } catch (err) {
     return res.status(500).json({ error: 'Server error' });
@@ -124,7 +124,7 @@ export const getItemById = async (req, res) => {
 
 // Get All Items (with filtering)
 export const getAllItems = async (req, res) => {
-  console.log('req.query in getAllItems', req.query);
+  // console.log('req.query in getAllItems', req.query);
   try {
     const { status, categoryKey, productType, temperature, density, dimension, packing } = req.query || {};
     const filter = {};
@@ -157,7 +157,7 @@ export const getAllItems = async (req, res) => {
     .populate('dimension', 'width length thickness unit')
     .lean();
 
-    // console.log('items in getAllItems (count)', items?.length || 0, 'items', items);
+    // // console.log('items in getAllItems (count)', items?.length || 0, 'items', items);
     return res.json(items);
   } catch (err) {
     return res.status(500).json({ error: 'Server error' });
@@ -166,7 +166,7 @@ export const getAllItems = async (req, res) => {
 
 // Get All Items (with filtering)
 export const getAllItemsOptions = async (req, res) => {
-  console.log('req.query in getAllItems', req.query);
+  // console.log('req.query in getAllItems', req.query);
   try {
     const { status, categoryKey } = req.query || {};
     const filter = {};
@@ -188,7 +188,7 @@ export const getAllItemsOptions = async (req, res) => {
     }
 
     const items = await Item.find(filter).lean();
-    // console.log('items in getAllItems (count)', items?.length || 0, 'items', items[0]);
+    // // console.log('items in getAllItems (count)', items?.length || 0, 'items', items[0]);
     return res.json(items);
   } catch (err) {
     return res.status(500).json({ error: 'Server error' });
@@ -228,7 +228,7 @@ export const updateItem = async (req, res) => {
     await item.save();
     return res.json({ message: 'Item updated', item });
   } catch (error) {
-    // console.log('err', error);
+    // // console.log('err', error);
     return handleError(res, error);
   }
 };
@@ -282,13 +282,13 @@ export const updateItemStatus = async (req, res) => {
 // Fetch summary of items where categoryKey === 'PACKING' (only _id, name, brandType)
 export const getPackingItems = async (req, res) => {
   try {
-    console.log('getPackingItems');
+    // console.log('getPackingItems');
     // Simple fixed query: only items with categoryKey PACKING
     const packings = await Item.find({ categoryKey: 'PACKING' })
       .populate('productType', 'name')
       .populate('dimension', 'width length thickness unit')
       .lean();
-    // console.log('packings', packings[0]); // i need to give productType name or i need to populate name of productType
+    // // console.log('packings', packings[0]); // i need to give productType name or i need to populate name of productType
     return res.status(200).json(packings);
 
   } catch (error) {
@@ -297,7 +297,7 @@ export const getPackingItems = async (req, res) => {
 };
 export const getFinishedItems = async (req, res) => {
   try {
-    console.log('getFinishedItems');
+    // console.log('getFinishedItems');
     // Simple fixed query: only items with categoryKey PACKING
     const FG = await Item.find({ categoryKey: 'FG' })
       .populate('productType', 'name')
@@ -307,7 +307,7 @@ export const getFinishedItems = async (req, res) => {
       .populate('packing', 'name brandType productColor')
       .lean();
 
-    // console.log('FG', mapFG[0]); // i need to give productType name or i need to populate name of productType
+    // // console.log('FG', mapFG[0]); // i need to give productType name or i need to populate name of productType
     return res.status(200).json(FG);
 
   } catch (error) {
@@ -316,10 +316,10 @@ export const getFinishedItems = async (req, res) => {
 };
 export const getRawItems = async (req, res) => {
   try {
-    console.log('getRawItems');
+    // console.log('getRawItems');
     // Simple fixed query: only items with categoryKey PACKING
     const packings = await Item.find({ categoryKey: 'RAW' }).lean();
-    console.log('RAW', packings[0]);
+    // console.log('RAW', packings[0]);
 
     return res.status(200).json(packings);
 
@@ -332,7 +332,7 @@ export const getRawItems = async (req, res) => {
 export const getPackingItemsByid = async (req, res) => {
   try {
     const { productType } = req.query || {};
-    console.log('productType', productType);
+    // console.log('productType', productType);
     if (!productType) {
       return res.status(400).json({ message: 'productType is a required query param' });
     }
@@ -345,7 +345,7 @@ export const getPackingItemsByid = async (req, res) => {
     const packings = await Item.find({ categoryKey: 'PACKING', productType }, '_id name brandType productColor').populate('dimension', 'width length thickness unit').lean();
     const mapped = valueandlabel(packings)
 
-    console.log('packings by id', mapped[0]);
+    // console.log('packings by id', mapped[0]);
     return res.status(200).json(mapped);
   } catch (error) {
     return handleError(res, error);
