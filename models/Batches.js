@@ -29,7 +29,6 @@ const batchesSchema = new mongoose.Schema(
 );
 
 // Useful indices
-batchesSchema.index({ batche_id: 1 }, { unique: true });
 batchesSchema.index({ createdBy: 1, date: -1 });
 
 export default mongoose.model('Batch', batchesSchema);

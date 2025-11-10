@@ -17,8 +17,8 @@ export default async function sendMail({ to, subject, html, text }) {
     // These should come from .env for security.
     const transporter = nodemailer.createTransport({
       host: process.env.SMTP_HOST || 'smtp.gmail.com',
-      port: Number(process.env.SMTP_PORT) || 465,
-      secure: true, // true for 465, false for 587
+      port: Number(process.env.SMTP_PORT) || 587,
+      secure: false, // true for 465, false for 587 465
       auth: {
         user: process.env.MAIL_FROM, // full email address
         pass: process.env.SMTP_PASS, // app password or smtp token

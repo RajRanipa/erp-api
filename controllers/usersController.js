@@ -31,7 +31,7 @@ async function forceLogoutEverywhere(userId) {
 }
 
 export async function createInvite(req, res) {
-  // // console.log('createInvite hit', req.user);
+  console.log('createInvite hit -> ', req.user);
   // requirePerm('users:invite')
   const { email, role = 'staff' } = req.body || {};
   const companyId = req.user.companyId;
