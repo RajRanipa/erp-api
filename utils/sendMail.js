@@ -36,7 +36,8 @@ export default async function sendMail({ to, subject, html, text }) {
       text: text || html?.replace(/<[^>]+>/g, ''), // fallback to plain text
       html,
     };
-
+    console.log('mailOptions', mailOptions);
+    console.log('transporter', transporter);
     // === Send email ===
     const info = await transporter.sendMail(mailOptions);
     console.log('✅ Email sent:', info, info.messageId);
