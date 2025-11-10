@@ -39,7 +39,7 @@ export default async function sendMail({ to, subject, html, text }) {
 
     // === Send email ===
     const info = await transporter.sendMail(mailOptions);
-    console.log('✅ Email sent:', info.messageId);
+    console.log('✅ Email sent:', info, info.messageId);
     return info;
   } catch (err) {
     console.error('❌ sendMail error:', err);
