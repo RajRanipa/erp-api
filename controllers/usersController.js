@@ -4,7 +4,7 @@ import Invite from '../models/Invite.js';
 import User from '../models/User.js';
 import Company from '../models/Company.js';
 import sendMail from '../utils/sendMail.js'; // your nodemailer/helper
-import {rolePermissions} from '../config/rolePermissions.js';
+import { rolePermissions } from '../config/rolePermissions.js';
 import mongoose from 'mongoose';
 
 const hash = (s) => crypto.createHash('sha256').update(s).digest('hex');
@@ -38,7 +38,7 @@ export async function createInvite(req, res) {
 
   // 1) do not allow inviting an email that already exists as a User (global uniqueness)
   const existing = await User.findOne({ email });
-  if (existing) return res.status(409).json({ status:false, message:'User with this email already exists' });
+  if (existing) return res.status(409).json({ status: false, message: 'User with this email already exists' });
 
   // 2) close older pending invites for same pair (optional)
   await Invite.updateMany(
@@ -65,22 +65,42 @@ export async function createInvite(req, res) {
     inviterId: req.user.id || req.user._id || null,
     tokenHash,
     companyName: company?.companyName || '',
-    expiresAt: new Date(Date.now() + 7*24*60*60*1000) // 7 days
+    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 days
   });
 
   const link = `${process.env.CLIENT_URL}/accept-invite?token=${encodeURIComponent(token)}`;
 
-  await sendMail({
+  // await sendMail({
+  //   to: email,
+  //   subject: `You're invited to ${company?.companyName || 'our JNR ERP'}`,
+  //   html: `
+  //   <div class="flex flex-col bg-gray-200 p-6 w-full gap-2">
+  //     <p>Hello,</p>
+  //     <p>You’ve been invited to join <b>${company?.companyName || 'our JNR ERP'}</b> as <b>${role}</b>.</p>
+  //     <p><a href="${link}">Accept your invite</a> (valid for 7 days)</p>
+  //   </div>
+  //   `
+  // });
+   await sendMail({
     to: email,
     subject: `You're invited to ${company?.companyName || 'our JNR ERP'}`,
     html: `
-      <p>Hello,</p>
-      <p>You’ve been invited to join <b>${company?.companyName || 'our JNR ERP'}</b> as <b>${role}</b>.</p>
-      <p><a href="${link}">Accept your invite</a> (valid for 7 days)</p>
+    <table width="100%" height="100%" cellspacing="0" cellpadding="0" border="0" style="background-color: #ffffff;">
+      <tr>
+        <td style="padding: 16px;">
+          <table width="100%" cellspacing="0" cellpadding="0" border="0">
+            <tr style="padding: 6px;"><td style="font-family: Arial, sans-serif; font-size: 16px; color: #333;">Hello,</td></tr>
+            <tr style="padding: 6px;"><td style="font-family: Arial, sans-serif; font-size: 16px;">You’ve been invited to join <b>${company?.companyName || 'our JNR ERP'}</b> as <b>${role}</b>.</td></tr>
+            <tr style="padding: 6px;"><td><a href="${link}" style="display:inline-block; background-color:#007bff; color:#fff; text-decoration:none; padding:10px 20px; border-radius:4px;">Accept your invite</a></td></tr>
+            <tr style="padding: 6px;"><td style="font-size:12px; color:#777;">(Valid for 7 days)</td></tr>
+          </table>
+        </td>
+      </tr>
+    </table>
     `
   });
 
-  return res.json({ status:true, message:'Invite sent', data: { id: invite._id, email, role } });
+  return res.json({ status: true, message: 'Invite sent', data: { id: invite._id, email, role } });
 }
 
 export async function resendInvite(req, res) {
@@ -88,18 +108,35 @@ export async function resendInvite(req, res) {
   const { id } = req.params;
   const invite = await Invite.findOne({ _id: id, companyId: req.user.companyId });
   // console.log('resendInvite hit', invite);
-  if (!invite || invite.status !== 'pending') return res.status(404).json({ status:false, message:'Invite not found' });
-  
+  if (!invite || invite.status !== 'pending') return res.status(404).json({ status: false, message: 'Invite not found' });
+
   // rotate token
   const token = genToken();
   invite.tokenHash = hash(token);
-  invite.expiresAt = new Date(Date.now() + 7*24*60*60*1000);
+  invite.expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
   await invite.save();
 
   const link = `${process.env.CLIENT_URL}/accept-invite?token=${encodeURIComponent(token)}`;
-  await sendMail({ to: invite.email, subject: 'Your invite link', html: `<a href="${link}">Accept invite</a>` });
-
-  res.json({ status:true, message:'Invite re-sent' });
+  // await sendMail({ to: invite.email, subject: 'Your invite link', html: `<a href="${link}">Accept invite</a>` });
+  await sendMail({
+    to: invite.email,
+    subject: `You're invited to ${invite?.companyName || 'our JNR ERP'}`,
+    html: `
+    <table width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color: #ffffff;">
+      <tr>
+        <td style="padding: 16px;">
+          <table width="100%" cellspacing="0" cellpadding="0" border="0">
+            <tr><td style="font-family: Arial, sans-serif; font-size: 16px; color: #333;">Hello,</td></tr>
+            <tr><td style="font-family: Arial, sans-serif; font-size: 16px;">You’ve been invited to join <b>${invite.companyName}</b> as <b>${invite.role}</b>.</td></tr>
+            <tr><td><a href="${link}" style="display:inline-block; background-color:#007bff; color:#fff; text-decoration:none; padding:10px 20px; border-radius:4px;">Accept your invite</a></td></tr>
+            <tr><td style="font-size:12px; color:#777;">(Valid for 7 days)</td></tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+    `
+  });
+  res.json({ status: true, message: 'Invite re-sent' });
 }
 
 export async function revokeInvite(req, res) {
@@ -110,40 +147,40 @@ export async function revokeInvite(req, res) {
     { $set: { status: 'revoked', revokedAt: new Date() } },
     { new: true }
   );
-  if (!invite) return res.status(404).json({ status:false, message:'Invite not found' });
-  res.json({ status:true, message:'Invite revoked' });
+  if (!invite) return res.status(404).json({ status: false, message: 'Invite not found' });
+  res.json({ status: true, message: 'Invite revoked' });
 }
 
 export async function validateInvite(req, res) {
   const { token } = req.query || {};
-  if (!token) return res.status(400).json({ status:false, message:'Missing token' });
+  if (!token) return res.status(400).json({ status: false, message: 'Missing token' });
 
   const invite = await Invite.findOne({ tokenHash: hash(token), status: 'pending' });
-  if (!invite) return res.status(410).json({ status:false, message:'Invalid or expired invite' });
-  if (invite.expiresAt < new Date()) return res.status(410).json({ status:false, message:'Invite expired' });
+  if (!invite) return res.status(410).json({ status: false, message: 'Invalid or expired invite' });
+  if (invite.expiresAt < new Date()) return res.status(410).json({ status: false, message: 'Invite expired' });
 
-  res.json({ status:true, data:{ email: invite.email, companyName: invite.companyName, role: invite.role } });
+  res.json({ status: true, data: { email: invite.email, companyName: invite.companyName, role: invite.role } });
 }
 
 export async function acceptInvite(req, res) {
   const { token, name, password } = req.body || {};
-  if (!token || !name || !password) return res.status(400).json({ status:false, message:'Missing fields' });
+  if (!token || !name || !password) return res.status(400).json({ status: false, message: 'Missing fields' });
 
   const invite = await Invite.findOne({ tokenHash: hash(token), status: 'pending' });
-  if (!invite) return res.status(410).json({ status:false, message:'Invalid or expired invite' });
-  if (invite.expiresAt < new Date()) return res.status(410).json({ status:false, message:'Invite expired' });
+  if (!invite) return res.status(410).json({ status: false, message: 'Invalid or expired invite' });
+  if (invite.expiresAt < new Date()) return res.status(410).json({ status: false, message: 'Invite expired' });
 
   // email must still not exist
   const existing = await User.findOne({ email: invite.email });
-  if (existing) return res.status(409).json({ status:false, message:'Email already registered' });
+  if (existing) return res.status(409).json({ status: false, message: 'Email already registered' });
 
   // create user under company
   const user = await User.create({
     email: invite.email,
-    fullName :name,
+    fullName: name,
     password,
     companyId: invite.companyId,
-    isSetupCompleted:  invite.companyId ? true : false,
+    isSetupCompleted: invite.companyId ? true : false,
     role: invite.role,
     permissions: rolePermissions[invite.role], // your helper
     status: 'active'
@@ -154,7 +191,7 @@ export async function acceptInvite(req, res) {
   await invite.save();
 
   // stick to your policy: DO NOT log in on accept → redirect to login
-  res.json({ status:true, message:'Account created. Please log in.', data:{ email: user.email } });
+  res.json({ status: true, message: 'Account created. Please log in.', data: { email: user.email } });
 }
 
 export async function listInvites(req, res) {
@@ -197,13 +234,13 @@ export const declineInviteByToken = async (req, res) => {
     // console.log('token', token);
     const invite = await Invite.findOne({ tokenHash: hash(token) });
     if (!invite) return res.status(404).json({ status: false, message: 'Invalid invite token' });
-    
+
     if (invite.status !== 'pending')
       return res.status(400).json({ status: false, message: `Invite already ${invite.status}` });
-    
+
     if (invite.expiresAt && invite.expiresAt < new Date())
       return res.status(400).json({ status: false, message: 'Invite expired' });
-    
+
     invite.status = 'declined';
     invite.declinedAt = new Date();
     // Optional: rotate/clear token so it can’t be reused
@@ -350,3 +387,13 @@ export async function listUsers(req, res) {
     res.status(500).json({ status: false, message: 'Failed to list users' });
   }
 }
+
+// `
+//  <div style="background-color: #f5f5f5; width: 100%; height: 100%; padding: 16px; gap: 8px">
+//       <div style="background-color: #ffffff; width: 100%; display: flex; flex-direction: column; gap: 8px">
+//         <h1 style="margin: 0; width: 100%;">Hello,</h1>
+//         <div style="margin: 0; width: 100%;">You’ve been invited to join <b>${invite?.companyName || 'our JNR ERP'}</b> as <b>${invite?.role}</b>.</div>
+//         <div style="margin: 0; width: 100%;"><a href="${link}">Accept your invite</a> (valid for 7 days)</div>
+//       </div>
+//     </div>
+// `

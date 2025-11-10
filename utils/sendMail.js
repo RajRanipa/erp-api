@@ -2,50 +2,41 @@
 import nodemailer from 'nodemailer';
 
 /**
- * Universal sendMail helper
- * 
+ * Universal sendMail helper with Render-safe fallbacks.
+ * Prefers HTTP API providers (Resend / SendGrid) to avoid SMTP port blocks.
+ * Falls back to SMTP (Gmail) only if no API key is configured.
+ *
  * Usage:
- *   await sendMail({
- *     to: 'user@example.com',  
- *     subject: 'Welcome!',
- *     html: '<p>Hello!</p>',
- *   });
+ *   await sendMail({ to, subject, html, text })
  */
 export default async function sendMail({ to, subject, html, text }) {
   try {
-    // === Configure transport ===
-    // These should come from .env for security.
-    const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST || 'smtp.gmail.com',
-      port: Number(process.env.SMTP_PORT) || 587,
-      secure: false, // true for 465, false for 587 465
-      auth: {
-        user: process.env.MAIL_FROM, // full email address
-        pass: process.env.SMTP_PASS, // app password or smtp token
-      },
-    });
+    const { Resend } = await import('resend');
+    const resend = new Resend(process.env.RESEND_API_KEY);
+    const fromName = process.env.MAIL_FROM_NAME || 'JNR ERP System';
+    const fromEmail = process.env.MAIL_FROM || 'rajranipa@erp.orientfibertech.com';
+    const from = `${fromName} <${fromEmail}>`;
 
-    // === Mail options ===
-    const mailOptions = {
-      from: {
-        name: process.env.MAIL_FROM_NAME || 'JNR ERP System',
-        address: process.env.MAIL_FROM || process.env.MAIL_FROM,
-      },
+    console.log('📧 Sending email via Resend...');
+    console.log({ from, to, subject });
+
+    const { data, error } = await resend.emails.send({
+      from,
       to,
       subject,
-      text: text || html?.replace(/<[^>]+>/g, ''), // fallback to plain text
       html,
-    };
-    console.log('mailOptions ======');
-    console.log('mailOptions', mailOptions);
-    console.log('transporter ======');
-    console.log('transporter', transporter);
-    // === Send email ===
-    const info = await transporter.sendMail(mailOptions);
-    console.log('✅ Email sent:', info, info.messageId);
-    return info;
+      text: text || html?.replace(/<[^>]+>/g, ''),
+    });
+
+    if (error) {
+      console.error('❌ Resend API error:', error);
+      throw new Error(error.message || 'Resend email failed');
+    }
+
+    console.log('✅ Email sent via Resend:', data?.id || data);
+    return data;
   } catch (err) {
-    console.error('❌ sendMail error:', err);
-    throw new Error('Failed to send email');
+    console.error('❌ sendMail Resend error:', err);
+    throw new Error('Failed to send email via Resend');
   }
 }
