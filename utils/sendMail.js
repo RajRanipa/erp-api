@@ -1,5 +1,5 @@
 // utils/sendMail.js
-import nodemailer from 'nodemailer';
+import sgMail from '@sendgrid/mail';
 
 /**
  * Universal sendMail helper with Render-safe fallbacks.
@@ -11,32 +11,27 @@ import nodemailer from 'nodemailer';
  */
 export default async function sendMail({ to, subject, html, text }) {
   try {
-    const { Resend } = await import('resend');
-    const resend = new Resend(process.env.RESEND_API_KEY);
+    sgMail.setApiKey(process.env.SENDGRID_API_KEY);
     const fromName = process.env.MAIL_FROM_NAME || 'JNR ERP System';
-    const fromEmail = process.env.MAIL_FROM || 'rajranipa@erp.orientfibertech.com';
-    const from = `${fromName} <${fromEmail}>`;
-
-    console.log('📧 Sending email via Resend...');
+    const fromEmail = process.env.MAIL_FROM || 'no-reply@orientedp.app';
+    const from = { name: fromName, email: fromEmail };
+  
+    console.log('📧 Sending email via SendGrid...');
     console.log({ from, to, subject });
-
-    const { data, error } = await resend.emails.send({
-      from,
+  
+    const msg = {
       to,
+      from,
       subject,
       html,
       text: text || html?.replace(/<[^>]+>/g, ''),
-    });
-
-    if (error) {
-      console.error('❌ Resend API error:', error);
-      throw new Error(error.message || 'Resend email failed');
-    }
-
-    console.log('✅ Email sent via Resend:', data?.id || data);
-    return data;
+    };
+  
+    const response = await sgMail.send(msg);
+    console.log('✅ Email sent via SendGrid:', response[0]?.statusCode);
+    return response;
   } catch (err) {
-    console.error('❌ sendMail Resend error:', err);
-    throw new Error('Failed to send email via Resend');
+    console.error('❌ sendMail SendGrid error:', err);
+    throw new Error('Failed to send email via SendGrid');
   }
 }

@@ -95,15 +95,15 @@ app.listen(PORT, () => {
   console.log(chalk.green(`🚀 Server running on http://localhost:${PORT}`));
 });
 
-// Start IMAP bounce watcher (optional; runs only if creds are present)
-(async () => {
-  try {
-    if (process.env.MAIL_FROM && process.env.SMTP_PASS) {
-      await startBounceWatcher(console);
-    } else {
-      console.warn('IMAP credentials missing — bounce watcher not started.');
-    }
-  } catch (e) {
-    console.error('Bounce watcher failed to start:', e);
-  }
-})();
+// // Start IMAP bounce watcher (optional; runs only if creds are present)
+// (async () => {
+//   try {
+//     if (process.env.MAIL_FROM && process.env.SMTP_PASS) {
+//       await startBounceWatcher(console);
+//     } else {
+//       console.warn('IMAP credentials missing — bounce watcher not started.');
+//     }
+//   } catch (e) {
+//     console.error('Bounce watcher failed to start:', e);
+//   }
+// })();

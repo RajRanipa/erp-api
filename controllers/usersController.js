@@ -70,17 +70,6 @@ export async function createInvite(req, res) {
 
   const link = `${process.env.CLIENT_URL}/accept-invite?token=${encodeURIComponent(token)}`;
 
-  // await sendMail({
-  //   to: email,
-  //   subject: `You're invited to ${company?.companyName || 'our JNR ERP'}`,
-  //   html: `
-  //   <div class="flex flex-col bg-gray-200 p-6 w-full gap-2">
-  //     <p>Hello,</p>
-  //     <p>You’ve been invited to join <b>${company?.companyName || 'our JNR ERP'}</b> as <b>${role}</b>.</p>
-  //     <p><a href="${link}">Accept your invite</a> (valid for 7 days)</p>
-  //   </div>
-  //   `
-  // });
    await sendMail({
     to: email,
     subject: `You're invited to ${company?.companyName || 'our JNR ERP'}`,
