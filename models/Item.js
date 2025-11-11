@@ -71,7 +71,7 @@ const ItemSchema = new Schema({
 
 
 // Quick lookup for SKU
-ItemSchema.index({ sku: 1 }, { unique: true });
+// ItemSchema.index({ sku: 1 }, { unique: true });
 // Unique combination for raw materials by (name + grade). Only applies when categoryKey === 'RAW' and grade exists.
 ItemSchema.index({ name: 1, grade: 1, categoryKey: 1 }, { unique: true, partialFilterExpression: { categoryKey: 'RAW', grade: { $exists: true, $ne: '' } } });
 ItemSchema.index({ status: 1 });
@@ -317,7 +317,8 @@ ItemSchema.pre('save', async function (next) {
       if (this._id) baseQuery._id = { $ne: this._id };
 
       const existingFG = await mongoose.models.Item.findOne(baseQuery).lean();
-      // console.log('existingFG -->> ', existingFG);
+      console.log('baseQuery -->> ', baseQuery);
+      console.log('existingFG -->> ', existingFG);
       if (existingFG) {
         return next(new Error('Duplicate product item detected for the provided combination of fields'));
       }
