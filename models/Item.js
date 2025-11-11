@@ -304,7 +304,7 @@ ItemSchema.pre('save', async function (next) {
         // uniqueness: productType + dimension + density + temperature + packing
         baseQuery.dimension = this.dimension;
         // console.log('baseQuery.dimension', pt);
-        if(pt && pt.name === "board") baseQuery.density = this.density;
+        if(pt && pt.name !== "board") baseQuery.density = this.density;
         baseQuery.temperature = this.temperature;
         baseQuery.packing = this.packing;
       } else {
