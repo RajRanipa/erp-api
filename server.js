@@ -25,6 +25,7 @@ import inventoryRoutes from './routes/inventoryRoutes.js';
 import { inviteRoutes, inviteAuthRoutes} from './routes/usersRoutes.js';
 import { startBounceWatcher } from './services/bounceWatcher.js';
 import { fileURLToPath } from 'url';
+import permissionsRoute from './routes/permissionsRoute.js';
 // import { initGlobalErrorHandlers, expressErrorHandler } from './utils/errorHandler.js';
 // initGlobalErrorHandlers({ logger: console, exitOnFatal: false });
 
@@ -87,6 +88,7 @@ app.use('/api/company', companyRoutes);
 app.use('/api/uploads', uploadRoutes);
 app.use('/api/inventory', inventoryRoutes);
 app.use('/api/users', inviteRoutes);
+app.use('/api/permissions', permissionsRoute);
 app.use('/', inviteAuthRoutes);
 
 // Start server

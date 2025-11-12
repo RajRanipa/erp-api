@@ -69,7 +69,7 @@ export async function createInvite(req, res) {
   });
 
   const link = `${process.env.CLIENT_URL}/accept-invite?token=${encodeURIComponent(token)}`;
-
+  console.log('link 1', link);
    await sendMail({
     to: email,
     subject: `You're invited to ${company?.companyName || 'our JNR ERP'}`,
@@ -107,6 +107,7 @@ export async function resendInvite(req, res) {
 
   const link = `${process.env.CLIENT_URL}/accept-invite?token=${encodeURIComponent(token)}`;
   // await sendMail({ to: invite.email, subject: 'Your invite link', html: `<a href="${link}">Accept invite</a>` });
+  console.log('link 2', link);
   await sendMail({
     to: invite.email,
     subject: `You're invited to ${invite?.companyName || 'our JNR ERP'}`,

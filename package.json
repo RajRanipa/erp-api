@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon --watch ./ --ext js,json,env --ignore node_modules server.js"
+    "dev": "nodemon --watch ./ --ext js,json,env --ignore node_modules server.js",
+    "seed:permissions": "node ./scripts/seedPermissions.js"
   },
   "keywords": [],
   "author": "Raj",

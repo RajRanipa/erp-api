@@ -6,6 +6,7 @@ import { generateAccessToken, generateRefreshToken, ACCESS_TOKEN_EXPIRE_MINUTES,
 import RefreshToken from '../models/RefreshToken.js';
 import { handleError } from '../utils/errorHandler.js';
 import { rolePermissions } from '../config/rolePermissions.js';
+import Permission from '../models/Permission.js';
 
 // @desc    Register new user
 // @route   POST /signup
@@ -257,6 +258,15 @@ export async function checkAuth(req, res) {
     }
 
     // Attach the decoded user info to the request object for further use if needed
+    // Fetch permissions from Permission collection for this role
+    let permKeys = [];
+    try {
+      // Use distinct for efficient key extraction
+      permKeys = await Permission.distinct('key', { roles: user.role });
+    } catch (e) {
+      console.error('Failed to load permissions for role', user.role, e);
+      permKeys = [];
+    }
     res.status(200).json({
       status: true,
       user: {
@@ -267,7 +277,7 @@ export async function checkAuth(req, res) {
         role: user.role,
         companyId: user?.companyId?._id || null,
         isSetupCompleted: user?.isSetupCompleted || false,
-        permissions: rolePermissions[user.role],
+        permissions: permKeys,
       },
     });
   } catch (error) {
