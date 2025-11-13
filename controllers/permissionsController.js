@@ -39,7 +39,7 @@ export const listRoles = async (_req, res) => {
 // GET /admin/permissions/role/:role
 export const getRolePermissions = async (req, res) => {
     try {
-        const { role } = req.params;
+        const { role } = req.user;
         if (!role) return res.status(400).json({ status: false, message: 'Role is required' });
 
         const keys = await Permission.getKeysForRole(role);
