@@ -18,8 +18,8 @@ export const listPermissions = async (req, res) => {
         if (role) filter.roles = role;
         if (q) filter.$or = [{ key: new RegExp(q, 'i') }, { label: new RegExp(q, 'i') }];
 
-        const docs = await Permission.find(filter).sort({ key: 1 }).lean();
-        return res.status(200).json({ status: true, data: docs });
+        const permissions = await Permission.find(filter).sort({ key: 1 }).lean();
+        return res.status(200).json({ status: true, permissions });
     } catch (err) {
         return res.status(500).json({ status: false, message: 'Failed to list permissions', error: err.message });
     }
@@ -29,21 +29,33 @@ export const listPermissions = async (req, res) => {
 export const listRoles = async (_req, res) => {
     try {
         const roles = getAllowedRoles();
-        // console.log('roles', roles);
-        return res.status(200).json({ status: true, data: roles });
+        console.log('roles', roles);
+        return res.status(200).json({ status: true, roles });
     } catch (err) {
         return res.status(500).json({ status: false, message: 'Failed to list roles', error: err.message });
     }
 };
 
 // GET /admin/permissions/role/:role
-export const getRolePermissions = async (req, res) => {
+export const getRolePermissionsbyRole = async (req, res) => {
     try {
         const { role } = req.user;
         if (!role) return res.status(400).json({ status: false, message: 'Role is required' });
 
         const keys = await Permission.getKeysForRole(role);
-        return res.status(200).json({ status: true, data: { role, permissions: keys } });
+        return res.status(200).json({ status: true, role, permissions: keys });
+    } catch (err) {
+        return res.status(500).json({ status: false, message: 'Failed to fetch role permissions', error: err.message });
+    }
+};
+
+export const getRolePermissions = async (req, res) => {
+    try {
+        const { role } = req.params;
+        if (!role) return res.status(400).json({ status: false, message: 'Role is required' });
+
+        const keys = await Permission.getKeysForRole(role);
+        return res.status(200).json({ status: true, role, permissions: keys });
     } catch (err) {
         return res.status(500).json({ status: false, message: 'Failed to fetch role permissions', error: err.message });
     }
@@ -66,7 +78,7 @@ export const seedPermissions = async (req, res) => {
             },
         }));
         const result = await Permission.bulkWrite(ops, { ordered: false });
-        return res.status(200).json({ status: true, message: 'Seed complete', data: result });
+        return res.status(200).json({ status: true, message: 'Seed complete', result });
     } catch (err) {
         return res.status(500).json({ status: false, message: 'Failed to seed permissions', error: err.message });
     }
@@ -135,7 +147,7 @@ export const setRolePermissions = async (req, res) => {
         return res.status(200).json({
             status: true,
             message: 'Role permissions updated',
-            data: { role, assigned: newKeys, stats: { pulled: pullRes, added: addRes } },
+            role, assigned: newKeys, stats: { pulled: pullRes, added: addRes },
         });
     } catch (err) {
         return res.status(500).json({ status: false, message: 'Failed to set role permissions', error: err.message });
