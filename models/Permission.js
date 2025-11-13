@@ -14,7 +14,7 @@ const { Schema } = mongoose;
 const PermissionSchema = new Schema(
   {
     // e.g. 'items:read', 'inventory:receipt'
-    key: { type: String, unique: true, required: true, trim: true },
+    key: { type: String, unique: true, required: true, trim: true, default:'permissions:read' },
 
     // Optional human readable label
     label: { type: String, trim: true },

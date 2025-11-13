@@ -10,7 +10,7 @@ const router = express.Router();
 
 router.get('/', roleAuth('users:permissions:read'), listPermissions);
 router.get('/roles', roleAuth('roles:read'), listRoles);
-router.get('/by-role', roleAuth('roles:read'), getRolePermissions);
+router.get('/by-role', roleAuth('users:permissions:read'), getRolePermissions);
 // router.post('/seed', roleAuth('users:invite:create'), seedPermissions);
 router.post('/', roleAuth('users:permissions:create'), createPermission);
 router.delete('/:key', roleAuth('users:permissions:delete'), deletePermission);
