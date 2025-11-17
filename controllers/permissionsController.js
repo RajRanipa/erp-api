@@ -2,11 +2,11 @@
 import Permission from '../models/Permission.js';
 
 // Utility: get allowed roles from schema enum
-function getAllowedRoles() {
+export function getAllowedRoles() {
     const schemaPath = Permission.schema.path('roles');
     // roles is an array of String with enum; caster holds the enum values
     const enumVals = schemaPath?.caster?.enumValues || schemaPath?.enumValues || [];
-    return enumVals.length ? enumVals : ['owner', 'manager', 'store_operator', 'production_manager', 'accountant', 'investor'];
+    return enumVals.length ? enumVals : [];
 }
 
 // GET /admin/permissions

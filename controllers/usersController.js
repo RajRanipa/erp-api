@@ -4,8 +4,11 @@ import Invite from '../models/Invite.js';
 import User from '../models/User.js';
 import Company from '../models/Company.js';
 import sendMail from '../utils/sendMail.js'; // your nodemailer/helper
-import { rolePermissions } from '../config/rolePermissions.js';
+import Permission from '../models/Permission.js';
+import { getAllowedRoles } from '../controllers/permissionsController.js';
+import { handleError } from '../utils/errorHandler.js';
 import mongoose from 'mongoose';
+import RefreshToken from '../models/RefreshToken.js';
 
 const hash = (s) => crypto.createHash('sha256').update(s).digest('hex');
 const genToken = () => crypto.randomBytes(32).toString('hex');
@@ -33,8 +36,14 @@ async function forceLogoutEverywhere(userId) {
 export async function createInvite(req, res) {
   console.log('createInvite hit -> ', req.user);
   // requirePerm('users:invite')
-  const { email, role = 'staff' } = req.body || {};
+  const { email, role = 'staff', name = '' } = req.body || {};
   const companyId = req.user.companyId;
+
+  // validation for role
+  const allowedRoles = getAllowedRoles(); // get all allowed roles
+  if (!role || !allowedRoles.includes(role)) {
+    return res.status(400).json({ status: false, message: 'Invalid role' });
+  }
 
   // 1) do not allow inviting an email that already exists as a User (global uniqueness)
   const existing = await User.findOne({ email });
@@ -54,6 +63,8 @@ export async function createInvite(req, res) {
     console.error('Failed to fetch company info for invite:', err);
   }
 
+  const inviteeName = (name || '').trim();
+
   const token = genToken();
   const tokenHash = hash(token);
 
@@ -65,23 +76,44 @@ export async function createInvite(req, res) {
     inviterId: req.user.id || req.user._id || null,
     tokenHash,
     companyName: company?.companyName || '',
+    inviteeName: inviteeName,
     expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 days
   });
 
   const link = `${process.env.CLIENT_URL}/accept-invite?token=${encodeURIComponent(token)}`;
   console.log('link 1', link);
-   await sendMail({
+  await sendMail({
     to: email,
     subject: `You're invited to ${company?.companyName || 'our JNR ERP'}`,
     html: `
-    <table width="100%" height="100%" cellspacing="0" cellpadding="0" border="0" style="background-color: #ffffff;">
+    <table width="100%" cellspacing="0" cellpadding="0" border="0" style="border-radius:8px; background-color:#e2e2e2; padding:24px 10px;">
       <tr>
-        <td style="padding: 16px;">
-          <table width="100%" cellspacing="0" cellpadding="0" border="0">
-            <tr style="padding: 6px;"><td style="font-family: Arial, sans-serif; font-size: 16px; color: #333;">Hello,</td></tr>
-            <tr style="padding: 6px;"><td style="font-family: Arial, sans-serif; font-size: 16px;">You’ve been invited to join <b>${company?.companyName || 'our JNR ERP'}</b> as <b>${role}</b>.</td></tr>
-            <tr style="padding: 6px;"><td><a href="${link}" style="display:inline-block; background-color:#007bff; color:#fff; text-decoration:none; padding:10px 20px; border-radius:4px;">Accept your invite</a></td></tr>
-            <tr style="padding: 6px;"><td style="font-size:12px; color:#777;">(Valid for 7 days)</td></tr>
+        <td align="center">
+          <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px; background-color:#ffffff; border-radius:8px; overflow:hidden; font-family:Arial, sans-serif;">
+            <tr>
+              <td style="padding:20px 18px; border-bottom:1px solid #eee;">
+                <h1 style="margin:0; font-size:18px; color:#222;">${company?.companyName || 'JNR ERP'}</h1>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:20px 18px; font-size:14px; color:#333; line-height:1.6;">
+                <p style="margin:0 0 12px;">Hello${inviteeName ? ' ' + inviteeName : ''},</p>
+                <p style="margin:0 0 12px;">
+                  You’ve been invited to join <b>${company?.companyName || 'our JNR ERP workspace'}</b> as
+                  <b>${role}</b>.
+                </p>
+                <p style="margin:0 0 16px;">
+                  Click the button below to accept your invitation and set up your account. This link is secure and
+                  valid for <b>7 days</b>.
+                </p>
+                <p style="margin:0 0 20px;" align="center">
+                  <a href="${link}" style="display:inline-block; background-color:#007bff; color:#ffffff; text-decoration:none; padding:10px 24px; border-radius:4px; font-size:14px;">Accept your invite</a>
+                </p>
+                <p style="margin:0 0 8px; font-size:12px; color:#777;">
+                  If you did not expect this email, you can safely ignore it.
+                </p>
+              </td>
+            </tr>
           </table>
         </td>
       </tr>
@@ -112,14 +144,33 @@ export async function resendInvite(req, res) {
     to: invite.email,
     subject: `You're invited to ${invite?.companyName || 'our JNR ERP'}`,
     html: `
-    <table width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color: #ffffff;">
+    <table width="100%" cellspacing="0"  cellpadding="0" border="0" style="border-radius:8px; background-color:#e2e2e2; padding:24px 10px;">
       <tr>
-        <td style="padding: 16px;">
-          <table width="100%" cellspacing="0" cellpadding="0" border="0">
-            <tr><td style="font-family: Arial, sans-serif; font-size: 16px; color: #333;">Hello,</td></tr>
-            <tr><td style="font-family: Arial, sans-serif; font-size: 16px;">You’ve been invited to join <b>${invite.companyName}</b> as <b>${invite.role}</b>.</td></tr>
-            <tr><td><a href="${link}" style="display:inline-block; background-color:#007bff; color:#fff; text-decoration:none; padding:10px 20px; border-radius:4px;">Accept your invite</a></td></tr>
-            <tr><td style="font-size:12px; color:#777;">(Valid for 7 days)</td></tr>
+        <td align="center">
+          <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px; background-color:#ffffff; border-radius:8px; overflow:hidden; font-family:Arial, sans-serif;">
+            <tr>
+              <td style="padding:20px 18px; border-bottom:1px solid #eee;">
+                <h1 style="margin:0; font-size:18px; color:#222;">${invite?.companyName || 'JNR ERP'}</h1>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:20px 18px; font-size:14px; color:#333; line-height:1.6;">
+                <p style="margin:0 0 12px;">Hello${invite?.inviteeName ? ' ' + invite.inviteeName : ''},</p>
+                <p style="margin:0 0 12px;">
+                  This is a reminder of your invitation to join <b>${invite?.companyName || 'our JNR ERP workspace'}</b>
+                  as <b>${invite.role}</b>.
+                </p>
+                <p style="margin:0 0 16px;">
+                  Click the button below to accept your invitation. This link is secure and valid for <b>7 days</b> from now.
+                </p>
+                <p style="margin:0 0 20px;" align="center">
+                  <a href="${link}" style="display:inline-block; background-color:#007bff; color:#ffffff; text-decoration:none; padding:10px 24px; border-radius:4px; font-size:14px;">Accept your invite</a>
+                </p>
+                <p style="margin:0 0 8px; font-size:12px; color:#777;">
+                  If you did not expect this email, you can safely ignore it.
+                </p>
+              </td>
+            </tr>
           </table>
         </td>
       </tr>
@@ -149,7 +200,7 @@ export async function validateInvite(req, res) {
   if (!invite) return res.status(410).json({ status: false, message: 'Invalid or expired invite' });
   if (invite.expiresAt < new Date()) return res.status(410).json({ status: false, message: 'Invite expired' });
 
-  res.json({ status: true, data: { email: invite.email, companyName: invite.companyName, role: invite.role } });
+  res.json({ status: true, email: invite.email, companyName: invite.companyName, role: invite.role, name: invite.inviteeName || '' });
 }
 
 export async function acceptInvite(req, res) {
@@ -172,7 +223,6 @@ export async function acceptInvite(req, res) {
     companyId: invite.companyId,
     isSetupCompleted: invite.companyId ? true : false,
     role: invite.role,
-    permissions: rolePermissions[invite.role], // your helper
     status: 'active'
   });
 
@@ -288,7 +338,11 @@ export async function removeUser(req, res) {
     await user.save();
 
     // 5) Optional: clear refresh tokens if you store them
-    // await RefreshToken.deleteMany({ userId: user._id }).catch(() => {});
+    await RefreshToken.deleteMany({ userId: user._id })
+      .catch((error) => {
+        console.error('Login Error:', error);
+        return handleError(res, error);
+      });
 
     return res.json({
       status: true,
@@ -308,7 +362,7 @@ export async function updateUserRole(req, res) {
 
   try {
     // validate role
-    const allowedRoles = Object.keys(rolePermissions);
+    const allowedRoles = getAllowedRoles(); // get all allowed roles
     if (!nextRole || !allowedRoles.includes(nextRole)) {
       return res.status(400).json({ status: false, message: 'Invalid role' });
     }
@@ -334,7 +388,8 @@ export async function updateUserRole(req, res) {
 
     user.role = nextRole;
     // realign permissions with role map
-    user.permissions = rolePermissions[nextRole] || [];
+    const permKeys = await Permission.getKeysForRole(nextRole);
+    user.permissions = permKeys;
     await user.save();
 
     // Invalidate all existing sessions (JWTs + refresh tokens if any)

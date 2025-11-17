@@ -7,12 +7,19 @@ const router = express.Router();
 
 // Signup
 router.post('/signup', Auth.signup);
+router.post('/signup/start', Auth.signupStart);
+router.post('/signup/verify-otp', Auth.signupVerifyOtp);
+router.post('/signup/resend-otp', Auth.signupResendOtp);
 
 // Login
 router.post('/login', Auth.login);
 
 // Logout (CLEAR JWT from cookies)
 router.post('/logout', Auth.logout);
+// NEW: login with OTP
+router.post('/login/start-otp', Auth.loginStartOtp);
+router.post('/login/verify-otp', Auth.loginVerifyOtp);
+router.post('/login/resend-otp', Auth.loginResendOtp);
 
 // Refresh Token
 router.post('/refresh-token', Auth.refreshToken);

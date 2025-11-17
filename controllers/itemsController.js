@@ -1,10 +1,6 @@
 // backend-api/controllers/itemsController.js
 import Item, { STATUS } from "../models/Item.js";
 import Category from "../models/Category.js";
-import ProductType from "../models/ProductType.js";
-import Temperature from "../models/Temperature.js";
-import Density from "../models/Density.js";
-import Dimension from "../models/Dimension.js";
 // import PackingMaterial from "../models/Packing.js";
 import { handleError } from '../utils/errorHandler.js';
 import { applyAuditCreate, applyAuditUpdate } from '../utils/auditHelper.js';

@@ -2,6 +2,7 @@ import packingMaterial from '../models/Packing.js';
 import Temperature from '../models/Temperature.js';
 import Density from '../models/Density.js';
 import Dimension from '../models/Dimension.js';
+import { handleError } from '../utils/errorHandler.js';
 
 const mapDensity = (d) => ({ label: `${d.value}${d.unit ? ' ' + d.unit : ''}`.trim(), value: String(d._id) });
 const mapTemperature = (t) => ({ label: `${t.value}${t.unit ? ' ' + t.unit : ''}`.trim(), value: String(t._id) });
@@ -19,7 +20,8 @@ export const getDensityOptions = async (req, res) => {
     const rows = await Density.find({}).sort({ value: 1 }).lean();
     res.status(200).json(rows.map(mapDensity));
   } catch (err) {
-    res.status(500).json({ message: 'Failed to fetch densities' });
+    console.error('density error', err);
+    handleError(res, err);
   }
 };
 
@@ -30,7 +32,8 @@ export const getTemperatureOptions = async (req, res) => {
     // console.log(rows.map(mapTemperature));
     res.status(200).json(rows.map(mapTemperature));
   } catch (err) {
-    res.status(500).json({ message: 'Failed to fetch temperatures' });
+    console.error('temperature error', err);
+    handleError(res, err);
   }
 };
 
@@ -39,7 +42,8 @@ export const getDimensionOptions = async (req, res) => {
     const rows = await Dimension.find({}).sort({ length: 1, width: 1, thickness: 1 }).lean();
     res.status(200).json(rows.map(mapDimension));
   } catch (err) {
-    res.status(500).json({ message: 'Failed to fetch dimensions' });
+    console.error('dimension error', err);
+    handleError(res, err);
   }
 };
 
@@ -72,8 +76,8 @@ export const getDimensionOptionsById = async (req, res) => {
     // console.log(rows);
     return res.status(200).json(rows.map(mapDimension));
   } catch (err) {
-    console.error('getDimensionOptionsById error', err);
-    return res.status(500).json({ message: 'Failed to fetch dimensions' });
+    console.error('dimension options error', err);
+    handleError(res, err);
   }
 };
 
@@ -97,8 +101,8 @@ export const getDensityOptionsById = async (req, res) => {
 
     return res.status(200).json(rows.map(mapDensity));
   } catch (err) {
-    console.error('getDensityOptionsById error', err);
-    return res.status(500).json({ message: 'Failed to fetch densities' });
+    console.error('density options error', err);
+    handleError(res, err);
   }
 };
 
@@ -122,8 +126,8 @@ export const getTemperatureOptionsById = async (req, res) => {
 
     return res.status(200).json(rows.map(mapTemperature));
   } catch (err) {
-    console.error('getTemperatureOptionsById error', err);
-    return res.status(500).json({ message: 'Failed to fetch temperatures' });
+    console.error('temperature options error', err);
+    handleError(res, err);
   }
 };
 
@@ -143,7 +147,8 @@ export const getAllParameterOptions = async (req, res) => {
       packing: packs.map(mapPacking),
     });
   } catch (err) {
-    res.status(500).json({ message: 'Failed to fetch parameters' });
+    console.error('parameter error', err);
+    handleError(res, err);
   }
 };
 // ---------- CREATE / SAVE CONTROLLERS ----------
@@ -175,7 +180,7 @@ export const createDensity = async (req, res) => {
       // fall through to generic error if not found for some reason
     } else {
       console.error('Failed to create dimension', err);
-      return res.status(500).json({ message: 'Failed to create density' });
+      handleError(res, err);
     }
   }
 };
@@ -208,7 +213,7 @@ export const createTemperature = async (req, res) => {
       // fall through to generic error if not found for some reason
     } else {
       console.error('Failed to create dimension', err);
-      return res.status(500).json({ message: 'Failed to create temperature' });
+      handleError(res, err);
     }
   }
 };
@@ -275,7 +280,7 @@ export const createDimension = async (req, res) => {
     }
   } catch (err) {
     console.error('createDimension error', err);
-    return res.status(500).json({ message: 'Failed to create dimension' });
+    handleError(res, err);
   }
 };
 
@@ -317,6 +322,7 @@ export const createDi_old_mension = async (req, res) => {
     // Should not reach here
     return res.status(500).json({ message: 'Unexpected error creating dimension' });
   } catch (err) {
-    return res.status(500).json({ message: 'Failed to create dimension' });
+    console.error('createDimension error', err);
+    handleError(res, err);
   }
 };

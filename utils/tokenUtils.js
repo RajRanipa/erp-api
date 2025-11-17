@@ -1,5 +1,5 @@
 import jwt from 'jsonwebtoken';
-import { rolePermissions } from '../config/rolePermissions.js';
+import Permission from '../models/Permission.js';
 
 export const ACCESS_TOKEN_EXPIRE_MINUTES = 15;
 export const REFRESH_TOKEN_EXPIRE_DAYS = 7;
@@ -14,20 +14,23 @@ export const REFRESH_TOKEN_EXPIRE_DAYS = 7;
 //   );
 // };
 
-export const generateAccessToken = (user) => {
+export const generateAccessToken = async (user) => {
   // console.log("Generating Access Token for user:", user);
+  const permKeys = await Permission.distinct('key', { roles: user?.role });
 
   const payload = {
     id: user._id || user.id,
     companyId: user.companyId || null,
     role: user.role || 'employee',
     isSetupCompleted: user.isSetupCompleted || false,
-    permissions: rolePermissions[user.role] || [],
+    permissions: Array.isArray(permKeys) ? permKeys : [],
   };
-
-  return jwt.sign(payload, process.env.JWT_ACCESS_SECRET, {
+  // console.log("generateAccessToken payload -> ", payload)
+  const newToken = jwt.sign(payload, process.env.JWT_ACCESS_SECRET, {
     expiresIn: `${ACCESS_TOKEN_EXPIRE_MINUTES}m`,
   });
+  // console.log("generateAccessToken newToken -> ", newToken)
+  return newToken
 };
 
 // Generate refresh token (long-lived)

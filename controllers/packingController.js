@@ -1,5 +1,6 @@
 import Packing from "../models/Packing.js";
 import ProductType from "../models/ProductType.js";
+import { handleError } from '../utils/errorHandler.js';
 
 // Create new packing material
 export const createPacking = async (req, res) => {
@@ -20,7 +21,7 @@ export const createPacking = async (req, res) => {
     res.status(201).json({ message: "Packing material created successfully", packing });
   } catch (error) {
     console.error("packing error ", error)
-    res.status(400).json({ message: "Error creating packing material", error });
+    handleError(res, error);
   }
 };
 
@@ -39,7 +40,8 @@ export const getAllPacking = async (req, res) => {
     ));
     res.status(200).json(mapped);
   } catch (error) {
-    res.status(500).json({ message: "Error fetching packing materials", error });
+    console.error("catch error ", error)
+    handleError(res, error);
   }
 };
 
@@ -70,7 +72,7 @@ export const getPackingById = async (req, res) => {
     return res.status(200).json(mapped);
   } catch (error) {
     console.error('getPackingById error', error);
-    return res.status(500).json({ message: 'Error fetching packing materials', error });
+    handleError(res, error);
   }
 };
 
@@ -83,7 +85,8 @@ export const updatePacking = async (req, res) => {
     }
     res.status(200).json(packing);
   } catch (error) {
-    res.status(400).json({ message: "Error updating packing material", error });
+    console.error("catch error ", error)
+    handleError(res, error);
   }
 };
 
@@ -96,6 +99,7 @@ export const deletePacking = async (req, res) => {
     }
     res.status(200).json({ message: "Packing material deleted successfully" });
   } catch (error) {
-    res.status(500).json({ message: "Error deleting packing material", error });
+    console.error("catch error ", error)
+    handleError(res, error);
   }
 };

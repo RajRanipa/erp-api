@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import Batch from '../models/Batches.js';
 import RawMaterial from '../models/Rawmaterial.js';
 import Campaign from '../models/Campaign.js';
+import { handleError } from '../utils/errorHandler.js';
 
 // Standardized HTTP error response helper
 const sendHttpError = (res, err) => {

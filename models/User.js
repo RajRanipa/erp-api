@@ -62,7 +62,12 @@ const userSchema = new mongoose.Schema(
       default: false,
     },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null, timestamps: true },
-    status: { type: String, enum: ['pending', 'active', 'suspended', 'disabled'], default: 'active' },
+    status: {
+      type: String,
+      enum: ['pending', 'active', 'suspended', 'disabled'],
+      default: 'pending',
+    },
+    lastSeenAt: { type: Date },
     disabledAt: { type: Date },
     disabledBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     // auth hygiene — bump to invalidate existing JWTs
