@@ -29,7 +29,7 @@ function buildSignupOtpEmailHtml({ email, otp, mode = 'signup' }) {
   const borderColor = '#e5e7eb'; // gray-200
   const bgColor = '#f9fafb'; // gray-50
   const APP_URL = process.env.CLIENT_URL || 'https://erp.orientfibertech.com/';
-  console.log('APP_URL', APP_URL)
+  console.log('APP_URL', APP_URL) // https://erp.orientfibertech.com/
   const isLogin = mode === 'login';
 
   const title = isLogin

@@ -223,7 +223,8 @@ export async function acceptInvite(req, res) {
     companyId: invite.companyId,
     isSetupCompleted: invite.companyId ? true : false,
     role: invite.role,
-    status: 'active'
+    status: 'active',
+    isVerified: true
   });
 
   invite.status = 'accepted';
