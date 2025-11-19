@@ -5,6 +5,8 @@ import auth from '../middleware/authMiddleware.js';
 const router = express.Router();
 
 
+// Check Authentication Status (Authenticated users)
+router.get('/check-auth', auth, Auth.checkAuth);
 // Signup
 router.post('/signup', Auth.signup);
 router.post('/signup/start', Auth.signupStart);
@@ -24,8 +26,7 @@ router.post('/login/resend-otp', Auth.loginResendOtp);
 // Refresh Token
 router.post('/refresh-token', Auth.refreshToken);
 
-// Check Authentication Status (Authenticated users)
-router.get('/check-auth',auth, Auth.checkAuth);
+
 
 // const res = await axiosInstance.put('/change-theme');
 router.put('/change-preferences', protect, Auth.changePreferences);
