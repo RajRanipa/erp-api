@@ -102,7 +102,7 @@ export async function receive(req, res) {
   try {
     // console.log("inventory receive controller called ", req.body);
     const { itemId, warehouseId, qty, uom, note = '', bin = null, batchNo = null, refType = null, refId = null } = req.body || {};
-    const { companyId, _id: userId } = req.user || {};
+    const { companyId, userId} = req.user || {};
     if (!companyId) throw new Error('Missing companyId on user');
     if (!itemId || !warehouseId || !uom) throw new Error('itemId, warehouseId, uom are required');
     const result = await svcReceive({
@@ -123,7 +123,8 @@ export async function receive(req, res) {
 export async function issue(req, res) {
   try {
     const { itemId, warehouseId, qty, uom, note = '', bin = null, batchNo = null, refType = null, refId = null } = req.body || {};
-    const { companyId, _id: userId } = req.user || {};
+    const { companyId, userId } = req.user || {};
+    console.log("inventory issue controller called ", req.user, userId);
     if (!companyId) throw new Error('Missing companyId on user');
     if (!itemId || !warehouseId || !uom) throw new Error('itemId, warehouseId, uom are required');
     const result = await svcIssue({
@@ -143,7 +144,7 @@ export async function issue(req, res) {
 export async function adjust(req, res) {
   try {
     const { itemId, warehouseId, qty, uom, note = '', bin = null, batchNo = null, refType = 'ADJUST', refId = null } = req.body || {};
-    const { companyId, _id: userId } = req.user || {};
+    const { companyId, userId } = req.user || {};
     if (!companyId) throw new Error('Missing companyId on user');
     if (!itemId || !warehouseId || !uom) throw new Error('itemId, warehouseId, uom are required');
     const result = await svcAdjust({
@@ -163,7 +164,7 @@ export async function adjust(req, res) {
 export async function transfer(req, res) {
   try {
     const { itemId, fromWarehouseId, toWarehouseId, qty, uom, note = '', bin = null, batchNo = null, refId = null } = req.body || {};
-    const { companyId, _id: userId } = req.user || {};
+    const { companyId, userId } = req.user || {};
     if (!companyId) throw new Error('Missing companyId on user');
     if (!itemId || !fromWarehouseId || !toWarehouseId || !uom) throw new Error('itemId, fromWarehouseId, toWarehouseId, uom are required');
     const result = await svcTransfer({
@@ -195,7 +196,7 @@ export async function repack(req, res) {
       refId = null,
     } = req.body || {};
 
-    const { companyId, _id: userId } = req.user || {};
+    const { companyId, userId } = req.user || {};
     if (!companyId) throw new Error('Missing companyId on user');
     if (!fromItemId || !toItemId || !warehouseId || !uom) {
       throw new Error('fromItemId, toItemId, warehouseId, uom are required');
@@ -228,7 +229,7 @@ export async function repack(req, res) {
 export async function reserve(req, res) {
   try {
     const { itemId, warehouseId, qty, uom, bin = null, batchNo = null } = req.body || {};
-    const { companyId, _id: userId } = req.user || {};
+    const { companyId, userId } = req.user || {};
     if (!companyId) throw new Error('Missing companyId on user');
     if (!itemId || !warehouseId || !uom) throw new Error('itemId, warehouseId, uom are required');
     const snap = await svcReserve({ companyId, itemId, warehouseId, uom, qty, bin, batchNo, by: userId });

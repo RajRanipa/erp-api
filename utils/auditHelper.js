@@ -8,6 +8,6 @@ export const applyAuditCreate = (req, data = {}) => ({
 
 export const applyAuditUpdate = (req, data = {}) => ({
   ...data,
-  updatedBy: req.user?._id,
+  updatedBy: req.user?.id || req.user?._id,
   updatedAt: new Date(),
 });

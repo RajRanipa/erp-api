@@ -119,7 +119,7 @@ export const createCampaign = async (req, res) => {
       totalRawIssued: Number(totalRawIssued) || 0,
       totalFiberProduced: Number(totalFiberProduced) || 0,
       meltReturns: Number(meltReturns) || 0,
-      createdBy: req.user?.id || req.user?._id || undefined,
+      createdBy: req.user?.userId || req.user?.id || undefined,
     });
 
     const saved = await doc.save();

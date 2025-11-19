@@ -94,6 +94,7 @@ export async function postMovement({
         throw new Error('Insufficient stock: onHand would go below zero');
       }
     }
+    console.log('postMovement signedQty by', by);
     // 1) Write ledger row
     const [ledger] = await InventoryLedger.create([{
       companyId, itemId, productType, warehouseId, bin, batchNo,
@@ -422,6 +423,7 @@ export async function getSnapshot(filter = {}, itemFilter = {}) {
 export async function getLedger(filter = {}, opts = { limit: 100, sort: { at: -1 } }) {
   return InventoryLedger.find(filter)
     .populate('warehouseId', 'name')
+    .populate('by', 'fullName')
     .populate({
       path: 'itemId',
       select: 'name density temperature packing dimension',

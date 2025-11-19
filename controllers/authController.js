@@ -1120,7 +1120,7 @@ export async function logout(req, res) {
 // @route POST /logout-all
 export async function logoutAll(req, res) {
   try {
-    const userId = req.user?.id;
+    const userId = req.user?.userId;
     if (!userId) return res.status(401).json({ status: false, message: 'Unauthorized' });
 
     await RefreshToken.deleteMany({ userId });
@@ -1145,7 +1145,7 @@ export async function logoutAll(req, res) {
 }
 
 export async function changePreferences(req, res) {
-  const userId = req.user?.id;
+  const userId = req.user?.userId;
   const { theme, language, notifications } = req.body;
   // console.log("req.user", req.user.id) // this is undefine becuse middleware set req.user to this json { iat: 1745828714, exp: 1745829614 }
   if (!userId) {

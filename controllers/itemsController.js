@@ -201,6 +201,7 @@ export const updateItem = async (req, res) => {
     // normalize incoming update payload
     const normalized = { ...req.body };
     // Stamp updatedBy from authenticated user
+    console.log('req.user in updateItem', req.user);
     const updateWithAudit = applyAuditUpdate(req, normalized);
     console.log('updateWithAudit applyAuditUpdate', updateWithAudit);
     // If SKU is being updated, check uniqueness
@@ -244,7 +245,7 @@ export const deleteItem = async (req, res) => {
     }
     // Prefer archiving instead of immediate delete
     await item.setStatus(STATUS.ARCHIVED, {
-      userId: req.user?._id,
+      userId: req.user?.userId || req.user?._id,
       reason: 'Soft delete via delete endpoint',
       companyId: req.user?.companyId
     });
@@ -265,7 +266,7 @@ export const updateItemStatus = async (req, res) => {
     if (!item) return res.status(404).json({ error: 'Item not found' });
 
     await item.setStatus(to, {
-      userId: req.user?._id,
+      userId:  req.user?.userId || req.user?._id,
       reason: reason || '',
       companyId: req.user?.companyId
     });

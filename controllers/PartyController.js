@@ -224,8 +224,8 @@ export const createParty = async (req, res) => {
 
     const doc = await Party.create({
       ...normalized,
-      createdBy: req.user?._id,
-      updatedBy: req.user?._id,
+      createdBy: req.user?.userId || req.user?._id,
+      updatedBy: req.user?.userId || req.user?._id,
     });
 
     const lean = await Party.findById(doc._id).lean({ getters: true });
@@ -296,7 +296,7 @@ export const updateParty = async (req, res) => {
 
     const updated = await Party.findByIdAndUpdate(
       id,
-      { ...normalized, updatedBy: req.user?._id },
+      { ...normalized, updatedBy: req.user?.userId || req.user?._id },
       { new: true, runValidators: true }
     ).lean({ getters: true });
 
@@ -324,7 +324,7 @@ export const patchPartyStatus = async (req, res) => {
 
     const updated = await Party.findByIdAndUpdate(
       id,
-      { status, updatedBy: req.user?._id },
+      { status, updatedBy: req.user?.userId || req.user?._id },
       { new: true }
     ).lean({ getters: true });
 

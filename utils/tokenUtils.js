@@ -19,7 +19,7 @@ export const generateAccessToken = async (user) => {
   const permKeys = await Permission.distinct('key', { roles: user?.role });
 
   const payload = {
-    id: user._id || user.id,
+    userId: user._id || user.id,
     companyId: user.companyId || null,
     role: user.role || 'employee',
     isSetupCompleted: user.isSetupCompleted || false,

@@ -73,7 +73,7 @@ export async function createInvite(req, res) {
     companyId,
     email,
     role,
-    inviterId: req.user.id || req.user._id || null,
+    inviterId: req.user.userId || req.user.id || req.user._id || null,
     tokenHash,
     companyName: company?.companyName || '',
     inviteeName: inviteeName,

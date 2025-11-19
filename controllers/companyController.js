@@ -249,7 +249,7 @@ export async function createCompany(req, res) {
 
     // Link user -> company
     await User.findByIdAndUpdate(
-      user.id || user._id,
+      user.userId || user.id || user._id,
       { $set: { companyId: company._id }, $setOnInsert: {} },
       { new: true }
     );
@@ -489,7 +489,7 @@ export async function finishCompany(req, res) {
     // Mirror isSetupCompleted to the User document (true at this point)
     try {
       await User.findByIdAndUpdate(
-        user.id || user._id,
+        user.userId || user.id || user._id,
         { $set: { isSetupCompleted: true } },
         { new: true }
       );
@@ -499,7 +499,7 @@ export async function finishCompany(req, res) {
 
     // Refresh access token with updated flags
     const payload = {
-      id: user._id || user.id,
+      id: user?.userId || user?._id || user?.id,
       companyId: saved._id,
       role: user.role || 'employee',
       isSetupCompleted: true,
