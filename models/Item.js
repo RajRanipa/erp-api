@@ -184,6 +184,8 @@ ItemSchema.pre('save', async function (next) {
 ItemSchema.pre('save', async function (next) {
   // Only enforce for categoryKey 'PACKING' and defined brandType
   if (this.categoryKey === 'PACKING') {
+    const trimmedGrade = this.grade && String(this.grade).trim();
+
     // dimension is required for packing items
     if (!this.productType) {
       return next(new Error('product type is required for packing items'));
@@ -191,20 +193,24 @@ ItemSchema.pre('save', async function (next) {
     if (!this.dimension) {
       return next(new Error('dimension is required for packing items'));
     }
-    // If brandType is NOT provided, enforce uniqueness on (categoryKey, productType, name)
+    // If brandType is NOT provided, enforce uniqueness on (categoryKey, productType, name, dimension)
+    // and, when grade is provided, include grade in the unique combination as well.
     if (!this.brandType && !this.productColor) {
       const queryNoBrand = {
         categoryKey: 'PACKING',
         productType: this.productType,
         name: this.name,
-        dimension: this.dimension
+        dimension: this.dimension,
       };
-      // If productColor is set on the current doc, we still want to allow duplicates that differ only by productColor
-      // (so we do NOT include productColor in the uniqueness criteria when brandType is missing).
+
+      // If grade is provided, make it part of the unique combo
+      if (trimmedGrade) {
+        queryNoBrand.grade = trimmedGrade;
+      }
 
       const existingNoBrand = await mongoose.models.Item.findOne(queryNoBrand).lean();
       if (existingNoBrand && String(existingNoBrand._id) !== String(this._id)) {
-        return next(new Error('Duplicate PACKING item detected: same categoryKey, productType, name and dimension  already exist'));
+        return next(new Error('Duplicate PACKING item detected: same categoryKey, productType, name, dimension and grade already exist'));
       }
     }
     if (this.brandType) {
@@ -214,8 +220,13 @@ ItemSchema.pre('save', async function (next) {
         productType: this.productType,
         name: this.name,
         brandType: this.brandType,
-        dimension : this.dimension
+        dimension: this.dimension,
       };
+
+      // If grade is provided, make it part of the unique combo
+      if (trimmedGrade) {
+        query.grade = trimmedGrade;
+      }
 
       // If productColor exists and is not empty, include it in uniqueness check
       if (this.productColor && this.productColor.trim() !== '') {
@@ -225,9 +236,10 @@ ItemSchema.pre('save', async function (next) {
         query.$or = [
           { productColor: { $exists: false } },
           { productColor: null },
-          { productColor: '' }
+          { productColor: '' },
         ];
       }
+
       // Check for existing document
       const existing = await mongoose.models.Item.findOne(query);
 
@@ -235,6 +247,7 @@ ItemSchema.pre('save', async function (next) {
         let errorMessage = 'Duplicate PACKING item detected';
         if (this.productColor) errorMessage += ` with same productColor "${this.productColor}"`;
         if (this.dimension) errorMessage += ` and same dimension`;
+        if (trimmedGrade) errorMessage += ` and same grade "${trimmedGrade}"`;
         return next(new Error(errorMessage));
       }
     }
@@ -298,17 +311,23 @@ ItemSchema.pre('save', async function (next) {
         }
       }
 
-      // Build uniqueness query depending on bulk vs non-bulk
+      const trimmedGradeFG = this.grade && String(this.grade).trim();
+
       const baseQuery = { categoryKey: 'FG', productType: this.productType };
+
+      // If grade is provided, make it part of the unique combo
+      if (trimmedGradeFG) {
+        baseQuery.grade = trimmedGradeFG;
+      }
+
       if (!isBulk) {
-        // uniqueness: productType + dimension + density + temperature + packing
+        // uniqueness: productType + dimension + density + temperature + packing (+ optional grade)
         baseQuery.dimension = this.dimension;
-        // console.log('baseQuery.dimension', pt);
-        if(pt && pt.name !== "board") baseQuery.density = this.density;
+        if (pt && pt.name !== 'board') baseQuery.density = this.density;
         baseQuery.temperature = this.temperature;
         baseQuery.packing = this.packing;
       } else {
-        // bulk uniqueness: productType + temperature + packing
+        // bulk uniqueness: productType + temperature + packing (+ optional grade)
         baseQuery.temperature = this.temperature;
         baseQuery.packing = this.packing;
       }
@@ -317,8 +336,8 @@ ItemSchema.pre('save', async function (next) {
       if (this._id) baseQuery._id = { $ne: this._id };
 
       const existingFG = await mongoose.models.Item.findOne(baseQuery).lean();
-      console.log('baseQuery -->> ', baseQuery);
-      console.log('existingFG -->> ', existingFG);
+      // console.log('baseQuery -->> ', baseQuery);
+      // console.log('existingFG -->> ', existingFG);
       if (existingFG) {
         return next(new Error('Duplicate product item detected for the provided combination of fields'));
       }

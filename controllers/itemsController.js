@@ -76,7 +76,8 @@ export const createItem = async (req, res) => {
     const derivedKey = deriveCategoryKeyFromName(cat.name);
     if (derivedKey) payload.categoryKey = derivedKey;
     // Apply audit fields from authenticated user (createdBy, updatedBy, companyId)
-    payload =  applyAuditCreate(req, payload);
+    payload = applyAuditCreate(req, payload);
+    console.log('payload applyAuditCreate', payload);
     const error = validateItemFields(payload, cat.name);
     // console.log('error', error);
     if (error) {
@@ -147,11 +148,11 @@ export const getAllItems = async (req, res) => {
     }
 
     const items = await Item.find(filter)
-    .populate('temperature', 'value unit')
-    .populate('density', 'value unit')
-    .populate('packing', 'name brandType productColor')
-    .populate('dimension', 'width length thickness unit')
-    .lean();
+      .populate('temperature', 'value unit')
+      .populate('density', 'value unit')
+      .populate('packing', 'name brandType productColor')
+      .populate('dimension', 'width length thickness unit')
+      .lean();
 
     // // console.log('items in getAllItems (count)', items?.length || 0, 'items', items);
     return res.json(items);
@@ -201,6 +202,7 @@ export const updateItem = async (req, res) => {
     const normalized = { ...req.body };
     // Stamp updatedBy from authenticated user
     const updateWithAudit = applyAuditUpdate(req, normalized);
+    console.log('updateWithAudit applyAuditUpdate', updateWithAudit);
     // If SKU is being updated, check uniqueness
     if (normalized.sku && normalized.sku !== item.sku) {
       const existing = await Item.findOne({ sku: normalized.sku });
@@ -283,6 +285,8 @@ export const getPackingItems = async (req, res) => {
     const packings = await Item.find({ categoryKey: 'PACKING' })
       .populate('productType', 'name')
       .populate('dimension', 'width length thickness unit')
+      .populate('createdBy', 'fullName')
+      .populate('updatedBy', 'fullName')
       .lean();
     // // console.log('packings', packings[0]); // i need to give productType name or i need to populate name of productType
     return res.status(200).json(packings);
@@ -301,6 +305,8 @@ export const getFinishedItems = async (req, res) => {
       .populate('density', 'value unit')
       .populate('temperature', 'value unit')
       .populate('packing', 'name brandType productColor')
+      .populate('createdBy', 'fullName')
+      .populate('updatedBy', 'fullName')
       .lean();
 
     // // console.log('FG', mapFG[0]); // i need to give productType name or i need to populate name of productType
@@ -314,7 +320,10 @@ export const getRawItems = async (req, res) => {
   try {
     // console.log('getRawItems');
     // Simple fixed query: only items with categoryKey PACKING
-    const packings = await Item.find({ categoryKey: 'RAW' }).lean();
+    const packings = await Item.find({ categoryKey: 'RAW' })
+      .populate('createdBy', 'fullName')
+      .populate('updatedBy', 'fullName')
+      .lean();
     // console.log('RAW', packings[0]);
 
     return res.status(200).json(packings);
@@ -416,12 +425,12 @@ export const getItemUomById = async (req, res) => {
     // Multi-tenant safety: prefer companyId from auth if available
     const companyId = req.user?.companyId || req.user?.company?._id || req.user?.company || null;
     const query = companyId ? { _id: id, companyId } : { _id: id };
-        // Select a broad set of possible UOM fields to be safe with schema variants
+    // Select a broad set of possible UOM fields to be safe with schema variants
     const projection = {
       UOM: 1,
       _id: 0,
     };
-        const doc = await Item.findOne(query).select(projection).lean();
+    const doc = await Item.findOne(query).select(projection).lean();
     if (!doc) {
       return res.status(404).json({ status: false, message: 'Item not found' });
     }

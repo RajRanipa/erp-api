@@ -879,7 +879,7 @@ export async function login(req, res) {
     });
 
     // console.log("Domain_Name : ", process.env.Domain_Name, process.env.Domain_Name.includes('localhost') ? '' : process.env.Domain_Name,)
-    console.log('accessToken from login ', accessToken);
+    // console.log('accessToken from login ', accessToken);
     res.cookie('accessToken', accessToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
