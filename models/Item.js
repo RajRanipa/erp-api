@@ -50,7 +50,7 @@ const ItemSchema = new Schema({
   raw_specificField1: { type: String },
   raw_specificField2: { type: String },
   // Optional grade for raw materials. When present, name+grade+categoryKey(RAW) must be unique.
-  grade: { type: String, trim: true },
+  grade: { type: String, trim: true, lowercase: true },
 
   // Product / FG specific
   productType: { type: Schema.Types.ObjectId, ref: 'ProductType' },
@@ -204,9 +204,9 @@ ItemSchema.pre('save', async function (next) {
       };
 
       // If grade is provided, make it part of the unique combo
-      if (trimmedGrade) {
-        queryNoBrand.grade = trimmedGrade;
-      }
+      // if (trimmedGrade) {
+        queryNoBrand.grade = trimmedGrade || '';
+      // }
 
       const existingNoBrand = await mongoose.models.Item.findOne(queryNoBrand).lean();
       if (existingNoBrand && String(existingNoBrand._id) !== String(this._id)) {
@@ -224,9 +224,9 @@ ItemSchema.pre('save', async function (next) {
       };
 
       // If grade is provided, make it part of the unique combo
-      if (trimmedGrade) {
-        query.grade = trimmedGrade;
-      }
+      // if (trimmedGrade) {
+        query.grade = trimmedGrade || '';
+      // }
 
       // If productColor exists and is not empty, include it in uniqueness check
       if (this.productColor && this.productColor.trim() !== '') {
@@ -270,6 +270,7 @@ ItemSchema.pre('save', async function (next) {
       const query = {
         categoryKey: 'RAW',
         name: this.name,
+        grade:'',
       };
       if (this._id) query._id = { $ne: this._id };
       const existingRaw = await mongoose.models.Item.findOne(query).lean();
@@ -316,9 +317,9 @@ ItemSchema.pre('save', async function (next) {
       const baseQuery = { categoryKey: 'FG', productType: this.productType };
 
       // If grade is provided, make it part of the unique combo
-      if (trimmedGradeFG) {
-        baseQuery.grade = trimmedGradeFG;
-      }
+      // if (trimmedGradeFG) {
+        baseQuery.grade = trimmedGradeFG || '';
+      // }
 
       if (!isBulk) {
         // uniqueness: productType + dimension + density + temperature + packing (+ optional grade)
@@ -336,8 +337,8 @@ ItemSchema.pre('save', async function (next) {
       if (this._id) baseQuery._id = { $ne: this._id };
 
       const existingFG = await mongoose.models.Item.findOne(baseQuery).lean();
-      // console.log('baseQuery -->> ', baseQuery);
-      // console.log('existingFG -->> ', existingFG);
+      console.log('baseQuery -->> ', baseQuery);
+      console.log('existingFG -->> ', existingFG);
       if (existingFG) {
         return next(new Error('Duplicate product item detected for the provided combination of fields'));
       }
