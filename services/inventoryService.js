@@ -372,7 +372,7 @@ export async function getSnapshot(filter = {}, itemFilter = {}) {
     .populate('warehouseId', 'name')
     .populate({
       path: 'itemId',
-      select: 'name categoryKey productType density temperature packing dimension',
+      select: 'name categoryKey productType density temperature packing dimension grade',
       populate: [
         { path: 'density', select: 'value unit' },
         { path: 'temperature', select: 'value unit' },
