@@ -1,8 +1,8 @@
-import packingMaterial from '../models/Packing.js';
 import Temperature from '../models/Temperature.js';
 import Density from '../models/Density.js';
 import Dimension from '../models/Dimension.js';
 import { handleError } from '../utils/errorHandler.js';
+import Item from '../models/Item.js';
 
 const mapDensity = (d) => ({ label: `${d.value}${d.unit ? ' ' + d.unit : ''}`.trim(), value: String(d._id) });
 const mapTemperature = (t) => ({ label: `${t.value}${t.unit ? ' ' + t.unit : ''}`.trim(), value: String(t._id) });
@@ -137,7 +137,7 @@ export const getAllParameterOptions = async (req, res) => {
       Density.find({}).sort({ value: 1 }).lean(),
       Temperature.find({}).sort({ value: 1 }).lean(),
       Dimension.find({}).sort({ length: 1, width: 1, thickness: 1 }).lean(),
-      packingMaterial.find({}).sort({ productName: 1 }).lean(),
+      Item.find({}).sort({ productName: 1 }).lean(),
     ]);
 
     res.status(200).json({

@@ -7,11 +7,8 @@ import chalk from 'chalk';
 import cookieParser from 'cookie-parser';
 import path from 'path';
 
-import productRoutes from './routes/productRoutes.js';
 // import productionRoutes from './routes/productionRoutes.js';
-import rawmaterialRoutes from './routes/rawmaterialRoutes.js';
 import producttypeRoutes from './routes/producttypeRoutes.js';
-import packingRoutes from './routes/packingRoutes.js';
 import parameterRoutes from './routes/parameterRoutes.js';
 import categoryRoutes from './routes/categoryRoutes.js';
 import campaignRoutes from './routes/campaignRoutes.js';
@@ -72,11 +69,9 @@ app.get('/', (req, res) => {
 
 // Use routes
 app.use('/auth',authRoutes); // This makes the route http://localhost:5000/api/send-contact-email
-app.use('/api/products', productRoutes);
 // app.use('/api', productionRoutes);
-app.use('/api/raw', rawmaterialRoutes);
+// app.use('/api/raw', rawmaterialRoutes);
 app.use('/api/product-type', producttypeRoutes);
-// app.use('/api/packings', packingRoutes);
 app.use('/api', parameterRoutes);
 app.use('/api/category', categoryRoutes);
 app.use('/api/campaigns', campaignRoutes);

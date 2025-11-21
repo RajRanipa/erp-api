@@ -945,7 +945,7 @@ export async function refreshToken(req, res) {
   try {
     // console.log("Verifying refresh token...");
     const decoded = jwt.verify(token, process.env.JWT_REFRESH_SECRET);
-    
+    console.log("Verified refresh token.", decoded);
     // ✅ Use model method to find matching hashed token
     const existingToken = await RefreshToken.findMatchingToken(token, decoded.userId);
     if (!existingToken) {

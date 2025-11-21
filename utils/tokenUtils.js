@@ -37,7 +37,7 @@ export const generateAccessToken = async (user) => {
 export const generateRefreshToken = (user) => {
   // console.log("Generating Refresh Token for user:", 'user =');
   return jwt.sign(
-    { id: user._id || user.id, email: user.email },
+    { userId: user._id || user.id, email: user.email },
     process.env.JWT_REFRESH_SECRET,
     { expiresIn: `${REFRESH_TOKEN_EXPIRE_DAYS}d` }
   );

@@ -1,7 +1,6 @@
 // backend-api/controllers/itemsController.js
 import Item, { STATUS } from "../models/Item.js";
 import Category from "../models/Category.js";
-// import PackingMaterial from "../models/Packing.js";
 import { handleError } from '../utils/errorHandler.js';
 import { applyAuditCreate, applyAuditUpdate } from '../utils/auditHelper.js';
 

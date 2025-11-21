@@ -1,9 +1,8 @@
 // controllers/productionController.js
-import Product from '../models/Product.js';
 import RawMaterial from '../models/Rawmaterial.js';
 import BOM from '../models/BOM.js';
-// import Inventory from '../models/InventoryMove.js';
 import WorkOrder from '../models/WorkOrder.js'; // Import the new WorkOrder model
+import Item from '../models/Item.js';
 
 export const createWorkOrder = async (req, res) => {
     try {
@@ -126,7 +125,7 @@ export const updateWorkOrder = async (req, res) => {
         // --- Logic for handling 'Complete' status and updating Inventory ---
         if (newStatus === 'Complete') {
             // Find the product details to get its type (blanket, bulk, etc.)
-            const productDetails = await Product.findById(workOrder.product);
+            const productDetails = await Item.findById(workOrder.product);
             if (!productDetails) {
                 return res.status(404).json({ message: 'Associated product not found for this work order.' });
             }
@@ -188,7 +187,7 @@ export const rePackProduct = async (req, res) => {
         }
 
         // 1. Find the product to ensure it exists and get its unit
-        const product = await Product.findById(productId);
+        const product = await Item.findById(productId);
         if (!product) {
             return res.status(404).json({ message: 'Product not found.' });
         }
