@@ -945,7 +945,7 @@ export async function refreshToken(req, res) {
   try {
     // console.log("Verifying refresh token...");
     const decoded = jwt.verify(token, process.env.JWT_REFRESH_SECRET);
-    console.log("Verified refresh token.", decoded);
+    // console.log("Verified refresh token.", decoded);
     // ✅ Use model method to find matching hashed token
     const existingToken = await RefreshToken.findMatchingToken(token, decoded.userId);
     if (!existingToken) {
@@ -1142,49 +1142,67 @@ export async function logoutAll(req, res) {
     console.error('Logout all error:', err);
     return res.status(500).json({ status: false, message: 'Server error during logout all' });
   }
-}
+} 
 
-export async function changePreferences(req, res) {
-  const userId = req.user?.userId;
-  const { theme, language, notifications } = req.body;
-  // console.log("req.user", req.user.id) // this is undefine becuse middleware set req.user to this json { iat: 1745828714, exp: 1745829614 }
-  if (!userId) {
-    return res.status(401).json({ status: false, message: 'Unauthorized: No user found in request.' });
-  }
-
-  // Basic validation
-  if (!['light', 'dark', 'system'].includes(theme)) {
-    return res.status(400).json({ status: false, message: 'Invalid theme selected.' });
-  }
-  if (!['en', 'hi'].includes(language)) {
-    return res.status(400).json({ status: false, message: 'Invalid language selected.' });
-  }
-  if (typeof notifications?.emailUpdates !== 'boolean' || typeof notifications?.inAppAlerts !== 'boolean') {
-    return res.status(400).json({ status: false, message: 'Invalid notifications settings.' });
-  }
-
+export async function changePassword(req, res) {
   try {
-    const user = await User.findByIdAndUpdate(
-      userId,
-      {
-        'preferences.theme': theme,
-        'preferences.language': language,
-        'preferences.notifications': notifications
-      },
-      { new: true, runValidators: true }
-    );
-    // console.log("Updated user preferences:", user);
-    if (!user) {
-      return res.status(404).json({ status: false, message: 'User not found.' });
+    const actingUser = req.user;
+    if (!actingUser?.userId) {
+      return res.status(401).json({ status: false, message: 'Unauthorized' });
     }
 
-    return res.status(200).json({
+    const { currentPassword, newPassword } = req.body || {};
+
+    if (!currentPassword || !newPassword) {
+      return res
+        .status(400)
+        .json({ status: false, message: 'Current and new password are required' });
+    }
+
+    const user = await User.findById(actingUser.userId).select('+password +tokenVersion');
+
+    if (!user) {
+      return res.status(404).json({ status: false, message: 'User not found' });
+    }
+
+    // Verify current password
+    let isMatch = false;
+
+    if (typeof user.comparePassword === 'function') {
+      isMatch = await user.comparePassword(currentPassword);
+    } else {
+      // fallback: use bcrypt if comparePassword is not defined
+      // isMatch = await bcrypt.compare(currentPassword, user.password);
+      throw new Error('Password comparison method not implemented');
+    }
+
+    if (!isMatch) {
+      return res
+        .status(400)
+        .json({ status: false, message: 'Current password is incorrect' });
+    }
+
+    // Set new password (pre-save hook should hash it)
+    user.password = newPassword;
+    user.tokenVersion = (user.tokenVersion || 0) + 1;
+    await user.save();
+
+    // Invalidate refresh tokens so all sessions are logged out
+    try {
+      await RefreshToken.deleteMany({ userId: user._id });
+    } catch (err) {
+      console.error('changePassword RefreshToken delete error:', err);
+      // not fatal, we already changed the password
+    }
+
+    return res.json({
       status: true,
-      message: 'Preferences updated successfully.',
-      preferences: user.preferences,
+      message: 'Password updated successfully. Please log in again on other devices.',
     });
-  } catch (error) {
-    console.error('Preferences update error:', error);
-    return res.status(500).json({ status: false, message: 'Server error while updating preferences.' });
+  } catch (err) {
+    console.error('changePassword error:', err);
+    return res
+      .status(500)
+      .json({ status: false, message: 'Failed to update password' });
   }
-};
+}

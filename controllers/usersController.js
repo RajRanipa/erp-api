@@ -305,7 +305,7 @@ export async function removeUser(req, res) {
 
   try {
     // 1) You cannot remove yourself
-    if (String(actingUser._id) === String(id)) {
+    if (String(actingUser.userId) === String(id)) {
       return res.status(400).json({ status: false, message: 'You cannot remove yourself.' });
     }
 
@@ -334,7 +334,7 @@ export async function removeUser(req, res) {
     // 4) Soft delete (disable the account) + bump tokenVersion
     user.status = 'disabled';
     user.disabledAt = new Date();
-    user.disabledBy = actingUser._id;
+    user.disabledBy = actingUser.userId;
     user.tokenVersion = (user.tokenVersion || 0) + 1;
     await user.save();
 
@@ -369,7 +369,7 @@ export async function updateUserRole(req, res) {
     }
 
     // You cannot change your own role here (optional safety)
-    if (String(actingUser._id) === String(id)) {
+    if (String(actingUser.userId) === String(id)) {
       return res.status(400).json({ status: false, message: 'You cannot change your own role.' });
     }
 
@@ -433,13 +433,143 @@ export async function listUsers(req, res) {
     res.status(500).json({ status: false, message: 'Failed to list users' });
   }
 }
+export async function meUser(req, res) {
+  try {
+    const actingUser = req.user; // set by auth middleware
+    const { id } = req.params;
+    if (String(actingUser.userId.trim()) !== String(id.trim())) {
+      console.log('actingUser',actingUser.userId, "id :- ",id);
+      return res.status(401).json({ status: false, message: 'Unauthorized' });
+    }
 
-// `
-//  <div style="background-color: #f5f5f5; width: 100%; height: 100%; padding: 16px; gap: 8px">
-//       <div style="background-color: #ffffff; width: 100%; display: flex; flex-direction: column; gap: 8px">
-//         <h1 style="margin: 0; width: 100%;">Hello,</h1>
-//         <div style="margin: 0; width: 100%;">You’ve been invited to join <b>${invite?.companyName || 'our JNR ERP'}</b> as <b>${invite?.role}</b>.</div>
-//         <div style="margin: 0; width: 100%;"><a href="${link}">Accept your invite</a> (valid for 7 days)</div>
-//       </div>
-//     </div>
-// `
+    const user = await User.findOne({
+      _id: actingUser.userId,
+      companyId: actingUser.companyId,
+    })
+      .select('-password -tokenVersion') // do not leak sensitive fields
+      .lean();
+
+    if (!user) {
+      return res.status(404).json({ status: false, message: 'User not found' });
+    }
+
+    return res.json({ status: true, user });
+  } catch (err) {
+    console.error('meUser error:', err);
+    return res.status(500).json({ status: false, message: 'Failed to fetch current user' });
+  }
+}
+
+export async function updateMyProfile(req, res) {
+  try {
+    const actingUser = req.user;
+    if (!actingUser?.userId || !actingUser?.companyId) {
+      return res.status(401).json({ status: false, message: 'Unauthorized' });
+    }
+
+    const { fullName, email } = req.body || {};
+
+    const user = await User.findOne({
+      _id: actingUser.userId,
+      companyId: actingUser.companyId,
+    });
+
+    if (!user) {
+      return res.status(404).json({ status: false, message: 'User not found' });
+    }
+
+    // Update name if provided
+    if (typeof fullName === 'string' && fullName.trim()) {
+      user.fullName = fullName.trim();
+    }
+
+    // If email is changing, ensure uniqueness
+    if (email && email !== user.email) {
+      const normalizedEmail = String(email).toLowerCase().trim();
+
+      const existing = await User.findOne({
+        email: normalizedEmail,
+        _id: { $ne: user._id },
+      });
+
+      if (existing) {
+        return res
+          .status(409)
+          .json({ status: false, message: 'Email already registered' });
+      }
+
+      user.email = normalizedEmail;
+      // In future: user.isVerified = false; send verification OTP
+    }
+
+    await user.save();
+
+    const safeUser = user.toObject();
+    delete safeUser.password;
+    delete safeUser.tokenVersion;
+
+    return res.json({
+      status: true,
+      message: 'Profile updated',
+      user: safeUser,
+    });
+  } catch (err) {
+    console.error('updateMyProfile error:', err);
+    return res
+      .status(500)
+      .json({ status: false, message: 'Failed to update profile' });
+  }
+}
+
+export async function updateMyPreferences(req, res) {
+  try {
+    const actingUser = req.user;
+    if (!actingUser?.userId || !actingUser?.companyId) {
+      return res.status(401).json({ status: false, message: 'Unauthorized' });
+    }
+
+    const { theme, language, notifications } = req.body || {};
+
+    const user = await User.findOne({
+      _id: actingUser.userId,
+      companyId: actingUser.companyId,
+    });
+
+    if (!user) {
+      return res.status(404).json({ status: false, message: 'User not found' });
+    }
+
+    // Ensure preferences object exists
+    if (!user.preferences) {
+      user.preferences = {};
+    }
+
+    if (theme) user.preferences.theme = theme;
+    if (language) user.preferences.language = language;
+
+    if (notifications && typeof notifications === 'object') {
+      if (!user.preferences.notifications) {
+        user.preferences.notifications = {};
+      }
+      if (typeof notifications.emailUpdates === 'boolean') {
+        user.preferences.notifications.emailUpdates = notifications.emailUpdates;
+      }
+      if (typeof notifications.inAppAlerts === 'boolean') {
+        user.preferences.notifications.inAppAlerts = notifications.inAppAlerts;
+      }
+    }
+
+    await user.save();
+
+    return res.json({
+      status: true,
+      message: 'Preferences updated',
+      preferences: user.preferences,
+    });
+  } catch (err) {
+    console.error('updateMyPreferences error:', err);
+    return res
+      .status(500)
+      .json({ status: false, message: 'Failed to update preferences' });
+  }
+}

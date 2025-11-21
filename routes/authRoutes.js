@@ -29,7 +29,7 @@ router.post('/refresh-token', Auth.refreshToken);
 
 
 // const res = await axiosInstance.put('/change-theme');
-router.put('/change-preferences', protect, Auth.changePreferences);
+router.post('/change-password', auth, Auth.changePassword);
 
 router.get('/api/test', (req, res) => {
   res.json({ message: 'Test route working added' });

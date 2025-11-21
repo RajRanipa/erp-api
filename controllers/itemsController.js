@@ -3,7 +3,7 @@ import Item, { STATUS } from "../models/Item.js";
 import Category from "../models/Category.js";
 import { handleError } from '../utils/errorHandler.js';
 import { applyAuditCreate, applyAuditUpdate } from '../utils/auditHelper.js';
-
+import InventorySnapshot from '../models/InventorySnapshot.js';
 export const createUser = async (req, res) => {
   try {
     const user = await User.create(req.body);
@@ -119,7 +119,7 @@ export const getItemById = async (req, res) => {
 };
 
 // Get All Items (with filtering)
-export const getAllItems = async (req, res) => {
+export const oldgetAllItems = async (req, res) => {
   // console.log('req.query in getAllItems', req.query);
   try {
     const { status, categoryKey, productType, temperature, density, dimension, packing } = req.query || {};
@@ -132,7 +132,8 @@ export const getAllItems = async (req, res) => {
     if (density) filter.density = density;
     if (dimension) filter.dimension = dimension;
     if (packing) filter.packing = packing;
-
+    // i want to set one filter as if that come then send only those items which is present in inventorySnapshot
+    
     // Status filtering:
     // - If status=all -> no filter
     // - If status is provided as comma-separated -> IN query
@@ -156,6 +157,72 @@ export const getAllItems = async (req, res) => {
     // // console.log('items in getAllItems (count)', items?.length || 0, 'items', items);
     return res.json(items);
   } catch (err) {
+    return res.status(500).json({ error: 'Server error' });
+  }
+};
+
+export const getAllItems = async (req, res) => {
+  try {
+    const {
+      status,
+      categoryKey,
+      productType,
+      temperature,
+      density,
+      dimension,
+      packing,
+      inStockOnly,
+    } = req.query || {};
+    const filter = {};
+
+    if (categoryKey) filter.categoryKey = categoryKey;
+    if (productType) filter.productType = productType;
+    if (temperature) filter.temperature = temperature;
+    if (density) filter.density = density;
+    if (dimension) filter.dimension = dimension;
+    if (packing) filter.packing = packing;
+    // 🔥 NEW: filter only items that have stock
+    console.log('inStockOnly', inStockOnly);
+    if (inStockOnly === 'true' || inStockOnly === '1') {
+      const snapFilter = { };
+      const companyId = req.user?.companyId || req.user?.company?._id || req.user?.company || null;
+      if (companyId) snapFilter.companyId = companyId;
+      
+      console.log('snapFilter', snapFilter);
+      const snapshots = await InventorySnapshot.find(snapFilter)
+      .select('itemId')
+      .lean();
+      // console.log('snapshots', snapshots);
+
+      const itemIds = [...new Set(snapshots.map(s => String(s.itemId)))];
+
+      if (!itemIds.length) {
+        return res.json([]);
+      }
+
+      filter._id = { $in: itemIds };
+    }
+
+    // Status filtering (your existing logic) ...
+    if (typeof status === 'string') {
+      if (status.toLowerCase() !== 'all') {
+        const list = status.split(',').map(s => s.trim()).filter(Boolean);
+        if (list.length) filter.status = { $in: list };
+      }
+    } else {
+      filter.status = STATUS.ACTIVE;
+    }
+
+    const items = await Item.find(filter)
+      .populate('temperature', 'value unit')
+      .populate('density', 'value unit')
+      .populate('packing', 'name brandType productColor')
+      .populate('dimension', 'width length thickness unit')
+      .lean();
+
+    return res.json(items);
+  } catch (err) {
+    console.error(err);
     return res.status(500).json({ error: 'Server error' });
   }
 };
@@ -200,9 +267,9 @@ export const updateItem = async (req, res) => {
     // normalize incoming update payload
     const normalized = { ...req.body };
     // Stamp updatedBy from authenticated user
-    console.log('req.user in updateItem', req.user);
+    // console.log('req.user in updateItem', req.user);
     const updateWithAudit = applyAuditUpdate(req, normalized);
-    console.log('updateWithAudit applyAuditUpdate', updateWithAudit);
+    // console.log('updateWithAudit applyAuditUpdate', updateWithAudit);
     // If SKU is being updated, check uniqueness
     if (normalized.sku && normalized.sku !== item.sku) {
       const existing = await Item.findOne({ sku: normalized.sku });
