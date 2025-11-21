@@ -947,7 +947,7 @@ export async function refreshToken(req, res) {
     const decoded = jwt.verify(token, process.env.JWT_REFRESH_SECRET);
     
     // ✅ Use model method to find matching hashed token
-    const existingToken = await RefreshToken.findMatchingToken(token, decoded.id);
+    const existingToken = await RefreshToken.findMatchingToken(token, decoded.userId);
     if (!existingToken) {
       console.error("No matching refresh token found in database.");
       return res.status(403).json({ status: false, message: 'Invalid refresh token' });
@@ -958,7 +958,7 @@ export async function refreshToken(req, res) {
     await RefreshToken.deleteOne({ _id: existingToken._id });
 
     // ✅ Generate new tokens
-    const user = await User.findById(decoded.id);
+    const user = await User.findById(decoded.userId);
     if (!user) {
       console.error("User not found for decoded refresh token.");
       return res.status(404).json({ status: false, message: 'User not found' });
@@ -1029,7 +1029,7 @@ export async function checkAuth(req, res) {
     const decoded = jwt.verify(token, process.env.JWT_ACCESS_SECRET);
 
     // Fetch user preferences
-    const user = await User.findById(decoded.id).populate('companyId','companyName');
+    const user = await User.findById(decoded.userId).populate('companyId','companyName');
     if (!user) {
       return res.status(404).json({
         status: false,
@@ -1050,7 +1050,7 @@ export async function checkAuth(req, res) {
     res.status(200).json({
       status: true,
       user: {
-        id: user._id,
+        userId: user._id,
         userName: user.fullName,
         companyName: user?.companyId?.companyName || null,
         email: user.email,
@@ -1083,7 +1083,7 @@ export async function logout(req, res) {
       try {
         const decoded = jwt.verify(raw, process.env.JWT_REFRESH_SECRET);
         // Find the exact stored token using your model helper (hash-aware)
-        const existing = await RefreshToken.findMatchingToken(raw, decoded.id);
+        const existing = await RefreshToken.findMatchingToken(raw, decoded.userId);
         if (existing) {
           await RefreshToken.deleteOne({ _id: existing._id });
         }

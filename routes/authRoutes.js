@@ -6,7 +6,7 @@ const router = express.Router();
 
 
 // Check Authentication Status (Authenticated users)
-router.get('/check-auth', auth, Auth.checkAuth);
+router.get('/checkAuth', auth, Auth.checkAuth);
 // Signup
 router.post('/signup', Auth.signup);
 router.post('/signup/start', Auth.signupStart);

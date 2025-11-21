@@ -2,7 +2,7 @@ import express from 'express';
 import dotenv from 'dotenv';
 import connectDB from './config/db.js';
 import cors from 'cors';
-import router from './routes/authRoutes.js';
+import authRoutes from './routes/authRoutes.js';
 import chalk from 'chalk';
 import cookieParser from 'cookie-parser';
 import path from 'path';
@@ -71,13 +71,13 @@ app.get('/', (req, res) => {
 // app.use(expressErrorHandler({ logger: console }));
 
 // Use routes
-app.use(router); // This makes the route http://localhost:5000/api/send-contact-email
+app.use('/auth',authRoutes); // This makes the route http://localhost:5000/api/send-contact-email
 app.use('/api/products', productRoutes);
 // app.use('/api', productionRoutes);
 app.use('/api/raw', rawmaterialRoutes);
 app.use('/api/product-type', producttypeRoutes);
 // app.use('/api/packings', packingRoutes);
-app.use('/api/', parameterRoutes);
+app.use('/api', parameterRoutes);
 app.use('/api/category', categoryRoutes);
 app.use('/api/campaigns', campaignRoutes);
 app.use('/api/batches', batchesRouter);

@@ -4,7 +4,7 @@ import Permission from '../models/Permission.js';
 // authMiddleware file here
 const auth = (req, res, next) => {
   const token = req.cookies.accessToken;
-  // console.log("authMiddleware file here ")
+  console.log("authMiddleware file here ")
   // console.log("req.cookies ",req.cookies)
   // console.log("token",!token)
 
