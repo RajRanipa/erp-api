@@ -212,14 +212,15 @@ export const getAllItems = async (req, res) => {
     } else {
       filter.status = STATUS.ACTIVE;
     }
-
+    // console.log('filter', filter);
     const items = await Item.find(filter)
-      .populate('temperature', 'value unit')
-      .populate('density', 'value unit')
-      .populate('packing', 'name brandType productColor')
-      .populate('dimension', 'width length thickness unit')
-      .lean();
-
+    .populate('temperature', 'value unit')
+    .populate('density', 'value unit')
+    .populate('packing', 'name brandType productColor')
+    .populate('dimension', 'width length thickness unit')
+    .lean();
+    
+    // console.log('items', items);
     return res.json(items);
   } catch (err) {
     console.error(err);

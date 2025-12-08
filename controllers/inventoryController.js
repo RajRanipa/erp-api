@@ -78,17 +78,62 @@ export async function getStock(req, res) {
  * Returns InventoryLedger rows (movements)
  * Optional query: limit, sort, from, to (date range)
  */
+// controllers/inventoryController.js (or wherever you have it)
 export async function getLedger(req, res) {
   try {
-    const filter = buildCommonFilter(req);
-    const { limit = 100, from, to } = req.query || {};
-    if (from || to) {
-      filter.at = {};
-      if (from) filter.at.$gte = new Date(from);
-      if (to) filter.at.$lte = new Date(to);
+    const filter = buildCommonFilter(req); // already handles itemId, warehouseId, productType, etc.
+    const { limit = 100, from, to, cursor, q } = req.query || {};
+
+    // Date range / cursor
+    if (from || to || cursor) {
+      filter.at = filter.at || {};
+
+      if (from) {
+        filter.at.$gte = new Date(from);
+      }
+
+      if (to) {
+        filter.at.$lte = new Date(to);
+      }
+
+      // Cursor = “load older than this date”
+      if (cursor) {
+        filter.at.$lt = new Date(cursor);
+      }
     }
-    const rows = await svcGetLedger(filter, { limit: Number(limit), sort: { at: -1 } });
-    res.json({ status: true, data: rows });
+
+    // Full-text-ish search (server-side)
+    if (q) {
+      const needle = String(q).trim();
+      if (needle) {
+        // Adjust fields to what exists in your Ledger model
+        filter.$or = [
+          { itemName: { $regex: needle, $options: 'i' } },
+          { batchNo: { $regex: needle, $options: 'i' } },
+          { uom: { $regex: needle, $options: 'i' } },
+          // if you have precomputed text
+          // { searchText: { $regex: needle, $options: 'i' } },
+        ];
+      }
+    }
+
+    const opts = {
+      limit: Number(limit),
+      sort: { at: -1 }, // newest first
+    };
+
+    const rows = await svcGetLedger(filter, opts);
+
+    const nextCursor =
+      rows.length === Number(limit)
+        ? rows[rows.length - 1].at.toISOString()
+        : null;
+
+    res.json({
+      status: true,
+      data: rows,
+      nextCursor,
+    });
   } catch (err) {
     handleError(res, err, 'Failed to fetch stock ledger');
   }
