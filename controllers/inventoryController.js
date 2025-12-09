@@ -16,7 +16,7 @@ import {
  * Build a Mongo filter for snapshot/ledger reads from query params.
  */
 function buildCommonFilter(req) {
-  const { itemId, warehouseId, bin, batchNo, uom, categoryKey, productType, temperature, density, dimension, packing } = req.query || {};
+  const { itemId, warehouseId, bin, batchNo, uom, categoryKey, productType, temperature, density, dimension, packing, txnType } = req.query || {};
   const filter = { companyId: req.user?.companyId };
   if (itemId) filter.itemId = itemId;
   if (warehouseId) filter.warehouseId = warehouseId;
@@ -29,6 +29,7 @@ function buildCommonFilter(req) {
   if (density) filter.density = density;
   if (dimension) filter.dimension = dimension;
   if (packing) filter.packing = packing;
+  if (txnType) filter.txnType = txnType;
   return filter;
 }
 
@@ -83,7 +84,8 @@ export async function getLedger(req, res) {
   try {
     const filter = buildCommonFilter(req); // already handles itemId, warehouseId, productType, etc.
     const { limit = 100, from, to, cursor, q } = req.query || {};
-
+    console.log("inventory ledger controller called ", limit, from, to, cursor, q);
+    console.log("filter", filter);
     // Date range / cursor
     if (from || to || cursor) {
       filter.at = filter.at || {};
@@ -103,25 +105,29 @@ export async function getLedger(req, res) {
     }
 
     // Full-text-ish search (server-side)
-    if (q) {
-      const needle = String(q).trim();
-      if (needle) {
-        // Adjust fields to what exists in your Ledger model
-        filter.$or = [
-          { itemName: { $regex: needle, $options: 'i' } },
-          { batchNo: { $regex: needle, $options: 'i' } },
-          { uom: { $regex: needle, $options: 'i' } },
-          // if you have precomputed text
-          // { searchText: { $regex: needle, $options: 'i' } },
-        ];
-      }
-    }
+    // if (q) {
+    //   const needle = String(q).trim();
+    //   if (needle) {
+    //     // Adjust fields to what exists in your Ledger model
+    //     console.log("needle", needle);
+    //     filter.$or = [
+    //       { itemName: { $regex: needle, $options: 'i' } },
+    //       { batchNo: { $regex: needle, $options: 'i' } },
+    //       { uom: { $regex: needle, $options: 'i' } },
+    //       { temperature: { $regex: needle, $options: 'i' } },
+    //       { density: { $regex: needle, $options: 'i' } },
+    //       // if you have precomputed text
+    //       // { searchText: { $regex: needle, $options: 'i' } },
+    //     ];
+    //   }
+    // }
 
     const opts = {
-      limit: Number(limit),
+      limit: Number(limit) ? Number(limit) : 2000,
       sort: { at: -1 }, // newest first
     };
-
+    
+    console.log("filter", filter);
     const rows = await svcGetLedger(filter, opts);
 
     const nextCursor =
