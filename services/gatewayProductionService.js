@@ -20,6 +20,7 @@ const SIZE_CODE_MAP = {
     3: { l: 7320, w: 610, t: 25 },
     4: { l: 7620, w: 610, t: 25 },
     5: { l: 7300, w: 610, t: 12 },
+    8: { l: 8000, w: 600, t: 30 },
 };
 
 function normalizeStatus(v) {
