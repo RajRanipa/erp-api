@@ -19,6 +19,7 @@ import itemRoutes from './routes/itemsRoutes.js'
 import companyRoutes from './routes/companyRoutes.js'
 import uploadRoutes from './routes/uploadRoutes.js';
 import inventoryRoutes from './routes/inventoryRoutes.js';
+import gatewayRoutes from './routes/gatewayRoutes.js';
 import { inviteRoutes, inviteAuthRoutes, settingRoutes} from './routes/usersRoutes.js';
 import { startBounceWatcher } from './services/bounceWatcher.js';
 import { fileURLToPath } from 'url';
@@ -86,7 +87,7 @@ app.use('/api/users', inviteRoutes);
 app.use('/api/permissions', permissionsRoute);
 app.use('/api/myaccount', settingRoutes);
 app.use('/', inviteAuthRoutes);
-
+app.use("/api/gateway", gatewayRoutes);
 // Start server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
