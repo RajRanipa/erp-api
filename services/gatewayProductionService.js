@@ -393,7 +393,7 @@ export async function ingestBlanketBatch({ companyId, payload }) {
       service: "gatewayProductionService.ingestBlanketBatch",
       at: new Date().toISOString(),
     };
-    return handleError(res, error);
-    // throw error; // controller will handle via handleError(res, error)
+    // return handleError(res, error);
+    throw error; // controller will handle via handleError(res, error)
   }
 }

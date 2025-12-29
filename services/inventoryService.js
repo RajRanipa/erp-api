@@ -24,7 +24,7 @@ async function getProductType(itemId) {
 }
 
 async function getItemLite(itemId) {
-  const item = await Item.findById(itemId).select('_id productType uom').lean();
+  const item = await Item.findById(itemId).select('_id productType UOM').lean();
   if (!item) throw new Error('Item not found');
   return item;
 }
@@ -75,6 +75,24 @@ export async function postMovement({
     createdSession = true;
     session.startTransaction();
   }
+  console.log("postMovement",
+    {
+      "companyId" :companyId,
+      "itemId" :itemId,
+      "warehouseId" :warehouseId,
+      "uom" :uom,
+      "qty" :qty,
+      "txnType" :txnType,
+      "by" :by,
+      "note" :note,
+      "refType" :refType,
+      "refId" :refId,
+      "bin" :bin,
+      "batchNo" :batchNo,
+      "enforceNonNegative" :enforceNonNegative,
+      "session: extSession" :session
+    }
+  );
 
   try {
     const signedQty = asNumber(qty);
@@ -83,13 +101,13 @@ export async function postMovement({
       throw new Error('Invalid txnType');
     }
     const productType = await getProductType(itemId);
-    // console.log("productType", productType);
-    // console.log("enforceNonNegative", enforceNonNegative);
+    console.log("productType", productType);
+    console.log("enforceNonNegative", enforceNonNegative);
     // If enforcing non-negative, pre-check (for decreases)
     if (enforceNonNegative && signedQty < 0) {
       const { onHand } = await getCurrentBalances({ companyId, itemId, warehouseId, uom, bin, batchNo }, session);
-      // console.log("onHand", onHand);
-      // console.log("signedQty", signedQty);
+      console.log("onHand", onHand);
+      console.log("signedQty", signedQty);
       if (onHand + signedQty < 0) {
         throw new Error('Insufficient stock: onHand would go below zero');
       }
@@ -100,8 +118,8 @@ export async function postMovement({
       companyId, itemId, productType, warehouseId, bin, batchNo,
       uom, quantity: signedQty, txnType, refType, refId, note, by, at: new Date(),
     }], { session });
-    
-    // console.log("ledger", ledger);
+
+    console.log("ledger", ledger);
     // 2) Update snapshot (onHand)
     const snapshot = await InventorySnapshot.incOnHand(
       { companyId, itemId, productType, warehouseId, uom, bin, batchNo },
@@ -130,7 +148,7 @@ export async function postMovement({
 export async function receive(params) {
   // expects: qty > 0
   const qty = Math.abs(asNumber(params.qty));
-  // console.log("qty", qty);
+  console.log("receive qty - ", qty);
   return postMovement({ ...params, qty, txnType: 'RECEIPT' });
 }
 
