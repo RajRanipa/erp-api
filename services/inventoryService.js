@@ -76,24 +76,7 @@ export async function postMovement({
     createdSession = true;
     session.startTransaction();
   }
-  console.log("postMovement",
-    {
-      "companyId" :companyId,
-      "itemId" :itemId,
-      "warehouseId" :warehouseId,
-      "uom" :uom,
-      "qty" :qty,
-      "txnType" :txnType,
-      "by" :by,
-      "note" :note,
-      "refType" :refType,
-      "refId" :refId,
-      "bin" :bin,
-      "batchNo" :batchNo,
-      "enforceNonNegative" :enforceNonNegative,
-      "session: extSession" :session
-    }
-  );
+  console.log("postMovement","session: extSession",session);
 
   try {
     const signedQty = asNumber(qty);
@@ -102,32 +85,32 @@ export async function postMovement({
       throw new Error('Invalid txnType');
     }
     const productType = await getProductType(itemId);
-    console.log("productType", productType);
-    console.log("enforceNonNegative", enforceNonNegative);
+    // console.log("productType", productType);
+    // console.log("enforceNonNegative", enforceNonNegative);
     // If enforcing non-negative, pre-check (for decreases)
     if (enforceNonNegative && signedQty < 0) {
       const { onHand } = await getCurrentBalances({ companyId, itemId, warehouseId, uom, bin, batchNo }, session);
-      console.log("onHand", onHand);
-      console.log("signedQty", signedQty);
+      // console.log("onHand", onHand);
+      // console.log("signedQty", signedQty);
       if (onHand + signedQty < 0) {
         throw new Error('Insufficient stock: onHand would go below zero');
       }
     }
-    console.log('postMovement signedQty by', by);
+    // console.log('postMovement signedQty by', by);
     // 1) Write ledger row
     const [ledger] = await InventoryLedger.create([{
       companyId, itemId, productType, warehouseId, bin, batchNo,
       uom, quantity: signedQty, txnType, refType, refId, note, by, at: new Date(),
     }], { session });
 
-    console.log("ledger", ledger);
+    // console.log("ledger", ledger);
     // 2) Update snapshot (onHand)
     const snapshot = await InventorySnapshot.incOnHand(
       { companyId, itemId, productType, warehouseId, uom, bin, batchNo },
       signedQty,
       session
     );
-    console.log("postMovement snapshot", snapshot);
+    // console.log("postMovement snapshot", snapshot);
 
     if (!extSession) {
       await session.commitTransaction();
@@ -150,7 +133,7 @@ export async function postMovement({
 export async function receive(params) {
   // expects: qty > 0
   const qty = Math.abs(asNumber(params.qty));
-  console.log("receive qty - ", qty);
+  // console.log("receive qty - ", qty);
   return postMovement({ ...params, qty, txnType: 'RECEIPT' });
 }
 
@@ -245,7 +228,7 @@ export async function reserveStock({
       +q,
       session
     );
-    console.log("reserveStock snap", snap);
+    // console.log("reserveStock snap", snap);
 
     if (createdSession) {
       await session.commitTransaction();
@@ -279,7 +262,7 @@ export async function releaseReservation({
       -q,
       session
     );
-    console.log("releaseReservation snap", snap);
+    // console.log("releaseReservation snap", snap);
     if (createdSession) {
       await session.commitTransaction();
       session.endSession();
@@ -402,7 +385,7 @@ export async function getSnapshot(filter = {}, itemFilter = {}) {
       ],
     })
     .lean();
-    console.log('getSnapshot snaps', snaps);
+    // console.log('getSnapshot snaps', snaps);
   // if no item-level filters → return as-is
   if (
     !itemFilter.categoryKey &&

@@ -255,11 +255,11 @@ export async function ingestBlanketBatch({ companyId, payload }) {
             const scaleNo = Number(it?.scaleNo);
             const weightKg = Number(it?.weight || 0);
             const statusOk = normalizeStatus(it?.status);
-            console.log('it?.status', it?.status);
+            // console.log('it?.status', it?.status);
 
             // ignore empty lines
             if (!scaleNo) continue;
-            console.log('scaleNo', scaleNo);
+            // console.log('scaleNo', scaleNo);
             try {
                 // insert normalized roll line (idempotent)
                 console.log('ENTER ProductionBlanketRoll ~ ');
@@ -291,11 +291,11 @@ export async function ingestBlanketBatch({ companyId, payload }) {
 
                 summary.inserted++;
 
-                console.log('ProductionBlanketRoll doc', doc);
+                // console.log('ProductionBlanketRoll doc', doc);
                 // Inventory posting
                 const shouldPost = statusOk === true && weightKg > 0;
                 
-                console.log('shouldPost', shouldPost, statusOk);
+                // console.log('shouldPost', shouldPost, statusOk);
 
                 if (!shouldPost) {
                   // Not an error: just track why no inventory
@@ -342,7 +342,7 @@ export async function ingestBlanketBatch({ companyId, payload }) {
                     enforceNonNegative: false,
                 });
                 
-                console.log('invRes', invRes);
+                // console.log('invRes', invRes);
 
                 await ProductionBlanketRoll.updateOne(
                     { _id: doc._id },
