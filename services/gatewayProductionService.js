@@ -290,6 +290,7 @@ export async function ingestBlanketBatch({ companyId, payload }) {
 
                 summary.inserted++;
 
+                console.log('ProductionBlanketRoll doc', doc);
                 // Inventory posting
                 const shouldPost = statusOk === true && weightKg > 0;
                 
@@ -339,6 +340,8 @@ export async function ingestBlanketBatch({ companyId, payload }) {
                     refId: doc._id,
                     enforceNonNegative: false,
                 });
+                
+                console.log('invRes', invRes);
 
                 await ProductionBlanketRoll.updateOne(
                     { _id: doc._id },
