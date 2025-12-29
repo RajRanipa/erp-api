@@ -8,7 +8,7 @@ import Density from "../models/Density.js";
 import Dimension from "../models/Dimension.js";
 import ProductType from "../models/ProductType.js";
 import Warehouse from "../models/Warehouse.js";
-import { AppError } from "../utils/errorHandler.js";
+import { AppError, handleError } from "../utils/errorHandler.js";
 
 /**
  * Your sizeCode mapping (provided)
