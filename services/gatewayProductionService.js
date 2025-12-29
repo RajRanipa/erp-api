@@ -3,24 +3,22 @@ import GatewayIngestBatch from "../models/GatewayIngestBatch.js";
 import ProductionBlanketRoll from "../models/ProductionBlanketRoll.js";
 import Item from "../models/Item.js";
 import { receive as invReceive } from "../services/inventoryService.js";
-
-// You will already have these models in your project:
-const Temperature = mongoose.models.Temperature;
-const Density = mongoose.models.Density;
-const Dimension = mongoose.models.Dimension;
-const ProductType = mongoose.models.ProductType;
-const Warehouse = mongoose.models.Warehouse;
+import Temperature from "../models/Temperature.js";
+import Density from "../models/Density.js";
+import Dimension from "../models/Dimension.js";
+import ProductType from "../models/ProductType.js";
+import Warehouse from "../models/Warehouse.js";
 
 /**
  * Your sizeCode mapping (provided)
  */
 const SIZE_CODE_MAP = {
-    1: { l: 7300, w: 610, t: 25 },
-    2: { l: 3650, w: 610, t: 50 },
-    3: { l: 7320, w: 610, t: 25 },
-    4: { l: 7620, w: 610, t: 25 },
-    5: { l: 7300, w: 610, t: 12 },
-    8: { l: 8000, w: 600, t: 30 },
+  1: { length: 7300, width: 610, thickness: 25 },
+  2: { length: 3650, width: 610, thickness: 50 },
+  3: { length: 7320, width: 610, thickness: 25 },
+  4: { length: 7620, width: 610, thickness: 25 },
+  5: { length: 7300, width: 610, thickness: 12 },
+  8: { length: 8000, width: 600, thickness: 30 },
 };
 
 function normalizeStatus(v) {
@@ -54,10 +52,8 @@ async function resolvePackingItem(companyId) {
     return packing?._id || null;
 }
 
-async function resolveDimension({ companyId, productTypeId, sizeCode }) {
+async function resolveDimension({ productTypeId, sizeCode }) {
     const spec = SIZE_CODE_MAP[sizeCode];
-
-    console.log('spec', spec, sizeCode, SIZE_CODE_MAP[8]);
 
     if (!spec) {
         return {
@@ -84,33 +80,57 @@ async function resolveDimension({ companyId, productTypeId, sizeCode }) {
     return { id: dim._id, err: null };
 }
 
-async function resolveProductType(companyId, productCode) {
-    console.log('productCode', productCode);
-    // You said blanket only and code=1 for now.
-    if (productCode !== 1) return { id: null, err: `Unsupported productCode: ${productCode}` };
+async function resolveProductType(productCode) {
+  // Map PLC product codes to ProductType.name (lowercase)
+  const PRODUCT_CODE_MAP = {
+    1: "blanket",
+    // 2: "bulk",
+    // 3: "board",
+    // 4: "module",
+  };
 
-    // If you have ProductType key/name like "blanket"
-    const pt = await ProductType?.findOne({
-        companyId,
-        $or: [
-            { key: { $regex: /^blanket$/i } },
-            { name: { $regex: /^blanket$/i } },
-        ],
-    }).lean();
+  const name = PRODUCT_CODE_MAP[productCode];
+  if (!name) return { id: null, err: `Unsupported productCode: ${productCode}` };
 
-    if (!pt) return { id: null, err: `ProductType 'blanket' not found in DB` };
-    return { id: pt._id, err: null };
+  // ProductType schema only has `name` (lowercased enum)
+  const pt = await ProductType?.findOne({ name }).lean();
+
+  if (!pt) return { id: null, err: `ProductType '${name}' not found in DB` };
+  return { id: pt._id, err: null };
 }
 
-async function resolveTempDensity(companyId, temperatureValue, densityValue) {
-    const errs = [];
-    const temp = await Temperature?.findOne({ companyId, value: temperatureValue }).lean();
-    if (!temp) errs.push(`Temperature not found for value ${temperatureValue}`);
+// async function resolveTempDensity(companyId, temperatureValue, densityValue) {
+//     const errs = [];
+//     const temp = await Temperature?.findOne({ companyId, value: temperatureValue }).lean();
+//     if (!temp) errs.push(`Temperature not found for value ${temperatureValue}`);
 
-    const dens = await Density?.findOne({ companyId, value: densityValue }).lean();
-    if (!dens) errs.push(`Density not found for value ${densityValue}`);
+//     const dens = await Density?.findOne({ companyId, value: densityValue }).lean();
+//     if (!dens) errs.push(`Density not found for value ${densityValue}`);
 
-    return { tempId: temp?._id || null, densId: dens?._id || null, errs };
+//     return { tempId: temp?._id || null, densId: dens?._id || null, errs };
+// }
+
+async function resolveTempDensity({ productTypeId, temperatureValue, densityValue }) {
+  const errs = [];
+
+  if (!productTypeId) {
+    return {
+      tempId: null,
+      densId: null,
+      errs: ["productTypeId is required to resolve temperature/density"],
+    };
+  }
+
+  const tVal = Number(temperatureValue);
+  const dVal = Number(densityValue);
+
+  const temp = await Temperature?.findOne({ productType: productTypeId, value: tVal }).lean();
+  if (!temp) errs.push(`Temperature not found for productType ${productTypeId} value ${tVal}`);
+
+  const dens = await Density?.findOne({ productType: productTypeId, value: dVal }).lean();
+  if (!dens) errs.push(`Density not found for productType ${productTypeId} value ${dVal}`);
+
+  return { tempId: temp?._id || null, densId: dens?._id || null, errs };
 }
 
 async function matchFGItem({ companyId, productTypeId, temperatureId, densityId, dimensionId, packingId }) {
@@ -148,7 +168,6 @@ export async function ingestBlanketBatch({ companyId, payload }) {
     if (!gatewayId) throw new Error("gatewayId is required");
     if (!Array.isArray(records)) throw new Error("records must be an array");
     
-    console.log("records", records);
 
     const batch = await GatewayIngestBatch.create({
         companyId,
@@ -180,27 +199,31 @@ export async function ingestBlanketBatch({ companyId, payload }) {
         const batchNo = rec?.batchNo || "";
         const at = safeDate(rec?.at) || new Date();
         
-        console.log("rec :- ", rec);
-
-        console.log("productCode :- ", productCode);
-        console.log("temperatureValue :- ", temperatureValue);
-        console.log("densityValue :- ", densityValue);
-        console.log("sizeCode :- ", sizeCode);
         
         const items = Array.isArray(rec?.items) ? rec.items : [];
 
         // resolve shared refs once per record
         const resolveErrors = [];
 
-        const { id: productTypeId, err: ptErr } = await resolveProductType(companyId, productCode);
+        const { id: productTypeId, err: ptErr } = await resolveProductType(productCode);
         if (ptErr) resolveErrors.push(ptErr);
 
-        const { id: dimensionId, err: dimErr } = await resolveDimension(companyId, sizeCode);
-        if (dimErr) resolveErrors.push(dimErr);
+        let dimensionId = null;
+        let temperatureId = null;
+        let densityId = null;
 
-        const { tempId: temperatureId, densId: densityId, errs: tdErrs } =
-            await resolveTempDensity(companyId, temperatureValue, densityValue);
-        resolveErrors.push(...tdErrs);
+        if (productTypeId) {
+          const dimRes = await resolveDimension({ productTypeId, sizeCode });
+          dimensionId = dimRes.id;
+          if (dimRes.err) resolveErrors.push(dimRes.err);
+
+          const tdRes = await resolveTempDensity({ productTypeId, temperatureValue, densityValue });
+          temperatureId = tdRes.tempId;
+          densityId = tdRes.densId;
+          if (tdRes.errs?.length) resolveErrors.push(...tdRes.errs);
+        } else {
+          resolveErrors.push("productTypeId not resolved; skipping dimension/temperature/density resolution");
+        }
 
         for (const it of items) {
             const scaleNo = Number(it?.scaleNo);
