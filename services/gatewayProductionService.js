@@ -8,6 +8,7 @@ import Density from "../models/Density.js";
 import Dimension from "../models/Dimension.js";
 import ProductType from "../models/ProductType.js";
 import Warehouse from "../models/Warehouse.js";
+import { AppError } from "../utils/errorHandler.js";
 
 /**
  * Your sizeCode mapping (provided)
@@ -35,10 +36,26 @@ function safeDate(v) {
     return d;
 }
 
-async function resolveWarehouseId(companyId) {
-    // If you later provide fixed warehouseId, replace this logic.
-    const wh = await Warehouse?.findOne({ companyId }).sort({ createdAt: 1 }).lean();
+async function resolveWarehouseId() {
+  // Prefer an explicit fixed warehouse for gateway receipts
+  const fixedId = process.env.GATEWAY_WAREHOUSE_ID;
+  if (fixedId) return fixedId;
+
+  const fixedCode = process.env.GATEWAY_WAREHOUSE_CODE;
+  if (fixedCode) {
+    const wh = await Warehouse.findOne({ code: fixedCode }).lean();
     return wh?._id || null;
+  }
+
+  const fixedName = process.env.GATEWAY_WAREHOUSE_NAME;
+  if (fixedName) {
+    const wh = await Warehouse.findOne({ name: { $regex: new RegExp(`^${fixedName}$`, "i") } }).lean();
+    return wh?._id || null;
+  }
+
+  // Fallback: pick the first/oldest warehouse
+  const wh = await Warehouse.findOne({}).sort({ createdAt: 1 }).lean();
+  return wh?._id || null;
 }
 
 async function resolvePackingItem(companyId) {
@@ -46,7 +63,7 @@ async function resolvePackingItem(companyId) {
     const packing = await Item.findOne({
         companyId,
         categoryKey: "PACKING",
-        name: { $regex: /^plastic bag$/i },
+        name: { $regex: /plastic\s*bag/i },
     }).select("_id name").lean();
 
     return packing?._id || null;
@@ -143,8 +160,8 @@ async function matchFGItem({ companyId, productTypeId, temperatureId, densityId,
         density: densityId,
         dimension: dimensionId,
         packing: packingId,
-        status: "active",
-    }).select("_id uom name").lean();
+        status: { $in: ["active", "approved"] },
+    }).select("_id UOM name").lean();
 
     // fallback: allow packing mismatch (in case FG items were created without packing)
     if (!item) {
@@ -155,19 +172,26 @@ async function matchFGItem({ companyId, productTypeId, temperatureId, densityId,
             temperature: temperatureId,
             density: densityId,
             dimension: dimensionId,
-            status: "active",
-        }).select("_id uom name").lean();
+            status: { $in: ["active", "approved"] },
+        }).select("_id UOM name").lean();
     }
 
     return item;
 }
 
 export async function ingestBlanketBatch({ companyId, payload }) {
-    if (!companyId) throw new Error("companyId is required for gateway ingestion");
+  try {
+    if (!companyId) {
+      throw new AppError("companyId is required for gateway ingestion", { statusCode: 400, code: "MISSING_COMPANY" });
+    }
+
     const { gatewayId, sentAt, records } = payload || {};
-    if (!gatewayId) throw new Error("gatewayId is required");
-    if (!Array.isArray(records)) throw new Error("records must be an array");
-    
+    if (!gatewayId) {
+      throw new AppError("gatewayId is required", { statusCode: 400, code: "MISSING_GATEWAY" });
+    }
+    if (!Array.isArray(records)) {
+      throw new AppError("records must be an array", { statusCode: 400, code: "INVALID_PAYLOAD" });
+    }
 
     const batch = await GatewayIngestBatch.create({
         companyId,
@@ -178,8 +202,10 @@ export async function ingestBlanketBatch({ companyId, payload }) {
         processingStatus: "RECEIVED",
     });
 
-    const warehouseId = await resolveWarehouseId(companyId);
+    const warehouseId = await resolveWarehouseId();
     const packingId = await resolvePackingItem(companyId);
+    if (!warehouseId) console.warn("[gateway] No warehouse found (set GATEWAY_WAREHOUSE_ID/CODE/NAME)");
+    if (!packingId) console.warn("[gateway] Packing item not found by name 'plastic bag' for companyId", companyId);
 
     const summary = {
         batchId: batch._id,
@@ -229,6 +255,7 @@ export async function ingestBlanketBatch({ companyId, payload }) {
             const scaleNo = Number(it?.scaleNo);
             const weightKg = Number(it?.weight || 0);
             const statusOk = normalizeStatus(it?.status);
+            console.log('it?.status', it?.status);
 
             // ignore empty lines
             if (!scaleNo) continue;
@@ -265,8 +292,14 @@ export async function ingestBlanketBatch({ companyId, payload }) {
 
                 // Inventory posting
                 const shouldPost = statusOk === true && weightKg > 0;
+                
+                console.log('shouldPost', shouldPost, statusOk);
 
-                if (!shouldPost) continue;
+                if (!shouldPost) {
+                  // Not an error: just track why no inventory
+                  // statusOk false or weightKg <= 0
+                  continue;
+                }
                 if (!warehouseId) {
                     await ProductionBlanketRoll.updateOne(
                         { _id: doc._id },
@@ -288,7 +321,7 @@ export async function ingestBlanketBatch({ companyId, payload }) {
                 if (!matchedItem) {
                     await ProductionBlanketRoll.updateOne(
                         { _id: doc._id },
-                        { $push: { resolveErrors: "FG Item not found for resolved specs" } }
+                        { $push: { resolveErrors: `FG Item not found for specs: productType=${productTypeId} temp=${temperatureId} density=${densityId} dimension=${dimensionId} packing=${packingId}` } }
                     );
                     continue;
                 }
@@ -298,7 +331,7 @@ export async function ingestBlanketBatch({ companyId, payload }) {
                     companyId,
                     itemId: matchedItem._id,
                     warehouseId,
-                    uom: matchedItem.uom || "roll",
+                    uom: matchedItem.UOM || "roll",
                     qty: 1,
                     by: null, // gateway (no user). Later you can store a system userId.
                     note: `Auto receipt from gateway ${gatewayId} recordId ${recordId} scale ${scaleNo}`,
@@ -354,4 +387,13 @@ export async function ingestBlanketBatch({ companyId, payload }) {
         status,
         summary,
     };
+  } catch (error) {
+    // Attach context for easier debugging
+    error.context = {
+      service: "gatewayProductionService.ingestBlanketBatch",
+      at: new Date().toISOString(),
+    };
+    return handleError(res, error);
+    // throw error; // controller will handle via handleError(res, error)
+  }
 }
