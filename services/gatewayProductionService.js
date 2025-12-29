@@ -380,13 +380,15 @@ export async function ingestBlanketBatch({ companyId, payload }) {
         { $set: { processingStatus: status, processingSummary: summary } }
     );
 
-    return {
+    const result = {
         ok: true,
         gatewayId: payload.gatewayId,
         batchId: batch._id,
         status,
         summary,
     };
+    console.log('result', result);
+    return 
   } catch (error) {
     // Attach context for easier debugging
     error.context = {
