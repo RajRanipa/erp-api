@@ -4,10 +4,13 @@ import Permission from '../models/Permission.js';
 // authMiddleware file here
 const auth = (req, res, next) => {
   const token = req.cookies.accessToken;
-  // console.log("authMiddleware file here ")
-  // console.log("req.cookies ",req.cookies)
-  // console.log("token",!token)
-
+  console.log("authMiddleware file here ")
+  console.log("method:", req.method);
+  console.log("res.req.url", res.req.url)
+  console.log("res.req.originalUrl", res.req.originalUrl)
+  console.log(next)
+  console.log("token",!token)
+  console.log(new Error("Middleware trace").stack);
   if (!token) {
     // console.log(" authMiddleware file here false ")
     return res.status(401).json({ message: 'Unauthorized: No access token provided.' });

@@ -87,7 +87,8 @@ app.use('/api/users', inviteRoutes);
 app.use('/api/permissions', permissionsRoute);
 app.use('/api/myaccount', settingRoutes);
 app.use('/', inviteAuthRoutes);
-app.use("/api/gateway", gatewayRoutes);
+// /api/gateway/blanket/production
+app.use("/gateway", gatewayRoutes); 
 // Start server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
