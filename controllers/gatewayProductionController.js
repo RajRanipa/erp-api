@@ -7,7 +7,8 @@ export async function ingestBlanketProduction(req, res) {
     if (!companyId) {
       throw new Error("GATEWAY_COMPANY_ID not configured");
     }
-
+    console.log("gateway companyId", companyId);
+    console.log("gateway req.body", req.body);
     const result = await ingestBlanketBatch({
       companyId,
       payload: req.body,
