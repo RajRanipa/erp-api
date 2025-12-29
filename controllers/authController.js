@@ -29,7 +29,7 @@ function buildSignupOtpEmailHtml({ email, otp, mode = 'signup' }) {
   const borderColor = '#e5e7eb'; // gray-200
   const bgColor = '#f9fafb'; // gray-50
   const APP_URL = process.env.CLIENT_URL || 'https://erp.orientfibertech.com/';
-  console.log('APP_URL', APP_URL) // https://erp.orientfibertech.com/
+  // console.log('APP_URL', APP_URL) // https://erp.orientfibertech.com/
   const isLogin = mode === 'login';
 
   const title = isLogin
@@ -261,11 +261,11 @@ export async function signupStart(req, res) {
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
-    console.log(
-      "normalizedEmail: " + normalizedEmail + ", otp: " + otp + ", expiresAt: " + expiresAt,
-      `${APP_NAME} verification code`,
-       buildSignupOtpEmailHtml({ email: normalizedEmail, otp }),
-    )
+    // console.log(
+    //   "normalizedEmail: " + normalizedEmail + ", otp: " + otp + ", expiresAt: " + expiresAt,
+    //   `${APP_NAME} verification code`,
+    //    buildSignupOtpEmailHtml({ email: normalizedEmail, otp }),
+    // )
     // return;
     // Send real OTP email via SendGrid helper
     try {
@@ -305,7 +305,7 @@ export async function signupStart(req, res) {
 // @access  Public
 export async function signupVerifyOtp(req, res) {
   try {
-    console.log(' signupVerifyOtp hit _ ');
+    // console.log(' signupVerifyOtp hit _ ');
     const { email, otp } = req.body || {};
 
     if (!email || !otp) {
@@ -851,7 +851,7 @@ export async function login(req, res) {
       isSetupCompleted = false; // no company => setup not complete
     }
 
-    console.log('login payload values -> ');
+    // console.log('login payload values -> ');
 
     // now generate tokens using a payload object (not the raw user doc)
     const tokenPayload = {

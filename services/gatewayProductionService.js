@@ -56,7 +56,7 @@ async function resolvePackingItem(companyId) {
 
 async function resolveDimension({ companyId, productTypeId, sizeCode }) {
     const spec = SIZE_CODE_MAP[sizeCode];
-    console.log('spec', spec);
+    console.log('spec', spec, sizeCode);
     if (!spec) {
         return {
             id: null,

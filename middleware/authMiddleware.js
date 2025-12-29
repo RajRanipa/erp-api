@@ -4,13 +4,13 @@ import Permission from '../models/Permission.js';
 // authMiddleware file here
 const auth = (req, res, next) => {
   const token = req.cookies.accessToken;
-  console.log("authMiddleware file here ")
-  console.log("method:", req.method);
-  console.log("res.req.url", res.req.url)
-  console.log("res.req.originalUrl", res.req.originalUrl)
-  console.log(next)
-  console.log("token",!token)
-  console.log(new Error("Middleware trace").stack);
+  // console.log("authMiddleware file here ")
+  // console.log("method:", req.method);
+  // console.log("res.req.url", res.req.url)
+  // console.log("res.req.originalUrl", res.req.originalUrl)
+  // console.log(next)
+  // console.log("token",!token)
+  // console.log(new Error("Middleware trace").stack);
   if (!token) {
     // console.log(" authMiddleware file here false ")
     return res.status(401).json({ message: 'Unauthorized: No access token provided.' });
@@ -71,7 +71,7 @@ export const roleAuth = (...requiredPerms) => async (req, res, next) => {
     };
 
     const ok = required.length === 0 ? true : required.every(hasPermission);
-    console.log('Required:', required, 'Allowed ?:', ok ? 'yes' : 'no');
+    // console.log('Required:', required, 'Allowed ?:', ok ? 'yes' : 'no');
 
     if (!ok) {
       return res.status(403).json({ error: 'Forbidden: insufficient permissions' });
