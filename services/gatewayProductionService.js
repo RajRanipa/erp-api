@@ -56,7 +56,9 @@ async function resolvePackingItem(companyId) {
 
 async function resolveDimension({ companyId, productTypeId, sizeCode }) {
     const spec = SIZE_CODE_MAP[sizeCode];
-    console.log('spec', spec, sizeCode);
+
+    console.log('spec', spec, sizeCode, SIZE_CODE_MAP[8]);
+
     if (!spec) {
         return {
             id: null,
@@ -83,6 +85,7 @@ async function resolveDimension({ companyId, productTypeId, sizeCode }) {
 }
 
 async function resolveProductType(companyId, productCode) {
+    console.log('productCode', productCode);
     // You said blanket only and code=1 for now.
     if (productCode !== 1) return { id: null, err: `Unsupported productCode: ${productCode}` };
 
@@ -144,6 +147,8 @@ export async function ingestBlanketBatch({ companyId, payload }) {
     const { gatewayId, sentAt, records } = payload || {};
     if (!gatewayId) throw new Error("gatewayId is required");
     if (!Array.isArray(records)) throw new Error("records must be an array");
+    
+    console.log("records", records);
 
     const batch = await GatewayIngestBatch.create({
         companyId,
@@ -174,7 +179,14 @@ export async function ingestBlanketBatch({ companyId, payload }) {
         const sizeCode = Number(rec?.sizeCode);
         const batchNo = rec?.batchNo || "";
         const at = safeDate(rec?.at) || new Date();
+        
+        console.log("rec :- ", rec);
 
+        console.log("productCode :- ", productCode);
+        console.log("temperatureValue :- ", temperatureValue);
+        console.log("densityValue :- ", densityValue);
+        console.log("sizeCode :- ", sizeCode);
+        
         const items = Array.isArray(rec?.items) ? rec.items : [];
 
         // resolve shared refs once per record

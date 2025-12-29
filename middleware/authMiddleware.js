@@ -6,8 +6,8 @@ const auth = (req, res, next) => {
   const token = req.cookies.accessToken;
   // console.log("authMiddleware file here ")
   // console.log("method:", req.method);
-  // console.log("res.req.url", res.req.url)
-  // console.log("res.req.originalUrl", res.req.originalUrl)
+  console.log("res.req.url", res.req.url)
+  console.log("res.req.originalUrl", res.req.originalUrl)
   // console.log(next)
   // console.log("token",!token)
   // console.log(new Error("Middleware trace").stack);
