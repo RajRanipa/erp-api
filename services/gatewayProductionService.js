@@ -362,6 +362,7 @@ export async function ingestBlanketBatch({ companyId, payload }) {
             } catch (err) {
                 // Duplicate safe handling
                 if (err?.code === 11000) {
+                    console.log('Duplicate recordId here');
                     summary.duplicates++;
                     continue;
                 }
