@@ -76,7 +76,7 @@ export async function postMovement({
     createdSession = true;
     session.startTransaction();
   }
-  console.log("postMovement","session: extSession",session);
+  // console.log("postMovement","session: extSession",session);
 
   try {
     const signedQty = asNumber(qty);
