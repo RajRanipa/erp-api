@@ -18,7 +18,6 @@ router.post('/login', Auth.login);
 
 // Logout (CLEAR JWT from cookies)
 router.post('/logout', Auth.logout);
-router.post('/gateway/login', Auth.gateWayLogin);
 // NEW: login with OTP
 router.post('/login/start-otp', Auth.loginStartOtp);
 router.post('/login/verify-otp', Auth.loginVerifyOtp);
@@ -26,8 +25,6 @@ router.post('/login/resend-otp', Auth.loginResendOtp);
 
 // Refresh Token
 router.post('/refresh-token', Auth.refreshToken);
-
-
 
 // const res = await axiosInstance.put('/change-theme');
 router.post('/change-password', auth, Auth.changePassword);

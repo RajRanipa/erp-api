@@ -20,6 +20,7 @@ import companyRoutes from './routes/companyRoutes.js'
 import uploadRoutes from './routes/uploadRoutes.js';
 import inventoryRoutes from './routes/inventoryRoutes.js';
 import gatewayRoutes from './routes/gatewayRoutes.js';
+import gatewayAuthRoutes from './routes/gatewayAuthRoutes.js';
 import { inviteRoutes, inviteAuthRoutes, settingRoutes} from './routes/usersRoutes.js';
 import { startBounceWatcher } from './services/bounceWatcher.js';
 import { fileURLToPath } from 'url';
@@ -88,6 +89,7 @@ app.use('/api/permissions', permissionsRoute);
 app.use('/api/myaccount', settingRoutes);
 app.use('/', inviteAuthRoutes);
 // /api/gateway/blanket/production
+app.use("/auth/gateway", gatewayAuthRoutes); 
 app.use("/gateway", gatewayRoutes); 
 // Start server
 const PORT = process.env.PORT || 5000;

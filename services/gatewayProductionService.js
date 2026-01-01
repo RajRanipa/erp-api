@@ -262,7 +262,7 @@ export async function ingestBlanketBatch({ companyId, payload }) {
             // console.log('scaleNo', scaleNo);
             try {
                 // insert normalized roll line (idempotent)
-                console.log('ENTER ProductionBlanketRoll ~ ');
+                // console.log('ENTER ProductionBlanketRoll ~ ');
                 const doc = await ProductionBlanketRoll.create({
                     companyId,
                     gatewayId,
