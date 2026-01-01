@@ -22,6 +22,9 @@ const refreshTokenSchema = new mongoose.Schema({
     type: Date,
     required: true,
   },
+  device:{
+    type: String,
+  }
 });
 
 // 👇 TTL index correctly defined here
