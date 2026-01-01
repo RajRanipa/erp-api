@@ -793,7 +793,7 @@ export async function login(req, res) {
   try {
     const { email, password } = req.body;
 
-    console.log("hit the log in ")
+    console.log("hit the log in ===================, email", email)
     // Find user and explicitly select password
     const user = await User.findOne({ email }).select('+password');
     // console.log("user ", user)

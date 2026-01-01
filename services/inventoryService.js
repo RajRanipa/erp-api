@@ -40,7 +40,7 @@ async function getCurrentBalances({ companyId, itemId, warehouseId, uom, bin = n
     null,
     session ? { session } : undefined
   ).lean();
-  console.log("getCurrentBalances snap", snap);
+  // console.log("getCurrentBalances snap", snap);
   return {
     onHand: snap?.onHand ?? 0,
     reserved: snap?.reserved ?? 0,
