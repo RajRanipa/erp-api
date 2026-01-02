@@ -193,7 +193,7 @@ export async function gateWayRefreshToken(req, res) {
     const existingToken = await RefreshToken.findOne({ device, userId: effectiveUserId });
 
     console.log('existingToken userId:', existingToken);
-    
+
     if (!existingToken) {
       console.error("No matching refresh token found in database.");
       return res.status(403).json({ status: false, message: 'Invalid refresh token' });
@@ -225,24 +225,6 @@ export async function gateWayRefreshToken(req, res) {
       device,
     });
 
-    // ✅ Set cookies againn
-    // console.log("Setting new cookies for access and refresh tokens.");
-    res.cookie('accessToken', accessToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.Strict_Mode,
-      domain: process.env.Domain_Name.includes('localhost') ? '' : process.env.Domain_Name,
-      maxAge: ACCESS_TOKEN_EXPIRE_MINUTES * 60 * 1000,
-    });
-
-    res.cookie('refreshToken', newRefreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.Strict_Mode,
-      domain: process.env.Domain_Name.includes('localhost') ? '' : process.env.Domain_Name,
-      maxAge: REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60 * 1000,
-    });
-
     console.log("Token refresh successful, returning response.", timestamp);
 
     // 📅 Calculate and send the new access token expiry time
@@ -251,10 +233,14 @@ export async function gateWayRefreshToken(req, res) {
     return res.status(200).json({
       status: true,
       message: 'Access token refreshed',
-      accessTokenExpireAt: accessTokenExpireAt
+      accessTokenExpireAt: accessTokenExpireAt,
+      "data": {
+          "accessToken": accessToken,
+          "accessTokenExpireAt": accessTokenExpireAt  
+      }
     });
-  } catch (err) {
-    console.error('Refresh Token Error:', err);
-    return res.status(403).json({ status: false, message: 'Invalid or expired refresh token' });
-  }
+} catch (err) {
+  console.error('Refresh Token Error:', err);
+  return res.status(403).json({ status: false, message: 'Invalid or expired refresh token' });
+}
 };
