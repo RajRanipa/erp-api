@@ -135,7 +135,8 @@ export async function gateWayRefreshToken(req, res) {
 
   console.log('Attempting to refresh token..', authHeader);
 
-  const { device, userId: bodyUserId } = req.body || {};
+  const { device, userId } = req.body || {};
+  bodyUserId = userId;
   console.log('request body', device, bodyUserId);
 
   const now = new Date();
@@ -186,10 +187,14 @@ export async function gateWayRefreshToken(req, res) {
       return res.status(400).json({ status: false, message: 'Invalid userId' });
     }
 
+    console.log('Effective userId:', effectiveUserId);
+
     const existingToken = await RefreshToken.findMatchingToken({
       device,
       userId: effectiveUserId,
     });
+
+    console.log('existingToken userId:', existingToken);
     
     if (!existingToken) {
       console.error("No matching refresh token found in database.");
