@@ -131,7 +131,7 @@ export async function gateWayRefreshToken(req, res) {
   const token = authHeader.startsWith('Bearer ')
     ? authHeader.slice(7)
     : null;
-  console.log("Attempting to refresh token..", req);
+  console.log("Attempting to refresh token..", authHeader);
   
   const { device, userId } = req.body;
   console.log("response body", device,userId);
