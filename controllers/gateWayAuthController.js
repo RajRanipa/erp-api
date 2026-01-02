@@ -136,7 +136,7 @@ export async function gateWayRefreshToken(req, res) {
   console.log('Attempting to refresh token..', authHeader);
 
   const { device, userId } = req.body || {};
-  bodyUserId = userId;
+  const bodyUserId = userId;
   console.log('request body', device, bodyUserId);
 
   const now = new Date();
