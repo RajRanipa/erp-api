@@ -235,12 +235,13 @@ export async function gateWayRefreshToken(req, res) {
       message: 'Access token refreshed',
       accessTokenExpireAt: accessTokenExpireAt,
       "data": {
-          "accessToken": accessToken,
-          "accessTokenExpireAt": accessTokenExpireAt  
+        tokenType: 'Bearer',
+        "accessToken": accessToken,
+        "accessTokenExpireAt": accessTokenExpireAt
       }
     });
-} catch (err) {
-  console.error('Refresh Token Error:', err);
-  return res.status(403).json({ status: false, message: 'Invalid or expired refresh token' });
-}
+  } catch (err) {
+    console.error('Refresh Token Error:', err);
+    return res.status(403).json({ status: false, message: 'Invalid or expired refresh token' });
+  }
 };
