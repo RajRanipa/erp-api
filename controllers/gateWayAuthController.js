@@ -1,4 +1,5 @@
 // backend-api/controllers/authController.js
+import mongoose from 'mongoose';
 import User from '../models/User.js';
 import Company from '../models/Company.js';
 import jwt from 'jsonwebtoken';
@@ -131,11 +132,12 @@ export async function gateWayRefreshToken(req, res) {
   const token = authHeader.startsWith('Bearer ')
     ? authHeader.slice(7)
     : null;
-  console.log("Attempting to refresh token..", authHeader);
-  
-  const { device, userId } = req.body;
-  console.log("response body", device,userId);
-  
+
+  console.log('Attempting to refresh token..', authHeader);
+
+  const { device, userId: bodyUserId } = req.body || {};
+  console.log('request body', device, bodyUserId);
+
   const now = new Date();
   const timestamp = now.toLocaleString('en-IN', {
     timeZone: 'Asia/Kolkata',
@@ -145,22 +147,46 @@ export async function gateWayRefreshToken(req, res) {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
-    hour12: true
+    hour12: true,
   });
-  console.log("refreshToken token at refreshToken ::-- ", timestamp, token);
 
   if (!token) {
-    console.error("No refresh token found.");
-    return res.status(401).json({ status: false, message: 'No refresh token found' });
+    console.error('No token found in Authorization header.');
+    return res.status(401).json({ status: false, message: 'No token found' });
+  }
+
+  if (!device) {
+    return res.status(400).json({ status: false, message: 'device is required' });
   }
 
   try {
-    // console.log("Verifying refresh token...");
-    const decoded = jwt.verify(token, process.env.JWT_ACCESS_SECRET);
-    console.log("Verified refresh token.", decoded);
-    
-    // ✅ Use model method to find matching hashed token
-    const existingToken = await RefreshToken.findMatchingToken(device, decoded.userId || userId);
+    let decoded = null;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_ACCESS_SECRET);
+      console.log('Verified token.', decoded);
+    } catch (verifyErr) {
+      if (verifyErr?.name === 'TokenExpiredError') {
+        // Ignore expiry: gateway will send userId in body
+        console.warn('[gateway] Token expired; falling back to userId from body.', verifyErr?.expiredAt);
+        decoded = null;
+      } else {
+        console.error('Refresh Token Error (verify failed):', verifyErr);
+        return res.status(403).json({ status: false, message: 'Invalid token' });
+      }
+    }
+
+    // Prefer decoded id when token is valid; otherwise fall back to body userId
+    const effectiveUserId = decoded?.id || decoded?.userId || bodyUserId;
+
+    if (!effectiveUserId) {
+      return res.status(400).json({ status: false, message: 'userId is required' });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(effectiveUserId)) {
+      return res.status(400).json({ status: false, message: 'Invalid userId' });
+    }
+
+    const existingToken = await RefreshToken.findMatchingToken(device, effectiveUserId);
     if (!existingToken) {
       console.error("No matching refresh token found in database.");
       return res.status(403).json({ status: false, message: 'Invalid refresh token' });
@@ -171,7 +197,7 @@ export async function gateWayRefreshToken(req, res) {
     await RefreshToken.deleteOne({ _id: existingToken._id });
 
     // ✅ Generate new tokens
-    const user = await User.findById(decoded.userId);
+    const user = await User.findById(effectiveUserId);
     if (!user) {
       console.error("User not found for decoded refresh token.");
       return res.status(404).json({ status: false, message: 'User not found' });
