@@ -189,7 +189,8 @@ export async function gateWayRefreshToken(req, res) {
 
     console.log('Effective userId:', effectiveUserId);
 
-    const existingToken = await RefreshToken.findMatchingToken(device, effectiveUserId);
+    // const existingToken = await RefreshToken.findMatchingToken(device, effectiveUserId);
+    const existingToken = await RefreshToken.findOne({ device, userId: effectiveUserId });
 
     console.log('existingToken userId:', existingToken);
     
