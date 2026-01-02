@@ -186,7 +186,11 @@ export async function gateWayRefreshToken(req, res) {
       return res.status(400).json({ status: false, message: 'Invalid userId' });
     }
 
-    const existingToken = await RefreshToken.findMatchingToken(device, effectiveUserId);
+    const existingToken = await RefreshToken.findMatchingToken({
+      device,
+      userId: effectiveUserId,
+    });
+    
     if (!existingToken) {
       console.error("No matching refresh token found in database.");
       return res.status(403).json({ status: false, message: 'Invalid refresh token' });
@@ -215,6 +219,7 @@ export async function gateWayRefreshToken(req, res) {
       userAgent: req.headers['user-agent'],
       ip: req.ip,
       expiresAt: refreshTokenExpireAt,
+      device,
     });
 
     // ✅ Set cookies againn
