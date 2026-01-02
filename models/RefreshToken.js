@@ -44,6 +44,8 @@ refreshTokenSchema.statics.hashToken = function (plainToken) {
 };
 
 refreshTokenSchema.statics.findMatchingToken = async function (plainToken, userId) {
+  console.log('plainToken', plainToken);
+  console.log('userId', userId);
   const hashed = this.hashToken(plainToken);
   return await this.findOne({ token: hashed, userId });
 };

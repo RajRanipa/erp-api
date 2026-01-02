@@ -178,21 +178,18 @@ export async function gateWayRefreshToken(req, res) {
 
     // Prefer decoded id when token is valid; otherwise fall back to body userId
     const effectiveUserId = decoded?.id || decoded?.userId || bodyUserId;
-    console.log('Effective userId:', effectiveUserId);
+
     if (!effectiveUserId) {
       return res.status(400).json({ status: false, message: 'userId is required' });
     }
 
-    // if (!mongoose.Types.ObjectId.isValid(effectiveUserId)) {
-    //   return res.status(400).json({ status: false, message: 'Invalid userId' });
-    // }
+    if (!mongoose.Types.ObjectId.isValid(effectiveUserId)) {
+      return res.status(400).json({ status: false, message: 'Invalid userId' });
+    }
 
     console.log('Effective userId:', effectiveUserId);
 
-    const existingToken = await RefreshToken.findMatchingToken({
-      device,
-      userId: effectiveUserId,
-    });
+    const existingToken = await RefreshToken.findMatchingToken(device, effectiveUserId);
 
     console.log('existingToken userId:', existingToken);
     
