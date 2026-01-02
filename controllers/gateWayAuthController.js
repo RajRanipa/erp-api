@@ -127,9 +127,15 @@ export async function gateWayLogin(req, res) {
 };
 
 export async function gateWayRefreshToken(req, res) {
-  // console.log("Attempting to refresh token..");
-  const token = req.cookies.refreshToken;
-  const aToken = req.cookies.accessToken;
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.startsWith('Bearer ')
+    ? authHeader.slice(7)
+    : null;
+  console.log("Attempting to refresh token..", req);
+  
+  const { device, userId } = req.body;
+  console.log("response body", device,userId);
+  
   const now = new Date();
   const timestamp = now.toLocaleString('en-IN', {
     timeZone: 'Asia/Kolkata',
@@ -141,7 +147,7 @@ export async function gateWayRefreshToken(req, res) {
     second: '2-digit',
     hour12: true
   });
-  // console.log("refreshToken token at refreshToken ::-- ", timestamp, token, !aToken);
+  console.log("refreshToken token at refreshToken ::-- ", timestamp, token);
 
   if (!token) {
     console.error("No refresh token found.");
@@ -150,10 +156,11 @@ export async function gateWayRefreshToken(req, res) {
 
   try {
     // console.log("Verifying refresh token...");
-    const decoded = jwt.verify(token, process.env.JWT_REFRESH_SECRET);
-    // console.log("Verified refresh token.", decoded);
+    const decoded = jwt.verify(token, process.env.JWT_ACCESS_SECRET);
+    console.log("Verified refresh token.", decoded);
+    
     // ✅ Use model method to find matching hashed token
-    const existingToken = await RefreshToken.findMatchingToken(token, decoded.userId);
+    const existingToken = await RefreshToken.findMatchingToken(device, decoded.userId || userId);
     if (!existingToken) {
       console.error("No matching refresh token found in database.");
       return res.status(403).json({ status: false, message: 'Invalid refresh token' });
