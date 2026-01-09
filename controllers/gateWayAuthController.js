@@ -164,7 +164,7 @@ export async function gateWayRefreshToken(req, res) {
     let decoded = null;
     try {
       decoded = jwt.verify(token, process.env.JWT_ACCESS_SECRET);
-      console.log('Verified token.', decoded);
+      // console.log('Verified token.', decoded);
     } catch (verifyErr) {
       if (verifyErr?.name === 'TokenExpiredError') {
         // Ignore expiry: gateway will send userId in body
