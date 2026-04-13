@@ -340,6 +340,7 @@ export async function ingestBlanketBatch({ companyId, payload }) {
                     refType: "PROD_GATEWAY",
                     refId: doc._id,
                     enforceNonNegative: false,
+                    batchNo:"Production Testing 01",
                 });
                 
                 // console.log('invRes', invRes);

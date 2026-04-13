@@ -1,353 +1,716 @@
-// controllers/PartyController.js
-import mongoose from 'mongoose';
-import Party from '../models/Party.js';
+// backend-api/controllers/partyController.js
+//
+// ✅ CRUD + Options + Status + Soft Delete
+// ✅ Bulk Export to Excel (.xlsx)
+// ✅ Bulk Import from Excel (.xlsx/.xls)
+//
+// Packages:
+//   npm i xlsx
+//
+// For import upload, use multer in routes (field name: "file"):
+//   npm i multer
+//
+// Assumptions (same as your codebase style):
+//  - req.user.companyId exists (multi-tenant)
+//  - handleError(res, err, msg?) exists
+//  - applyAuditCreate(req, payload) + applyAuditUpdate(req, payload) exist
 
-const { isValidObjectId } = mongoose;
+import XLSX from 'xlsx';
+import Party, { PARTY_ROLES, PARTY_STATUS, PARTY_TYPE, ADDRESS_PURPOSES } from '../models/Party.js';
+import { handleError } from '../utils/errorHandler.js';
+import { applyAuditCreate, applyAuditUpdate } from '../utils/auditHelper.js';
 
-/* ------------------------------ util helpers ------------------------------ */
+const asStr = (v) => (v == null ? '' : String(v)).trim();
+const asUpper = (v) => asStr(v).toUpperCase();
+const asLower = (v) => asStr(v).toLowerCase();
 
-const sendHttpError = (res, err, fallbackStatus = 400) => {
-  const status = Number(err?.status) || fallbackStatus;
-  const payload = {
-    success: false,
-    message: String(err?.message || 'Request failed'),
-  };
-  if (err?.errors && typeof err.errors === 'object') payload.errors = err.errors;
-  return res.status(status).json(payload);
-};
+// Basic format validators (optional fields: validate only when provided)
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i;
+const PHONE_RE = /^[0-9+\-() ]{6,20}$/;
 
-const toTrim = (v) => (typeof v === 'string' ? v.trim() : v);
-const toUpper = (v) => (typeof v === 'string' ? v.trim().toUpperCase() : v);
-const isNonEmpty = (v) => typeof v === 'string' && v.trim().length > 0;
+// India GSTIN format (15 chars). We apply this only when taxId looks like a GSTIN.
+const GSTIN_RE = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]$/;
 
-const EMAIL_RE =
-  /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i;
-const PHONE_RE =
-  /^[0-9+\-() ]{6,20}$/;
-
-// GSTIN format: 15 chars, first 2 digits state code
-// Ref: https://en.wikipedia.org/wiki/Goods_and_Services_Tax_(India)#GSTIN
-const GSTIN_RE =
-  /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9][Z][A-Z0-9]$/;
-
-const normalizePartyInput = (input = {}) => {
-  const out = { ...input };
-
-  out.legalName = toTrim(out.legalName);
-  out.displayName = toTrim(out.displayName);
-  out.role = toTrim(out.role);
-  out.email = toTrim(out.email);
-  out.phone = toTrim(out.phone);
-
-  // normalize tax
-  if (out.tax) {
-    out.tax = { ...out.tax };
-    if (out.tax.gstin) out.tax.gstin = toUpper(out.tax.gstin);
-    if (out.tax.pan) out.tax.pan = toUpper(out.tax.pan);
-    if (out.tax.placeOfSupply) out.tax.placeOfSupply = toTrim(out.tax.placeOfSupply);
-  }
-
-  // normalize addresses
-  if (Array.isArray(out.addresses)) {
-    out.addresses = out.addresses.map((a) => ({
-      label: toTrim(a?.label),
-      line1: toTrim(a?.line1),
-      line2: toTrim(a?.line2),
-      city: toTrim(a?.city),
-      state: toTrim(a?.state),
-      stateCode: toTrim(a?.stateCode),
-      country: a?.country || 'IN',
-      pincode: toTrim(a?.pincode),
-      isDefaultBilling: Boolean(a?.isDefaultBilling),
-      isDefaultShipping: Boolean(a?.isDefaultShipping),
-    }));
-  }
-
-  // contacts
-  if (Array.isArray(out.contacts)) {
-    out.contacts = out.contacts.map((c) => ({
-      name: toTrim(c?.name),
-      email: toTrim(c?.email),
-      phone: toTrim(c?.phone),
-      role: toTrim(c?.role),
-      isPrimary: Boolean(c?.isPrimary),
-    }));
-  }
-
-  // credit
-  if (out.credit) {
-    out.credit = {
-      currency: toTrim(out.credit.currency) || 'INR',
-      paymentTerm: toTrim(out.credit.paymentTerm) || 'NET30',
-      creditLimit: Number(out.credit.creditLimit) || 0,
-      onHold: Boolean(out.credit.onHold),
-    };
-  }
-
-  // bank
-  if (out.bank) {
-    out.bank = {
-      holderName: toTrim(out.bank.holderName),
-      ifsc: toTrim(out.bank.ifsc),
-      accountNo: toTrim(out.bank.accountNo),
-      branch: toTrim(out.bank.branch),
-    };
-  }
-
-  // status
-  if (out.status) out.status = toTrim(out.status);
-
-  return out;
-};
-
-const validatePartyInput = (input = {}) => {
-  const errors = {};
-
-  if (!isNonEmpty(input.legalName)) errors.legalName = 'legalName is required';
-  if (!['customer', 'vendor', 'both'].includes(input.role || '')) {
-    errors.role = 'role must be one of customer | vendor | both';
-  }
-
-  if (input.email && !EMAIL_RE.test(input.email)) errors.email = 'invalid email';
-  if (input.phone && !PHONE_RE.test(input.phone)) errors.phone = 'invalid phone';
-
-  if (input.tax?.gstin && !GSTIN_RE.test(input.tax.gstin)) {
-    errors.gstin = 'invalid GSTIN format';
-  }
-  if (input.tax?.placeOfSupply && input.tax?.gstin) {
-    const stateCodeFromGstin = input.tax.gstin.substring(0, 2);
-    if (isNonEmpty(input.tax.placeOfSupply) && input.tax.placeOfSupply !== stateCodeFromGstin) {
-      errors.placeOfSupply = 'placeOfSupply must match GSTIN state code';
-    }
-  }
-
-  // address min validation
-  if (Array.isArray(input.addresses)) {
-    input.addresses.forEach((a, idx) => {
-      if (!isNonEmpty(a?.line1)) {
-        (errors.addresses ??= {});
-        errors.addresses[idx] = { line1: 'line1 is required' };
-      }
-      if (a?.pincode && String(a.pincode).length < 5) {
-        (errors.addresses ??= {});
-        errors.addresses[idx] = { ...(errors.addresses[idx] || {}), pincode: 'invalid pincode' };
-      }
-    });
-  }
-
-  // role-based field visibility
-  if (input.role === 'customer' || input.role === 'both') {
-    // ok to have credit
-  } else if (input.credit) {
-    // strip or flag — we choose to ignore silently in controller
-  }
-
-  if (input.role === 'vendor' || input.role === 'both') {
-    // ok to have bank
-  } else if (input.bank) {
-    // ignore or flag
-  }
-
-  // status enum
-  if (input.status && !['draft', 'active', 'archived'].includes(input.status)) {
-    errors.status = 'invalid status';
-  }
-
-  return { ok: Object.keys(errors).length === 0, errors };
-};
-
-const ensureUniqueGSTIN = async (gstin, excludeId = null) => {
-  if (!gstin) return;
-  const q = { 'tax.gstin': gstin };
-  if (excludeId && isValidObjectId(excludeId)) {
-    q._id = { $ne: excludeId };
-  }
-  const exists = await Party.exists(q);
-  if (exists) {
-    const err = new Error('GSTIN already exists');
-    err.status = 409;
+function validateEmailPhone({ email, phone }) {
+  if (email && !EMAIL_RE.test(String(email).trim())) {
+    const err = new Error('Invalid email format');
+    err.status = 400;
     throw err;
   }
-};
+  if (phone && !PHONE_RE.test(String(phone).trim())) {
+    const err = new Error('Invalid phone format');
+    err.status = 400;
+    throw err;
+  }
+}
 
-const buildListFilters = (query = {}) => {
-  const {
-    role,
+function validateTaxIdMaybeGSTIN(taxId) {
+  if (!taxId) return;
+  const t = String(taxId).trim().toUpperCase();
+
+  // Only enforce GSTIN regex when it looks like a GSTIN (15 chars).
+  // This keeps the module universal (VAT/other tax IDs won't be rejected).
+  if (t.length === 15 && !GSTIN_RE.test(t)) {
+    const err = new Error('Invalid GSTIN format');
+    err.status = 400;
+    throw err;
+  }
+}
+
+// ---- Address normalization helpers ----
+function normalizePurposes(purposes) {
+  return Array.from(
+    new Set(
+      (Array.isArray(purposes) ? purposes : [])
+        .map((p) => asLower(p))
+        .map((p) => p.trim())
+        .filter(Boolean)
+    )
+  );
+}
+
+function normalizeAddress(addr = {}) {
+  const a = addr && typeof addr === 'object' ? addr : {};
+
+  // Accept both postalCode and pincode from clients; we store pincode.
+  const pin = asStr(a.pincode || a.postalCode);
+
+  return {
+    label: asStr(a.label) || 'Office',
+    purposes: normalizePurposes(a.purposes),
+    line1: asStr(a.line1),
+    line2: asStr(a.line2),
+    city: asStr(a.city),
+    state: asStr(a.state),
+    country: asStr(a.country) || 'India',
+    pincode: pin,
+
+    // pass-through optional fields if you later add them in UI
+    landmark: asStr(a.landmark),
+    area: asStr(a.area),
+    district: asStr(a.district),
+    placeId: asStr(a.placeId),
+    isActive: a.isActive == null ? true : Boolean(a.isActive),
+    notes: asStr(a.notes),
+  };
+}
+
+function normalizeAddresses(input) {
+  // New format: { primaryAddress, additionalAddresses }
+  if (input && typeof input === 'object' && !Array.isArray(input)) {
+    const primary = normalizeAddress(input.primaryAddress || {});
+    const additional = Array.isArray(input.additionalAddresses)
+      ? input.additionalAddresses.map(normalizeAddress)
+      : [];
+    return { primaryAddress: primary, additionalAddresses: additional };
+  }
+
+  // Old format: [addr, addr, ...] => first becomes primary; rest additional.
+  if (Array.isArray(input)) {
+    const first = input[0] || {};
+    const rest = input.slice(1) || [];
+    return {
+      primaryAddress: normalizeAddress(first),
+      additionalAddresses: rest.map((a) => {
+        const na = normalizeAddress(a);
+        // translate old flags if present
+        if (a?.isDefaultBilling) na.purposes = Array.from(new Set([...(na.purposes || []), ADDRESS_PURPOSES.BILLING]));
+        if (a?.isDefaultShipping) na.purposes = Array.from(new Set([...(na.purposes || []), ADDRESS_PURPOSES.SHIPPING]));
+        return na;
+      }),
+    };
+  }
+
+  // No addresses provided
+  return { primaryAddress: normalizeAddress({ label: 'Office' }), additionalAddresses: [] };
+}
+
+function enforceUniquePurpose(additionalAddresses = []) {
+  // At most one billing + one shipping in additional addresses.
+  let seenBilling = false;
+  let seenShipping = false;
+
+  return (additionalAddresses || []).map((a) => {
+    const addr = { ...(a || {}) };
+    const p = normalizePurposes(addr.purposes);
+
+    let out = p;
+    if (out.includes(ADDRESS_PURPOSES.BILLING)) {
+      if (seenBilling) out = out.filter((x) => x !== ADDRESS_PURPOSES.BILLING);
+      else seenBilling = true;
+    }
+    if (out.includes(ADDRESS_PURPOSES.SHIPPING)) {
+      if (seenShipping) out = out.filter((x) => x !== ADDRESS_PURPOSES.SHIPPING);
+      else seenShipping = true;
+    }
+
+    addr.purposes = out;
+    return addr;
+  });
+}
+
+function ensureCompany(req) {
+  const companyId = req.user?.companyId;
+  if (!companyId) throw new Error('Missing companyId on user');
+  return companyId;
+}
+
+function escapeRegex(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function parseRoles(v) {
+  if (Array.isArray(v)) return v.map(asUpper).filter(Boolean);
+  const s = asStr(v);
+  if (!s) return [];
+  // allow: "SUPPLIER,CUSTOMER" or "SUPPLIER | CUSTOMER"
+  return s
+    .split(/[,|]/g)
+    .map(asUpper)
+    .map((x) => x.replace(/\s+/g, ''))
+    .filter(Boolean);
+}
+
+function validateRoles(roles = []) {
+  const allowed = new Set(Object.values(PARTY_ROLES));
+  for (const r of roles) {
+    if (!allowed.has(r)) {
+      throw new Error(`Invalid role "${r}". Allowed: ${Array.from(allowed).join(', ')}`);
+    }
+  }
+}
+
+function normalizePartyPayload(body = {}) {
+  const roles = parseRoles(body.roles);
+  validateRoles(roles);
+
+  const partyType = body.partyType ? asUpper(body.partyType) : PARTY_TYPE.BUSINESS;
+  if (!Object.values(PARTY_TYPE).includes(partyType)) {
+    throw new Error(`Invalid partyType "${partyType}"`);
+  }
+
+  const status = body.status ? asLower(body.status) : PARTY_STATUS.ACTIVE;
+  if (!Object.values(PARTY_STATUS).includes(status)) {
+    throw new Error(`Invalid status "${status}"`);
+  }
+
+  const taxId = body?.taxProfile?.taxId != null ? asUpper(body.taxProfile.taxId) : null;
+  const pan = body?.taxProfile?.pan != null ? asUpper(body.taxProfile.pan) : null;
+
+  const payload = {
+    name: asStr(body.name),
+    legalName: asStr(body.legalName),
+    partyType,
+    roles,
     status,
-    state,
-    q,
-  } = query;
 
-  const filter = {};
-  if (role && ['customer', 'vendor', 'both'].includes(role)) filter.role = role;
-  if (status && ['draft', 'active', 'archived'].includes(status)) filter.status = status;
-  if (state) filter['addresses.state'] = state;
+    phone: asStr(body.phone),
+    email: asLower(body.email),
+    website: asStr(body.website),
 
-  if (q && q.trim()) {
-    const term = q.trim();
-    // Prefer text index if present, else use regex OR
-    filter.$or = [
-      { legalName: { $regex: term, $options: 'i' } },
-      { displayName: { $regex: term, $options: 'i' } },
-      { email: { $regex: term, $options: 'i' } },
-      { phone: { $regex: term, $options: 'i' } },
-      { 'tax.gstin': { $regex: term, $options: 'i' } },
-    ];
-  }
+    tags: Array.isArray(body.tags) ? body.tags.map(asStr).filter(Boolean) : [],
 
-  return filter;
-};
+    addresses: (() => {
+      const out = normalizeAddresses(body.addresses);
+      out.additionalAddresses = enforceUniquePurpose(out.additionalAddresses);
+      return out;
+    })(),
+    contacts: Array.isArray(body.contacts) ? body.contacts : [],
 
-const parsePaging = (query = {}) => {
-  const page = Math.max(1, Number(query.page) || 1);
-  const limit = Math.min(100, Math.max(1, Number(query.limit) || 25));
-  const skip = (page - 1) * limit;
-  return { page, limit, skip };
-};
+    taxProfile: {
+      ...(body.taxProfile || {}),
+      isTaxRegistered: Boolean(body?.taxProfile?.isTaxRegistered),
+      taxId: taxId || null,
+      pan: pan || null,
+      placeOfSupply: asStr(body?.taxProfile?.placeOfSupply),
+    },
 
-/* --------------------------------- create --------------------------------- */
+    paymentTerms: {
+      ...(body.paymentTerms || {}),
+    },
 
-export const createParty = async (req, res) => {
+    currency: asStr(body.currency) || 'INR',
+    creditLimit: body.creditLimit == null ? 0 : Number(body.creditLimit),
+    openingBalance: body.openingBalance == null ? 0 : Number(body.openingBalance),
+
+    notes: asStr(body.notes),
+
+    // Extensions
+    meta: body.meta && typeof body.meta === 'object' ? body.meta : undefined,
+    customFields: body.customFields && typeof body.customFields === 'object' ? body.customFields : undefined,
+  };
+
+  validateEmailPhone({ email: payload.email, phone: payload.phone });
+  validateTaxIdMaybeGSTIN(payload?.taxProfile?.taxId);
+
+  if (!payload.name) throw new Error('name is required');
+  if (Number.isNaN(payload.creditLimit) || payload.creditLimit < 0) throw new Error('creditLimit must be a non-negative number');
+  if (Number.isNaN(payload.openingBalance)) throw new Error('openingBalance must be a number');
+
+  return payload;
+}
+
+/**
+ * POST /parties
+ */
+export async function createParty(req, res) {
   try {
-    const normalized = normalizePartyInput(req.body || {});
-    console.log("req.body :- ", req.body)
-    console.log("normalized :- ", normalized)
-    // return;
-    const { ok, errors } = validatePartyInput(normalized);
-    if (!ok) return res.status(400).json({ success: false, message: 'Validation failed', errors });
+    const companyId = ensureCompany(req);
+    let payload = normalizePartyPayload(req.body || {});
+    payload.companyId = companyId;
 
-    await ensureUniqueGSTIN(normalized?.tax?.gstin);
+    payload = applyAuditCreate(req, payload);
 
-    // Strip fields not allowed by role (soft enforcement)
-    if (normalized.role === 'customer') normalized.bank = undefined;
-    if (normalized.role === 'vendor') normalized.credit = undefined;
-
-    const doc = await Party.create({
-      ...normalized,
-      createdBy: req.user?.userId || req.user?._id,
-      updatedBy: req.user?.userId || req.user?._id,
-    });
-
-    const lean = await Party.findById(doc._id).lean({ getters: true });
-    return res.status(201).json({ success: true, message: 'Party created', data: lean });
+    const doc = await Party.create(payload);
+    return res.status(201).json({ status: true, message: 'Party created', data: doc });
   } catch (err) {
-    return sendHttpError(res, err, 500);
+    return handleError(res, err, 'Failed to create party');
   }
-};
+}
 
-/* ---------------------------------- list ---------------------------------- */
-
-export const listParties = async (req, res) => {
+/**
+ * GET /parties/:id
+ */
+export async function getPartyById(req, res) {
   try {
-    const filter = buildListFilters(req.query || {});
-    const { page, limit, skip } = parsePaging(req.query || {});
-    const [data, total] = await Promise.all([
-      Party.find(filter)
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit)
-        .lean({ getters: true }),
+    const companyId = ensureCompany(req);
+    const { id } = req.params;
+
+    const doc = await Party.findOne({ _id: id, companyId }).lean();
+    if (!doc) return res.status(404).json({ status: false, message: 'Party not found' });
+
+    return res.json({ status: true, data: doc });
+  } catch (err) {
+    return handleError(res, err, 'Failed to fetch party');
+  }
+}
+
+/**
+ * GET /parties
+ * Query:
+ *  - role=SUPPLIER|CUSTOMER|...
+ *  - status=active|inactive|all
+ *  - q=search (name/phone/email/taxId/pan)
+ *  - page, limit
+ */
+export async function listParties(req, res) {
+  try {
+    const companyId = ensureCompany(req);
+    const { role, status = 'active', q = '', limit = 50, page = 1 } = req.query || {};
+
+    const filter = { companyId };
+
+    if (role) {
+      const r = asUpper(role);
+      validateRoles([r]);
+      filter.roles = r;
+    }
+
+    if (String(status).toLowerCase() !== 'all') {
+      const st = asLower(status);
+      if (!Object.values(PARTY_STATUS).includes(st)) throw new Error('Invalid status filter');
+      filter.status = st;
+    }
+
+    const search = asStr(q);
+    if (search) {
+      const re = new RegExp(escapeRegex(search), 'i');
+      filter.$or = [
+        { name: re },
+        { legalName: re },
+        { phone: re },
+        { email: re },
+        { 'taxProfile.taxId': re },
+        { 'taxProfile.pan': re },
+      ];
+    }
+
+    const lim = Math.min(200, Math.max(1, Number(limit) || 50));
+    const pg = Math.max(1, Number(page) || 1);
+    const skip = (pg - 1) * lim;
+
+    const [rows, total] = await Promise.all([
+      Party.find(filter).sort({ name: 1 }).skip(skip).limit(lim).lean(),
       Party.countDocuments(filter),
     ]);
 
     return res.json({
-      success: true,
-      data,
-      page,
-      limit,
-      total,
+      status: true,
+      data: rows,
+      meta: { page: pg, limit: lim, total, pages: Math.ceil(total / lim) },
     });
   } catch (err) {
-    return sendHttpError(res, err, 500);
+    return handleError(res, err, 'Failed to list parties');
   }
-};
+}
 
-/* ---------------------------------- read ---------------------------------- */
-
-export const getPartyById = async (req, res) => {
+/**
+ * GET /parties/options
+ * Lightweight endpoint for dropdowns
+ * Query:
+ *  - role=SUPPLIER (common)
+ *  - q=search
+ *  - limit
+ */
+export async function getPartyOptions(req, res) {
   try {
-    const { id } = req.params;
-    if (!isValidObjectId(id)) return res.status(400).json({ success: false, message: 'Invalid id' });
+    const companyId = ensureCompany(req);
+    const { role, q = '', limit = 30 } = req.query || {};
 
-    const doc = await Party.findById(id).lean({ getters: true });
-    if (!doc) return res.status(404).json({ success: false, message: 'Party not found' });
+    const filter = { companyId, status: PARTY_STATUS.ACTIVE };
 
-    return res.json({ success: true, data: doc });
-  } catch (err) {
-    return sendHttpError(res, err, 500);
-  }
-};
-
-/* --------------------------------- update --------------------------------- */
-
-export const updateParty = async (req, res) => {
-  try {
-    const { id } = req.params;
-    if (!isValidObjectId(id)) return res.status(400).json({ success: false, message: 'Invalid id' });
-
-    const normalized = normalizePartyInput(req.body || {});
-    const { ok, errors } = validatePartyInput(normalized);
-    if (!ok) return res.status(400).json({ success: false, message: 'Validation failed', errors });
-
-    await ensureUniqueGSTIN(normalized?.tax?.gstin, id);
-
-    if (normalized.role === 'customer') normalized.bank = undefined;
-    if (normalized.role === 'vendor') normalized.credit = undefined;
-
-    const updated = await Party.findByIdAndUpdate(
-      id,
-      { ...normalized, updatedBy: req.user?.userId || req.user?._id },
-      { new: true, runValidators: true }
-    ).lean({ getters: true });
-
-    if (!updated) return res.status(404).json({ success: false, message: 'Party not found' });
-    return res.json({ success: true, message: 'Party updated', data: updated });
-  } catch (err) {
-    // duplicate gstin would throw here as well (unique index)
-    if (err?.code === 11000 && err?.keyPattern?.['tax.gstin']) {
-      err.status = 409; err.message = 'GSTIN already exists';
-    }
-    return sendHttpError(res, err, 500);
-  }
-};
-
-/* --------------------------------- status --------------------------------- */
-
-export const patchPartyStatus = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { status } = req.body || {};
-    if (!isValidObjectId(id)) return res.status(400).json({ success: false, message: 'Invalid id' });
-    if (!['draft', 'active', 'archived'].includes(status || '')) {
-      return res.status(400).json({ success: false, message: 'Invalid status' });
+    if (role) {
+      const r = asUpper(role);
+      validateRoles([r]);
+      filter.roles = r;
     }
 
-    const updated = await Party.findByIdAndUpdate(
-      id,
-      { status, updatedBy: req.user?.userId || req.user?._id },
-      { new: true }
-    ).lean({ getters: true });
+    const search = asStr(q);
+    if (search) {
+      const re = new RegExp(escapeRegex(search), 'i');
+      filter.$or = [
+        { name: re },
+        { phone: re },
+        { email: re },
+        { 'taxProfile.taxId': re },
+      ];
+    }
 
-    if (!updated) return res.status(404).json({ success: false, message: 'Party not found' });
-    return res.json({ success: true, message: 'Status updated', data: updated });
+    const lim = Math.min(100, Math.max(1, Number(limit) || 30));
+
+    const rows = await Party.find(filter, 'name phone email roles status taxProfile.taxId')
+      .sort({ name: 1 })
+      .limit(lim)
+      .lean();
+
+    const mapped = rows.map((p) => ({
+      value: String(p._id),
+      label: p.name,
+      meta: {
+        phone: p.phone || '',
+        email: p.email || '',
+        taxId: p?.taxProfile?.taxId || '',
+        roles: p.roles || [],
+      },
+    }));
+
+    return res.json({ status: true, data: mapped });
   } catch (err) {
-    return sendHttpError(res, err, 500);
+    return handleError(res, err, 'Failed to fetch party options');
   }
-};
+}
 
-/* --------------------------------- delete --------------------------------- */
-// Soft delete recommendation: archive instead of delete.
-// If you still need hard delete for test data, expose it guarded by role.
-export const deleteParty = async (req, res) => {
+/**
+ * PATCH /parties/:id
+ */
+export async function updateParty(req, res) {
   try {
+    const companyId = ensureCompany(req);
     const { id } = req.params;
-    if (!isValidObjectId(id)) return res.status(400).json({ success: false, message: 'Invalid id' });
 
-    const deleted = await Party.findByIdAndDelete(id).lean({ getters: true });
-    if (!deleted) return res.status(404).json({ success: false, message: 'Party not found' });
+    const existing = await Party.findOne({ _id: id, companyId });
+    if (!existing) return res.status(404).json({ status: false, message: 'Party not found' });
 
-    return res.json({ success: true, message: 'Party deleted' });
+    // Merge existing + incoming, then normalize (prevents wiping fields unintentionally)
+    const incoming = req.body || {};
+    const merged = {
+      ...existing.toObject(),
+      ...incoming,
+      // Preserve nested objects when incoming omits them
+      taxProfile: { ...(existing.toObject().taxProfile || {}), ...(incoming.taxProfile || {}) },
+      paymentTerms: { ...(existing.toObject().paymentTerms || {}), ...(incoming.paymentTerms || {}) },
+      // addresses are normalized later, but ensure we pass incoming.addresses if provided, else keep existing
+      addresses: incoming.addresses != null ? incoming.addresses : existing.toObject().addresses,
+    };
+    const normalized = normalizePartyPayload(merged);
+    const updateWithAudit = applyAuditUpdate(req, normalized);
+
+    Object.assign(existing, updateWithAudit);
+    await existing.save();
+
+    return res.json({ status: true, message: 'Party updated', data: existing });
   } catch (err) {
-    return sendHttpError(res, err, 500);
+    return handleError(res, err, 'Failed to update party');
   }
+}
+
+/**
+ * PATCH /parties/:id/status
+ * Body: { to: 'active'|'inactive' }
+ */
+export async function updatePartyStatus(req, res) {
+  try {
+    const companyId = ensureCompany(req);
+    const { id } = req.params;
+    const { to } = req.body || {};
+
+    const st = asLower(to);
+    if (!Object.values(PARTY_STATUS).includes(st)) throw new Error('Invalid target status');
+
+    const doc = await Party.findOne({ _id: id, companyId });
+    if (!doc) return res.status(404).json({ status: false, message: 'Party not found' });
+
+    doc.status = st;
+    Object.assign(doc, applyAuditUpdate(req, {}));
+    await doc.save();
+
+    return res.json({ status: true, message: 'Status updated', data: doc });
+  } catch (err) {
+    return handleError(res, err, 'Failed to update status');
+  }
+}
+
+/**
+ * DELETE /parties/:id
+ * Soft delete => set status inactive
+ */
+export async function deleteParty(req, res) {
+  try {
+    const companyId = ensureCompany(req);
+    const { id } = req.params;
+
+    const doc = await Party.findOne({ _id: id, companyId });
+    if (!doc) return res.status(404).json({ status: false, message: 'Party not found' });
+
+    doc.status = PARTY_STATUS.INACTIVE;
+    Object.assign(doc, applyAuditUpdate(req, {}));
+    await doc.save();
+
+    return res.json({ status: true, message: 'Party deactivated', data: doc });
+  } catch (err) {
+    return handleError(res, err, 'Failed to delete party');
+  }
+}
+
+/**
+ * GET /parties/export
+ * Query:
+ *  - role=SUPPLIER|CUSTOMER
+ *  - status=active|inactive|all
+ *  - q=search
+ * Returns .xlsx buffer
+ */
+export async function exportPartiesXlsx(req, res) {
+  try {
+    const companyId = ensureCompany(req);
+    const { role, status = 'all', q = '' } = req.query || {};
+
+    const filter = { companyId };
+
+    if (role) {
+      const r = asUpper(role);
+      validateRoles([r]);
+      filter.roles = r;
+    }
+
+    if (String(status).toLowerCase() !== 'all') {
+      const st = asLower(status);
+      if (!Object.values(PARTY_STATUS).includes(st)) throw new Error('Invalid status filter');
+      filter.status = st;
+    }
+
+    const search = asStr(q);
+    if (search) {
+      const re = new RegExp(escapeRegex(search), 'i');
+      filter.$or = [{ name: re }, { phone: re }, { email: re }, { 'taxProfile.taxId': re }];
+    }
+
+    const rows = await Party.find(filter).sort({ name: 1 }).lean();
+
+    const data = rows.map((p) => ({
+      Name: p.name || '',
+      LegalName: p.legalName || '',
+      PartyType: p.partyType || '',
+      Roles: (p.roles || []).join(','),
+      Status: p.status || '',
+      Phone: p.phone || '',
+      Email: p.email || '',
+      Website: p.website || '',
+      TaxRegistered: p?.taxProfile?.isTaxRegistered ? 'YES' : 'NO',
+      TaxId: p?.taxProfile?.taxId || '',
+      PAN: p?.taxProfile?.pan || '',
+      PlaceOfSupply: p?.taxProfile?.placeOfSupply || '',
+      Currency: p.currency || 'INR',
+      CreditLimit: p.creditLimit ?? 0,
+      OpeningBalance: p.openingBalance ?? 0,
+      Notes: p.notes || '',
+    }));
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(data);
+    XLSX.utils.book_append_sheet(wb, ws, 'Parties');
+
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="parties_${Date.now()}.xlsx"`);
+    return res.send(buf);
+  } catch (err) {
+    return handleError(res, err, 'Failed to export parties');
+  }
+}
+
+/**
+ * POST /parties/import
+ * multipart/form-data, field name: "file"
+ *
+ * Columns (case-insensitive):
+ *  Name*, LegalName, PartyType, Roles, Status, Phone, Email, Website,
+ *  TaxRegistered, TaxId, PAN, PlaceOfSupply, Currency, CreditLimit, OpeningBalance, Notes
+ *
+ * Upsert rules:
+ *  - If TaxId exists => upsert by (companyId + taxId)
+ *  - Else => soft match by (companyId + name + phone?) then update, else create
+ */
+export async function importPartiesXlsx(req, res) {
+  try {
+    const companyId = ensureCompany(req);
+
+    if (!req.file?.buffer) {
+      throw new Error('Missing file. Send multipart/form-data with field name "file".');
+    }
+
+    const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
+    const sheetName = wb.SheetNames?.[0];
+    if (!sheetName) throw new Error('Excel has no sheets');
+
+    const ws = wb.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return res.json({
+        status: true,
+        message: 'No rows found in file',
+        summary: { total: 0, created: 0, updated: 0, failed: 0 },
+        errors: [],
+      });
+    }
+
+    const errors = [];
+    let created = 0;
+    let updated = 0;
+
+    const getCell = (row, key) => {
+      const k = Object.keys(row).find((x) => asLower(x) === asLower(key));
+      return k ? row[k] : '';
+    };
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      try {
+        const name = asStr(getCell(row, 'Name'));
+        if (!name) throw new Error('Name is required');
+
+        const roles = parseRoles(getCell(row, 'Roles'));
+        validateRoles(roles);
+
+        const partyType = asUpper(getCell(row, 'PartyType')) || PARTY_TYPE.BUSINESS;
+        if (!Object.values(PARTY_TYPE).includes(partyType)) throw new Error(`Invalid PartyType "${partyType}"`);
+
+        const status = asLower(getCell(row, 'Status')) || PARTY_STATUS.ACTIVE;
+        if (!Object.values(PARTY_STATUS).includes(status)) throw new Error(`Invalid Status "${status}"`);
+
+        const taxRegisteredRaw = asUpper(getCell(row, 'TaxRegistered'));
+        const isTaxRegistered = taxRegisteredRaw === 'YES' || taxRegisteredRaw === 'TRUE' || taxRegisteredRaw === '1';
+
+        const taxId = asUpper(getCell(row, 'TaxId')) || null;
+        const pan = asUpper(getCell(row, 'PAN')) || null;
+
+        const payload = {
+          companyId,
+          name,
+          legalName: asStr(getCell(row, 'LegalName')),
+          partyType,
+          roles,
+          status,
+          phone: asStr(getCell(row, 'Phone')),
+          email: asLower(getCell(row, 'Email')),
+          website: asStr(getCell(row, 'Website')),
+          taxProfile: {
+            isTaxRegistered,
+            taxId,
+            pan,
+            placeOfSupply: asStr(getCell(row, 'PlaceOfSupply')),
+          },
+          currency: asStr(getCell(row, 'Currency')) || 'INR',
+          creditLimit: Number(getCell(row, 'CreditLimit') || 0),
+          openingBalance: Number(getCell(row, 'OpeningBalance') || 0),
+          notes: asStr(getCell(row, 'Notes')),
+        };
+
+        validateEmailPhone({ email: payload.email, phone: payload.phone });
+        validateTaxIdMaybeGSTIN(payload?.taxProfile?.taxId);
+
+        if (Number.isNaN(payload.creditLimit) || payload.creditLimit < 0) throw new Error('CreditLimit must be a non-negative number');
+        if (Number.isNaN(payload.openingBalance)) throw new Error('OpeningBalance must be a number');
+
+        // Upsert
+        if (taxId) {
+          const doc = await Party.findOne({ companyId, 'taxProfile.taxId': taxId });
+          if (doc) {
+            Object.assign(doc, applyAuditUpdate(req, payload));
+            await doc.save();
+            updated++;
+          } else {
+            await Party.create(applyAuditCreate(req, payload));
+            created++;
+          }
+        } else {
+          const softMatch = { companyId, name: payload.name };
+          if (payload.phone) softMatch.phone = payload.phone;
+
+          const doc = await Party.findOne(softMatch);
+          if (doc) {
+            Object.assign(doc, applyAuditUpdate(req, payload));
+            await doc.save();
+            updated++;
+          } else {
+            await Party.create(applyAuditCreate(req, payload));
+            created++;
+          }
+        }
+      } catch (e) {
+        // row number: +2 because header row + 1-indexed
+        errors.push({ row: i + 2, error: String(e?.message || e) });
+      }
+    }
+
+    return res.json({
+      status: true,
+      message: 'Import completed',
+      summary: { total: rows.length, created, updated, failed: errors.length },
+      errors,
+    });
+  } catch (err) {
+    return handleError(res, err, 'Failed to import parties');
+  }
+}
+
+const partyController = {
+  createParty,
+  getPartyById,
+  listParties,
+  getPartyOptions,
+  updateParty,
+  updatePartyStatus,
+  deleteParty,
+  exportPartiesXlsx,
+  importPartiesXlsx,
 };
+
+export default partyController;
+
+// I want to use this ✅ Option A — If user enters GSTIN
+// You can fetch:
+// 	•	legal name
+// 	•	address
+// 	•	registration status/type
+// …but typically via GSTN APIs through an authorized channel (GSP / e-invoice APIs), not a casual public endpoint. GSTN explains GSP ecosystem (authorized providers) here.  
+// NIC’s e-invoice API docs also show “Get GSTIN details” endpoints (part of e-invoicing API set).  
+
+// Best practical approach:
+// In your Party form, add a button:
+// 	•	“Fetch details from GSTIN”
+// 	•	Fill: legalName + address + status
+
+// So for this we need to make one api ??

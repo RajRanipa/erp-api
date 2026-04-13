@@ -17,7 +17,7 @@ export async function gateWayLogin(req, res) {
   try {
     const { email, password } = req.body;
 
-    console.log("hit the log in ===================, email", email)
+    console.log("hit the log in gateway ===================, email", email)
     // Find user and explicitly select password
     const user = await User.findOne({ email }).select('+password');
     // console.log("user ", user)
@@ -187,12 +187,12 @@ export async function gateWayRefreshToken(req, res) {
       return res.status(400).json({ status: false, message: 'Invalid userId' });
     }
 
-    console.log('Effective userId:', effectiveUserId);
+    // console.log('Effective userId:', effectiveUserId);
 
     // const existingToken = await RefreshToken.findMatchingToken(device, effectiveUserId);
     const existingToken = await RefreshToken.findOne({ device, userId: effectiveUserId });
 
-    console.log('existingToken userId:', existingToken);
+    console.log('existingToken userId:', existingToken?.device);
 
     if (!existingToken) {
       console.error("No matching refresh token found in database.");
