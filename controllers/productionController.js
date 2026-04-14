@@ -291,45 +291,85 @@ export const getAllInventory = async (req, res) => {
         res.status(500).json({ message: 'Server error while fetching inventory items.', error: error.message });
     }
 };
+
 export const getAllProduction = async (req, res) => {
     try {
-        // 1. Extract the dates from the query parameters (e.g., /api/production?startDate=2023-10-01&endDate=2023-10-31)
         const { startDate, endDate } = req.query;
-        console.log('startDate backend', startDate);
-        console.log('endDate backend', endDate);
-        // 2. Initialize an empty filter object
+        
+        // 1. Initialize empty match filter
         let queryFilter = {};
 
-        // 3. Construct the date query if either date is provided
+        // 2. Construct the date query if either date is provided
         if (startDate || endDate) {
             queryFilter.createdAt = {};
 
             if (startDate) {
-                // $gte: Greater Than or Equal to start date
                 queryFilter.createdAt.$gte = new Date(startDate); 
             }
 
             if (endDate) {
-                // $lte: Less Than or Equal to end date
                 const end = new Date(endDate);
-                // Push the time to the very end of the day so it includes records created at 5 PM, 10 PM, etc.
                 end.setHours(23, 59, 59, 999); 
                 queryFilter.createdAt.$lte = end;
             }
         }
 
-        // 4. Pass the filter into your find() method
-        const Productionlist = await ProductionBlanketRoll.find(queryFilter);
-            // .populate('matchedItem', 'name'); 
+        // 3. Build the Aggregation Pipeline
+        const pipeline = [];
 
-        res.status(200).json(Productionlist);
+        // Stage A: Filter records by date (Equivalent to your previous find query filter)
+        if (Object.keys(queryFilter).length > 0) {
+            pipeline.push({ $match: queryFilter });
+        }
+
+        // Stage B: Group by matchedItem, calculate count and sum of weightKg
+        pipeline.push({
+            $group: {
+                _id: "$matchedItem",               // Group by the matchedItem ObjectId
+                totalRecords: { $sum: 1 },         // Add 1 for every record found
+                totalWeight: { $sum: "$weightKg" } // Sum the weightKg field
+            }
+        });
+
+        // Stage C: (Optional but recommended) Populate the matchedItem details
+        // Note: 'items' should be the actual lowercase, pluralized name of your Item collection in the DB.
+        pipeline.push({
+            $lookup: {
+                from: "items",             // Collection name for the Item model
+                localField: "_id",         // The _id from our $group stage (which is the matchedItem ObjectId)
+                foreignField: "_id",       // The _id in the items collection
+                as: "itemDetails"          // Put the result in this new array field
+            }
+        });
+
+        // Stage D: Flatten the itemDetails array into an object
+        pipeline.push({
+            $unwind: {
+                path: "$itemDetails",
+                preserveNullAndEmptyArrays: true // Keep groups even if itemDetails isn't found
+            }
+        });
+
+        // Stage E: Format the final output to look clean and professional
+        pipeline.push({
+            $project: {
+                _id: 0,                         // Hide the default _id field
+                matchedItemId: "$_id",          // Rename _id to matchedItemId
+                itemName: "$itemDetails.name",  // Assuming your Item model has a 'name' field
+                totalRecords: 1,                // Keep the totalRecords count
+                totalWeight: 1                  // Keep the totalWeight sum
+            }
+        });
+
+        // 4. Execute the pipeline
+        const aggregatedProduction = await ProductionBlanketRoll.aggregate(pipeline);
+
+        res.status(200).json(aggregatedProduction);
     } catch (error) {
-        console.error('Error fetching production data:', error);
+        console.error('Error fetching aggregated production data:', error);
         res.status(500).json({ 
             message: 'Server error while fetching production data.', 
             error: error.message 
         });
     }
 };
-
-// ProductionBlanketRoll
