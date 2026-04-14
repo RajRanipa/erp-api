@@ -319,8 +319,8 @@ export const getAllProduction = async (req, res) => {
         }
 
         // 4. Pass the filter into your find() method
-        const Productionlist = await ProductionBlanketRoll.find(queryFilter)
-            .populate('item'); 
+        const Productionlist = await ProductionBlanketRoll.find(queryFilter);
+            // .populate('matchedItem', 'name'); 
 
         res.status(200).json(Productionlist);
     } catch (error) {
