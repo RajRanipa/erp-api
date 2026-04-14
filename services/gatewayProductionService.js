@@ -218,6 +218,7 @@ export async function ingestBlanketBatch({ companyId, payload }) {
 
     for (const rec of records) {
         const recordId = rec?.recordId;
+        console.log("recordId", recordId);
         const productCode = Number(rec?.productCode);
         const temperatureValue = Number(rec?.temperature);
         const densityValue = Number(rec?.density);
