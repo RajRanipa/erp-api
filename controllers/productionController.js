@@ -22,7 +22,7 @@ export const getAllProduction = async (req, res) => {
       // 1. FILTER
       {
         $match: {
-          companyId: new mongoose.Types.ObjectId(companyId),
+        //   companyId: new mongoose.Types.ObjectId(companyId),
           at: { $gte: start, $lte: end },
           matchedItem: { $ne: null }, // only valid items
         },
@@ -96,7 +96,7 @@ export const getAllProduction = async (req, res) => {
     //   },
     //   { $unwind: { path: "$packingItem", preserveNullAndEmptyArrays: true } },
 
-      // OPTIONAL: populate matchedItem also
+    //   // OPTIONAL: populate matchedItem also
     //   {
     //     $lookup: {
     //       from: "items",
@@ -108,19 +108,19 @@ export const getAllProduction = async (req, res) => {
     //   { $unwind: { path: "$matchedItem", preserveNullAndEmptyArrays: true } },
 
       // 4. CLEAN OUTPUT
-    //   {
-    //     $project: {
-    //       _id: 0,
-    //       matchedItem: 1,
-    //       productType: 1,
-    //       temperature: 1,
-    //       density: 1,
-    //       dimension: 1,
-    //       packingItem: 1,
-    //       totalRolls: 1,
-    //       totalWeight: 1,
-    //     },
-    //   },
+      {
+        $project: {
+          _id: 0,
+          matchedItem: 1,
+          productType: 1,
+          temperature: 1,
+          density: 1,
+          dimension: 1,
+          packingItem: 1,
+          totalRolls: 1,
+          totalWeight: 1,
+        },
+      },
 
       // 5. SORT (optional)
       {
