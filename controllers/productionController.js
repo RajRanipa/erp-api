@@ -46,81 +46,81 @@ export const getAllProduction = async (req, res) => {
       },
 
       // 3. LOOKUPS (populate)
-      {
-        $lookup: {
-          from: "producttypes",
-          localField: "productType",
-          foreignField: "_id",
-          as: "productType",
-        },
-      },
-      { $unwind: { path: "$productType", preserveNullAndEmptyArrays: true } },
+    //   {
+    //     $lookup: {
+    //       from: "producttypes",
+    //       localField: "productType",
+    //       foreignField: "_id",
+    //       as: "productType",
+    //     },
+    //   },
+    //   { $unwind: { path: "$productType", preserveNullAndEmptyArrays: true } },
 
-      {
-        $lookup: {
-          from: "temperatures",
-          localField: "temperature",
-          foreignField: "_id",
-          as: "temperature",
-        },
-      },
-      { $unwind: { path: "$temperature", preserveNullAndEmptyArrays: true } },
+    //   {
+    //     $lookup: {
+    //       from: "temperatures",
+    //       localField: "temperature",
+    //       foreignField: "_id",
+    //       as: "temperature",
+    //     },
+    //   },
+    //   { $unwind: { path: "$temperature", preserveNullAndEmptyArrays: true } },
 
-      {
-        $lookup: {
-          from: "densities",
-          localField: "density",
-          foreignField: "_id",
-          as: "density",
-        },
-      },
-      { $unwind: { path: "$density", preserveNullAndEmptyArrays: true } },
+    //   {
+    //     $lookup: {
+    //       from: "densities",
+    //       localField: "density",
+    //       foreignField: "_id",
+    //       as: "density",
+    //     },
+    //   },
+    //   { $unwind: { path: "$density", preserveNullAndEmptyArrays: true } },
 
-      {
-        $lookup: {
-          from: "dimensions",
-          localField: "dimension",
-          foreignField: "_id",
-          as: "dimension",
-        },
-      },
-      { $unwind: { path: "$dimension", preserveNullAndEmptyArrays: true } },
+    //   {
+    //     $lookup: {
+    //       from: "dimensions",
+    //       localField: "dimension",
+    //       foreignField: "_id",
+    //       as: "dimension",
+    //     },
+    //   },
+    //   { $unwind: { path: "$dimension", preserveNullAndEmptyArrays: true } },
 
-      {
-        $lookup: {
-          from: "items",
-          localField: "packingItem",
-          foreignField: "_id",
-          as: "packingItem",
-        },
-      },
-      { $unwind: { path: "$packingItem", preserveNullAndEmptyArrays: true } },
+    //   {
+    //     $lookup: {
+    //       from: "items",
+    //       localField: "packingItem",
+    //       foreignField: "_id",
+    //       as: "packingItem",
+    //     },
+    //   },
+    //   { $unwind: { path: "$packingItem", preserveNullAndEmptyArrays: true } },
 
       // OPTIONAL: populate matchedItem also
-      {
-        $lookup: {
-          from: "items",
-          localField: "_id",
-          foreignField: "_id",
-          as: "matchedItem",
-        },
-      },
-      { $unwind: { path: "$matchedItem", preserveNullAndEmptyArrays: true } },
+    //   {
+    //     $lookup: {
+    //       from: "items",
+    //       localField: "_id",
+    //       foreignField: "_id",
+    //       as: "matchedItem",
+    //     },
+    //   },
+    //   { $unwind: { path: "$matchedItem", preserveNullAndEmptyArrays: true } },
 
       // 4. CLEAN OUTPUT
-      {
-        $project: {
-          _id: 0,
-          matchedItem: 1,
-          productType: 1,
-          temperature: 1,
-          density: 1,
-          dimension: 1,
-          packingItem: 1,
-          totalRolls: 1,
-          totalWeight: 1,
-        },
-      },
+    //   {
+    //     $project: {
+    //       _id: 0,
+    //       matchedItem: 1,
+    //       productType: 1,
+    //       temperature: 1,
+    //       density: 1,
+    //       dimension: 1,
+    //       packingItem: 1,
+    //       totalRolls: 1,
+    //       totalWeight: 1,
+    //     },
+    //   },
 
       // 5. SORT (optional)
       {
