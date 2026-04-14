@@ -17,13 +17,14 @@ export const getAllProduction = async (req, res) => {
 
     const start = new Date(startDate);
     const end = new Date(endDate);
-
+    end.setHours(23, 59, 59, 999);
+    
     const data = await ProductionBlanketRoll.aggregate([
       // 1. FILTER
       {
         $match: {
         //   companyId: new mongoose.Types.ObjectId(companyId),
-          at: { $gte: start, $lte: end },
+          createdAt: { $gte: start, $lte: end },
           matchedItem: { $ne: null }, // only valid items
         },
       },
