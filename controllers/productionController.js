@@ -292,7 +292,7 @@ export const getAllInventory = async (req, res) => {
     }
 };
 
-export const getAllProduction = async (req, res) => {
+export const getAllProduction1 = async (req, res) => {
     try {
         const { startDate, endDate } = req.query;
         
@@ -376,4 +376,138 @@ export const getAllProduction = async (req, res) => {
             error: error.message 
         });
     }
+};
+
+export const getAllProduction = async (req, res) => {
+  try {
+    const { companyId } = req.user; // or from params
+    const { startDate, endDate } = req.query;
+
+    if (!startDate || !endDate) {
+      return res.status(400).json({ message: "startDate and endDate required" });
+    }
+
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+
+    const data = await ProductionBlanketRoll.aggregate([
+      // 1. FILTER
+      {
+        $match: {
+          companyId: new mongoose.Types.ObjectId(companyId),
+          at: { $gte: start, $lte: end },
+          matchedItem: { $ne: null }, // only valid items
+        },
+      },
+
+      // 2. GROUP BY matchedItem
+      {
+        $group: {
+          _id: "$matchedItem",
+
+          totalRolls: { $sum: 1 },
+          totalWeight: { $sum: "$weightKg" },
+
+          // take first values (same for group)
+          productType: { $first: "$productType" },
+          temperature: { $first: "$temperature" },
+          density: { $first: "$density" },
+          dimension: { $first: "$dimension" },
+          packingItem: { $first: "$packingItem" },
+        },
+      },
+
+      // 3. LOOKUPS (populate)
+      {
+        $lookup: {
+          from: "producttypes",
+          localField: "productType",
+          foreignField: "_id",
+          as: "productType",
+        },
+      },
+      { $unwind: { path: "$productType", preserveNullAndEmptyArrays: true } },
+
+      {
+        $lookup: {
+          from: "temperatures",
+          localField: "temperature",
+          foreignField: "_id",
+          as: "temperature",
+        },
+      },
+      { $unwind: { path: "$temperature", preserveNullAndEmptyArrays: true } },
+
+      {
+        $lookup: {
+          from: "densities",
+          localField: "density",
+          foreignField: "_id",
+          as: "density",
+        },
+      },
+      { $unwind: { path: "$density", preserveNullAndEmptyArrays: true } },
+
+      {
+        $lookup: {
+          from: "dimensions",
+          localField: "dimension",
+          foreignField: "_id",
+          as: "dimension",
+        },
+      },
+      { $unwind: { path: "$dimension", preserveNullAndEmptyArrays: true } },
+
+      {
+        $lookup: {
+          from: "items",
+          localField: "packingItem",
+          foreignField: "_id",
+          as: "packingItem",
+        },
+      },
+      { $unwind: { path: "$packingItem", preserveNullAndEmptyArrays: true } },
+
+      // OPTIONAL: populate matchedItem also
+      {
+        $lookup: {
+          from: "items",
+          localField: "_id",
+          foreignField: "_id",
+          as: "matchedItem",
+        },
+      },
+      { $unwind: { path: "$matchedItem", preserveNullAndEmptyArrays: true } },
+
+      // 4. CLEAN OUTPUT
+      {
+        $project: {
+          _id: 0,
+          matchedItem: 1,
+          productType: 1,
+          temperature: 1,
+          density: 1,
+          dimension: 1,
+          packingItem: 1,
+          totalRolls: 1,
+          totalWeight: 1,
+        },
+      },
+
+      // 5. SORT (optional)
+      {
+        $sort: { totalWeight: -1 },
+      },
+    ]);
+
+    return res.json({
+      success: true,
+      count: data.length,
+      data,
+    });
+
+  } catch (error) {
+    console.error("Production Summary Error:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
 };
