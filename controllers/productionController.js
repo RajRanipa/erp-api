@@ -366,7 +366,7 @@ export const getAllProduction = async (req, res) => {
         });
 
         // 4. Execute the pipeline
-        const aggregatedProduction = await ProductionBlanketRoll.aggregate(pipeline);
+        const aggregatedProduction = await ProductionBlanketRoll.aggregate(pipeline).populate('matchedItem');
 
         res.status(200).json(aggregatedProduction);
     } catch (error) {
