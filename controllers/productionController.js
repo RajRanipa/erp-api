@@ -351,87 +351,17 @@ export const getAllProduction = async (req, res) => {
         });
 
         // Stage E: Format the final output to look clean and professional
-        // Stage C: Get the base Item details
-        pipeline.push({
-            $lookup: {
-                from: "items",             // Verify this collection name in your DB
-                localField: "_id",         
-                foreignField: "_id",       
-                as: "itemDetails"          
-            }
-        });
-        pipeline.push({
-            $unwind: { path: "$itemDetails", preserveNullAndEmptyArrays: true }
-        });
-
-        // Stage D1: Populate Temperature
-        pipeline.push({
-            $lookup: {
-                from: "temperatures", // The collection name for Temperature (usually pluralized by Mongoose)
-                localField: "itemDetails.temperature", // Pointing to the ID inside itemDetails
-                foreignField: "_id",
-                as: "tempDetails"
-            }
-        });
-        pipeline.push({
-            $unwind: { path: "$tempDetails", preserveNullAndEmptyArrays: true }
-        });
-
-        // Stage D2: Populate Density
-        pipeline.push({
-            $lookup: {
-                from: "densities", // The collection name for Density
-                localField: "itemDetails.density",
-                foreignField: "_id",
-                as: "densityDetails"
-            }
-        });
-        pipeline.push({
-            $unwind: { path: "$densityDetails", preserveNullAndEmptyArrays: true }
-        });
-
-        // Stage D3: Populate Dimension
-        pipeline.push({
-            $lookup: {
-                from: "dimensions", // The collection name for Dimension
-                localField: "itemDetails.dimension",
-                foreignField: "_id",
-                as: "dimensionDetails"
-            }
-        });
-        pipeline.push({
-            $unwind: { path: "$dimensionDetails", preserveNullAndEmptyArrays: true }
-        });
-
-        // Stage D4: Populate Packing
-        pipeline.push({
-            $lookup: {
-                from: "packings", // NOTE: Replace with actual collection name for packing (might be 'items' again?)
-                localField: "itemDetails.packing",
-                foreignField: "_id",
-                as: "packingDetails"
-            }
-        });
-        pipeline.push({
-            $unwind: { path: "$packingDetails", preserveNullAndEmptyArrays: true }
-        });
-
-        // Stage E: Final Format ($project)
         pipeline.push({
             $project: {
-                _id: 0,                         
-                matchedItemId: "$_id",          
-                itemName: "$itemDetails.name",  
-                
-                // IMPORTANT: Replace '.value' or '.name' with the actual field 
-                // names you want to display from those specific schemas.
-                temperature: "$tempDetails.value",      // e.g., if Temperature schema has a 'value' field
-                density: "$densityDetails.value",       // e.g., if Density schema has a 'value' field
-                dimension: "$dimensionDetails.size",    // e.g., if Dimension schema has a 'size' field
-                packing: "$packingDetails.name",        // e.g., if Packing schema has a 'name' field
-                
-                totalRecords: 1,                
-                totalWeight: 1                  
+                _id: 0,                         // Hide the default _id field
+                matchedItemId: "$_id",          // Rename _id to matchedItemId
+                itemName: "$itemDetails.name",  // Assuming your Item model has a 'name' field
+                temperature: "$itemDetails.temperature",  // Assuming your Item model has a 'name' field
+                density: "$itemDetails.density",  // Assuming your Item model has a 'name' field
+                dimension: "$itemDetails.dimension",  // Assuming your Item model has a 'name' field
+                packing: "$itemDetails.packing",  // Assuming your Item model has a 'name' field
+                totalRecords: 1,                // Keep the totalRecords count
+                totalWeight: 1                  // Keep the totalWeight sum
             }
         });
 
