@@ -4,6 +4,7 @@ import ProductionBlanketRoll from '../models/ProductionBlanketRoll.js';
 import BOM from '../models/BOM.js';
 import WorkOrder from '../models/WorkOrder.js'; // Import the new WorkOrder model
 import Item from '../models/Item.js';
+import { Mongoose } from 'mongoose';
 
 export const createWorkOrder = async (req, res) => {
     try {
@@ -394,7 +395,7 @@ export const getAllProduction = async (req, res) => {
       // 1. FILTER
       {
         $match: {
-          companyId: new mongoose.Types.ObjectId(companyId),
+          companyId: new Mongoose.Types.ObjectId(companyId),
           at: { $gte: start, $lte: end },
           matchedItem: { $ne: null }, // only valid items
         },
