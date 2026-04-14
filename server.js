@@ -7,7 +7,7 @@ import chalk from 'chalk';
 import cookieParser from 'cookie-parser';
 import path from 'path';
 
-// import productionRoutes from './routes/productionRoutes.js';
+import productionRoutes from './routes/productionRoutes.js';
 import producttypeRoutes from './routes/producttypeRoutes.js';
 import parameterRoutes from './routes/parameterRoutes.js';
 import categoryRoutes from './routes/categoryRoutes.js';
@@ -87,6 +87,7 @@ app.use('/api/inventory', inventoryRoutes);
 app.use('/api/users', inviteRoutes);
 app.use('/api/permissions', permissionsRoute);
 app.use('/api/myaccount', settingRoutes);
+app.use('/api/production', productionRoutes);
 app.use('/', inviteAuthRoutes);
 // /api/gateway/blanket/production
 app.use("/auth/gateway", gatewayAuthRoutes); 

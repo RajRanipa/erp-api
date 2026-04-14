@@ -1,5 +1,6 @@
 // controllers/productionController.js
 import RawMaterial from '../models/Rawmaterial.js';
+import ProductionBlanketRoll from '../models/ProductionBlanketRoll.js';
 import BOM from '../models/BOM.js';
 import WorkOrder from '../models/WorkOrder.js'; // Import the new WorkOrder model
 import Item from '../models/Item.js';
@@ -290,3 +291,45 @@ export const getAllInventory = async (req, res) => {
         res.status(500).json({ message: 'Server error while fetching inventory items.', error: error.message });
     }
 };
+export const getAllProduction = async (req, res) => {
+    try {
+        // 1. Extract the dates from the query parameters (e.g., /api/production?startDate=2023-10-01&endDate=2023-10-31)
+        const { startDate, endDate } = req.query;
+        console.log('startDate backend', startDate);
+        console.log('endDate backend', endDate);
+        // 2. Initialize an empty filter object
+        let queryFilter = {};
+
+        // 3. Construct the date query if either date is provided
+        if (startDate || endDate) {
+            queryFilter.createdAt = {};
+
+            if (startDate) {
+                // $gte: Greater Than or Equal to start date
+                queryFilter.createdAt.$gte = new Date(startDate); 
+            }
+
+            if (endDate) {
+                // $lte: Less Than or Equal to end date
+                const end = new Date(endDate);
+                // Push the time to the very end of the day so it includes records created at 5 PM, 10 PM, etc.
+                end.setHours(23, 59, 59, 999); 
+                queryFilter.createdAt.$lte = end;
+            }
+        }
+
+        // 4. Pass the filter into your find() method
+        const Productionlist = await ProductionBlanketRoll.find(queryFilter)
+            .populate('item'); 
+
+        res.status(200).json(Productionlist);
+    } catch (error) {
+        console.error('Error fetching production data:', error);
+        res.status(500).json({ 
+            message: 'Server error while fetching production data.', 
+            error: error.message 
+        });
+    }
+};
+
+// ProductionBlanketRoll
