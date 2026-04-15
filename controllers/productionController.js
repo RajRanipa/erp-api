@@ -29,10 +29,13 @@ export const getAllProduction = async (req, res) => {
         },
       },
 
-      // 2. GROUP BY matchedItem
+      // 2. GROUP BY matchedItem and statusOk
       {
         $group: {
-          _id: "$matchedItem",
+          _id: {
+            matchedItem: "$matchedItem",
+            statusOk: "$statusOk",
+          },
 
           totalRolls: { $sum: 1 },
           totalWeight: { $sum: "$weightKg" },
@@ -101,7 +104,7 @@ export const getAllProduction = async (req, res) => {
       {
         $lookup: {
           from: "items",
-          localField: "_id",
+          localField: "_id.matchedItem",
           foreignField: "_id",
           as: "matchedItem",
         },
@@ -120,6 +123,7 @@ export const getAllProduction = async (req, res) => {
           packingItem: 1,
           totalRolls: 1,
           totalWeight: 1,
+          statusOk: "$_id.statusOk",
         },
       },
 
