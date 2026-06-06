@@ -8,7 +8,7 @@ const ProductType = new mongoose.Schema(
       unique: true,
       required: true,
       lowercase: true,
-      enum: ['blanket', 'bulk', 'board', 'module', 'ET'],
+      enum: ['blanket', 'bulk', 'board', 'module', 'et'],
     }
   },
   { timestamps: true }
