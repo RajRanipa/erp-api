@@ -6,7 +6,7 @@ const ProductionBlanketRollSchema = new Schema(
     companyId: { type: Schema.Types.ObjectId, ref: "Company", required: true, index: true },
     gatewayId: { type: String, required: true, index: true },
 
-    recordId: { type: Number, required: true },
+    recordId: { type: String, required: true },
     at: { type: Date, required: true, index: true },
 
     // Raw fields from PLC
