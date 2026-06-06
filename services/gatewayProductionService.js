@@ -216,6 +216,223 @@ export async function ingestBlanketBatch({ companyId, payload }) {
             errors: [],
         };
 
+        // --- FLAT ARRAY LOOP STARTS HERE ---
+        for (const rec of records) {
+            const recordId = rec?.recordId;
+            console.log("Processing recordId", recordId);
+            
+            const productCode = Number(rec?.productCode);
+            const temperatureValue = Number(rec?.temperature);
+            const densityValue = Number(rec?.density);
+            const sizeCode = Number(rec?.sizeCode);
+            const batchNo = rec?.batchNo || "";
+            const at = safeDate(rec?.at) || new Date();
+
+            // EXTRACT SCALE DATA DIRECTLY FROM THE FLAT RECORD
+            const scaleNo = Number(rec?.scaleNo);
+            const weightKg = Number(rec?.weight || 0);
+            const statusOk = normalizeStatus(rec?.status);
+
+            // ignore empty/invalid lines
+            if (!scaleNo) continue;
+
+            // resolve shared refs
+            const resolveErrors = [];
+            const { id: productTypeId, err: ptErr } = await resolveProductType(productCode);
+            if (ptErr) resolveErrors.push(ptErr);
+
+            let dimensionId = null;
+            let temperatureId = null;
+            let densityId = null;
+            let matchedItemId = null;
+            let matchedItemUom = "roll";
+
+            if (productTypeId) {
+                const dimRes = await resolveDimension({ productTypeId, sizeCode });
+                dimensionId = dimRes.id;
+                if (dimRes.err) resolveErrors.push(dimRes.err);
+
+                const tdRes = await resolveTempDensity({ productTypeId, temperatureValue, densityValue });
+                temperatureId = tdRes.tempId;
+                densityId = tdRes.densId;
+                if (tdRes.errs?.length) resolveErrors.push(...tdRes.errs);
+
+                const matchedItem = await matchFGItem({
+                    companyId,
+                    productTypeId,
+                    temperatureId,
+                    densityId,
+                    dimensionId,
+                    packingId,
+                });
+
+                if (matchedItem) {
+                    matchedItemId = matchedItem._id;
+                    matchedItemUom = matchedItem.UOM || "roll";
+                } else {
+                    resolveErrors.push(`FG Item not found for specs: productType=${productTypeId} temp=${temperatureId} density=${densityId} dimension=${dimensionId} packing=${packingId}`);
+                }
+            } else {
+                resolveErrors.push("productTypeId not resolved; skipping dimension/temperature/density/matchedItem resolution");
+            }
+
+            try {
+                // insert normalized roll line (idempotent)
+                const doc = await ProductionBlanketRoll.create({
+                    companyId,
+                    gatewayId,
+                    recordId,
+                    at,
+                    productCode,
+                    temperatureValue,
+                    densityValue,
+                    sizeCode,
+                    batchNo,
+                    scaleNo,
+                    weightKg,
+                    statusOk,
+                    productType: productTypeId,
+                    temperature: temperatureId,
+                    density: densityId,
+                    dimension: dimensionId,
+                    packingItem: packingId,
+                    matchedItem: matchedItemId, 
+                    resolveErrors,
+                    ingestBatchId: batch._id,
+                });
+
+                summary.inserted++;
+
+                // Inventory posting (1-to-1 Traceability)
+                const shouldPost = statusOk === true && weightKg > 0;
+
+                if (!shouldPost) {
+                    continue;
+                }
+
+                if (!warehouseId) {
+                    await ProductionBlanketRoll.updateOne(
+                        { _id: doc._id },
+                        { $push: { resolveErrors: "Warehouse not found to post inventory" } }
+                    );
+                    continue;
+                }
+
+                if (!matchedItemId) {
+                    continue;
+                }
+
+                // post inventory as qty=1 roll
+                const invRes = await invReceive({
+                    companyId,
+                    itemId: matchedItemId, 
+                    warehouseId,
+                    uom: matchedItemUom,   
+                    qty: 1, // <--- EXPLICITLY SET TO 1
+                    by: null,
+                    note: `Auto receipt from gateway ${gatewayId} recordId ${recordId} scale ${scaleNo}`,
+                    refType: "PROD_GATEWAY",
+                    refId: doc._id,
+                    enforceNonNegative: false,
+                    batchNo: "Production Testing 01",
+                });
+
+                await ProductionBlanketRoll.updateOne(
+                    { _id: doc._id },
+                    {
+                        $set: {
+                            inventoryPosted: true,
+                            inventoryRef: {
+                                ledgerId: invRes?.ledger?._id,
+                                snapshotId: invRes?.snapshot?._id,
+                            },
+                        },
+                    }
+                );
+
+                summary.postedToInventory++;
+            } catch (err) {
+                // Duplicate safe handling (MongoDB Error 11000)
+                if (err?.code === 11000) {
+                    console.log(`Duplicate recordId ${recordId} safely skipped.`);
+                    summary.duplicates++;
+                    continue;
+                }
+                summary.failed++;
+                summary.errors.push(`recordId ${recordId} scale ${scaleNo}: ${err.message}`);
+            }
+        }
+
+        // finalize batch status
+        const status =
+            summary.failed === 0 && summary.errors.length === 0
+                ? "PROCESSED"
+                : summary.postedToInventory > 0
+                    ? "PARTIAL"
+                    : "FAILED";
+
+        await GatewayIngestBatch.updateOne(
+            { _id: batch._id },
+            { $set: { processingStatus: status, processingSummary: summary } }
+        );
+
+        const result = {
+            ok: true,
+            gatewayId: payload.gatewayId,
+            batchId: batch._id,
+            status,
+            summary,
+        };
+        
+        console.log('Batch Result:', result);
+        return result; // <--- FIXED: Now returns the payload to the controller
+
+    } catch (error) {
+        error.context = {
+            service: "gatewayProductionService.ingestBlanketBatch",
+            at: new Date().toISOString(),
+        };
+        throw error;
+    }
+}
+
+export async function ingestBlanketBatch_oldOne({ companyId, payload }) {
+    try {
+        if (!companyId) {
+            throw new AppError("companyId is required for gateway ingestion", { statusCode: 400, code: "MISSING_COMPANY" });
+        }
+
+        const { gatewayId, sentAt, records } = payload || {};
+        if (!gatewayId) {
+            throw new AppError("gatewayId is required", { statusCode: 400, code: "MISSING_GATEWAY" });
+        }
+        if (!Array.isArray(records)) {
+            throw new AppError("records must be an array", { statusCode: 400, code: "INVALID_PAYLOAD" });
+        }
+
+        const batch = await GatewayIngestBatch.create({
+            companyId,
+            gatewayId,
+            sentAt: safeDate(sentAt),
+            recordsCount: records.length,
+            rawPayload: payload,
+            processingStatus: "RECEIVED",
+        });
+
+        const warehouseId = await resolveWarehouseId();
+        const packingId = await resolvePackingItem(companyId);
+        if (!warehouseId) console.warn("[gateway] No warehouse found (set GATEWAY_WAREHOUSE_ID/CODE/NAME)");
+        if (!packingId) console.warn("[gateway] Packing item not found by name 'plastic bag' for companyId", companyId);
+
+        const summary = {
+            batchId: batch._id,
+            inserted: 0,
+            duplicates: 0,
+            postedToInventory: 0,
+            failed: 0,
+            errors: [],
+        };
+
         for (const rec of records) {
             const recordId = rec?.recordId;
             console.log("recordId", recordId);
