@@ -101,9 +101,10 @@ async function resolveProductType(productCode) {
     // Map PLC product codes to ProductType.name (lowercase)
     const PRODUCT_CODE_MAP = {
         1: "blanket",
-        // 2: "bulk",
-        // 3: "board",
-        // 4: "module",
+        2: "bulk",
+        3: "board",
+        4: "module",
+        5: "ET",
     };
 
     const name = PRODUCT_CODE_MAP[productCode];
