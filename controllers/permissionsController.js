@@ -29,7 +29,7 @@ export const listPermissions = async (req, res) => {
 export const listRoles = async (_req, res) => {
     try {
         const roles = getAllowedRoles();
-        console.log('roles', roles);
+        // console.log('roles', roles);
         return res.status(200).json({ status: true, roles });
     } catch (err) {
         return res.status(500).json({ status: false, message: 'Failed to list roles', error: err.message });

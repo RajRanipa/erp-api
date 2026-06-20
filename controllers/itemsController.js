@@ -55,6 +55,7 @@ function deriveCategoryKeyFromName(name) {
   if (n.includes('raw')) return 'RAW';
   if (n.includes('finish') || n.includes('finished')) return 'FG';
   if (n.includes('pack')) return 'PACKING';
+  if (n.includes('non-conformance')) return 'NC';
   return null;
 }
 
@@ -67,7 +68,7 @@ export const createItem = async (req, res) => {
     // Populate category to get name
     const cat = await Category.findById(category);
     // console.log('rest', rest); //  packing is here 
-    // console.log('cat', cat); // but why it's not here
+    console.log('cat', cat); // but why it's not here
     // if (!cat) throw new AppError('Invalid category.', { statusCode: 400, code: 'INVALID_CATEGORY' });
     // Validate fields
     let payload = { ...rest, sku: rest.sku || sku || null, category };
@@ -76,7 +77,6 @@ export const createItem = async (req, res) => {
     if (derivedKey) payload.categoryKey = derivedKey;
     // Apply audit fields from authenticated user (createdBy, updatedBy, companyId)
     payload = applyAuditCreate(req, payload);
-    console.log('payload applyAuditCreate', payload);
     const error = validateItemFields(payload, cat.name);
     // console.log('error', error);
     if (error) {

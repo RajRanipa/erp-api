@@ -19,24 +19,24 @@ const router = express.Router();
 router.use(auth);
 // Grouped endpoint: fetch all four parameter option lists
 // GET /api/options
-router.get('/options', roleAuth('items:parameters:read'), getAllParameterOptions);
+router.get('/options', roleAuth('parameters:read'), getAllParameterOptions);
 
 // Individual endpoints
 // GET /api/densities
-router.get('/densities',roleAuth('items:parameters:read'), getDensityOptions);
-router.get('/densities/by-id',roleAuth('items:parameters:read'), getDensityOptionsById);
+router.get('/densities',roleAuth('parameters:densities:read'), getDensityOptions);
+router.get('/densities/by-id',roleAuth('parameters:densities:read'), getDensityOptionsById);
 
 // GET /api/temperatures
-router.get('/temperatures',roleAuth('items:parameters:read'), getTemperatureOptions);
-router.get('/temperatures/by-id',roleAuth('items:parameters:read'), getTemperatureOptionsById);
+router.get('/temperatures',roleAuth('parameters:temperatures:read'), getTemperatureOptions);
+router.get('/temperatures/by-id',roleAuth('parameters:temperatures:read'), getTemperatureOptionsById);
 
 // GET /api/dimensions
-router.get('/dimensions',roleAuth('items:parameters:read'), getDimensionOptions);
-router.get('/dimensions/by-id',roleAuth('items:parameters:read'), getDimensionOptionsById);
+router.get('/dimensions',roleAuth('parameters:dimensions:read'), getDimensionOptions);
+router.get('/dimensions/by-id',roleAuth('parameters:dimensions:read'), getDimensionOptionsById);
 
 // CREATE endpoints
-router.post('/densities', roleAuth('items:parameters:create'), createDensity);
-router.post('/temperatures', roleAuth('items:parameters:create'), createTemperature);
-router.post('/dimensions', roleAuth('items:parameters:create'), createDimension);
+router.post('/densities', roleAuth('parameters:temperatures:create'), createDensity);
+router.post('/temperatures', roleAuth('parameters:temperatures:create'), createTemperature);
+router.post('/dimensions', roleAuth('parameters:dimensions:create'), createDimension);
 
 export default router;
