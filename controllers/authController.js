@@ -426,7 +426,7 @@ export async function signupResendOtp(req, res) {
 // @access  Public
 export async function loginStartOtp(req, res) {
   try {
-    console.log(' loginStartOtp hit _ ', process.env.SENDGRID_API_KEY);
+    console.log(' loginStartOtp hit _ ');
     const { email } = req.body || {};
 
     if (!email || typeof email !== 'string') {
