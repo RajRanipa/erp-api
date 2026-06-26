@@ -10,7 +10,7 @@ const ProductType = new mongoose.Schema(
       lowercase: true,
       enum: ['blanket', 'bulk', 'board', 'module', 'et'],
     },
-    catagoryID: {
+    categoryID: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Category",
       required: true,

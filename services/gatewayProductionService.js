@@ -113,8 +113,16 @@ async function resolveProductType(productCode) {
     // ProductType schema only has `name` (lowercased enum)
     const pt = await ProductType?.findOne({ name }).lean();
     console.log("gateway --- resolveProductType ", name, pt);
+        //     gateway --- resolveProductType  et {
+        //   _id: new ObjectId('6a241e823bd6aa522a038048'),
+        //   name: 'et',
+        //   createdAt: 2026-06-06T13:20:02.768Z,
+        //   updatedAt: 2026-06-26T13:09:08.169Z,
+        //   __v: 0,
+        //   categoryID: new ObjectId('6909ae671eb1036890995040')
+        // }
     if (!pt) return { id: null, err: `ProductType '${name}' not found in DB` };
-    return { id: pt._id, err: null };
+    return { id: pt._id, category: pt.categoryID, err: null };
 }
 
 // async function resolveTempDensity(companyId, temperatureValue, densityValue) {
@@ -151,11 +159,11 @@ async function resolveTempDensity({ productTypeId, temperatureValue, densityValu
     return { tempId: temp?._id || null, densId: dens?._id || null, errs };
 }
 
-async function matchFGItem({ companyId, productTypeId, temperatureId, densityId, dimensionId, packingId }) {
+async function matchFGItem({ companyId, productTypeId, category, temperatureId, densityId, dimensionId, packingId }) {
     // Try strict match first (including packing)
     let item = await Item.findOne({
         companyId,
-        categoryKey: "FG",
+        category: category,
         productType: productTypeId,
         temperature: temperatureId,
         density: densityId,
@@ -168,7 +176,7 @@ async function matchFGItem({ companyId, productTypeId, temperatureId, densityId,
     if (!item) {
         item = await Item.findOne({
             companyId,
-            categoryKey: "FG",
+            category: category,
             productType: productTypeId,
             temperature: temperatureId,
             density: densityId,
@@ -239,7 +247,7 @@ export async function ingestBlanketBatch({ companyId, payload }) {
 
             // resolve shared refs
             const resolveErrors = [];
-            const { id: productTypeId, err: ptErr } = await resolveProductType(productCode);
+            const { id: productTypeId, err: ptErr , category } = await resolveProductType(productCode);
             if (ptErr) resolveErrors.push(ptErr);
 
             let dimensionId = null;
@@ -261,6 +269,7 @@ export async function ingestBlanketBatch({ companyId, payload }) {
                 const matchedItem = await matchFGItem({
                     companyId,
                     productTypeId,
+                    category,
                     temperatureId,
                     densityId,
                     dimensionId,
