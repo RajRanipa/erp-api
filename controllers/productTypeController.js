@@ -33,8 +33,6 @@ const getProductTypes = async (req, res) => {
     // Optional: Allow the frontend to filter by category (e.g., ?category=60d5ec...)
     // This pairs perfectly with the `apiparams` logic in your frontend SelectTypeInput
     const filter = {};
-    console.log("req.query.category ", req.query.category);
-
     // Return name and catagoryID for dropdowns
     const productTypes = await ProductType.find(filter).populate('catagoryID', 'name')
       .sort({ name: 1 })
@@ -75,7 +73,7 @@ const getProductTypesOptions = async (req, res) => {
 const getProductTypeById = async (req, res) => {
   try {
     // Use .populate() to attach the full Category document to the response
-    // console.log("req.params.id ", req.params.id);
+    console.log("req.params.id ", req.params.id);
     const productTypes = await ProductType.find({catagoryID :req.params.id});
     if (!productTypes) {
       return res.status(404).json({ message: 'ProductType not found' });
@@ -94,8 +92,11 @@ const getProductTypeById = async (req, res) => {
 // Update a ProductType by ID
 const updateProductType = async (req, res) => {
   try {
+    console.log("req.params.id ", req.body);
+    const { _id, catagoryID, name } = req.body;
+    console.log("_id, catagoryID, name", _id, catagoryID, name);
     const updatedProductType = await ProductType.findByIdAndUpdate(
-      req.params.id,
+      _id,
       req.body, // This automatically grabs catagoryID if it is passed in the update payload
       { new: true, runValidators: true }
     ).populate('catagoryID'); // Populate the response so the frontend gets the updated related data
