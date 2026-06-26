@@ -8,7 +8,6 @@ export const rolePermissions = {
     'settings:full',
     'categories:full',
     'parameters:full',
-    'producttypes:full',
     'campaigns:full',
     'rawmaterials:full',
     'rawmterials:full',

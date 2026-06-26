@@ -1,3 +1,4 @@
+import Item from "../models/Item.js";
 import ProductType from "../models/ProductType.js";
 
 // Create a new ProductType
@@ -32,7 +33,24 @@ const getProductTypes = async (req, res) => {
     // Optional: Allow the frontend to filter by category (e.g., ?category=60d5ec...)
     // This pairs perfectly with the `apiparams` logic in your frontend SelectTypeInput
     const filter = {};
-    // console.log("req.query.category ", req.query.category);
+    console.log("req.query.category ", req.query.category);
+
+    // Return name and catagoryID for dropdowns
+    const productTypes = await ProductType.find(filter).populate('catagoryID', 'name')
+      .sort({ name: 1 })
+      .lean();
+    
+    res.status(200).json(productTypes);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+const getProductTypesOptions = async (req, res) => {
+  try {
+    // Optional: Allow the frontend to filter by category (e.g., ?category=60d5ec...)
+    // This pairs perfectly with the `apiparams` logic in your frontend SelectTypeInput
+    const filter = {};
+    console.log("req.query.category ", req.query.category);
 
     // Return name and catagoryID for dropdowns
     const productTypes = await ProductType.find(filter).populate('catagoryID', 'name')
@@ -47,7 +65,7 @@ const getProductTypes = async (req, res) => {
       catagory: pt.catagoryID // pass it along in case the frontend needs it
     }));
     
-    res.status(200).json(productTypes);
+    res.status(200).json(options);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -57,7 +75,7 @@ const getProductTypes = async (req, res) => {
 const getProductTypeById = async (req, res) => {
   try {
     // Use .populate() to attach the full Category document to the response
-    console.log("req.params.id ", req.params.id);
+    // console.log("req.params.id ", req.params.id);
     const productTypes = await ProductType.find({catagoryID :req.params.id});
     if (!productTypes) {
       return res.status(404).json({ message: 'ProductType not found' });
@@ -95,6 +113,20 @@ const updateProductType = async (req, res) => {
 const deleteProductType = async (req, res) => {
   try {
     // Deletion doesn't explicitly need to worry about catagoryID, but it's kept intact
+    if (!req.params.id) {
+      return res.status(400).json({ message: "Category ID is required" });
+    }
+
+    const itemCount = await Item.countDocuments({ category: req.params.id });
+
+    if (itemCount > 0) {
+      return res.status(400).json({
+        message: `You can't delete this category. It is linked to ${itemCount} item(s). Please delete the linked records first.`,
+        itemCount,
+        productTypeCount,
+      });
+    }
+
     const deletedProductType = await ProductType.findByIdAndDelete(req.params.id);
     if (!deletedProductType) {
       return res.status(404).json({ message: 'ProductType not found' });
@@ -108,6 +140,7 @@ const deleteProductType = async (req, res) => {
 export {
   createProductType,
   getProductTypes,
+  getProductTypesOptions,
   getProductTypeById,
   updateProductType,
   deleteProductType,

@@ -2,15 +2,18 @@
 import express from 'express';
 import {
   getDensityOptions,
-  getTemperatureOptions,
+  getAllTemperature,
   getDimensionOptions,
   getAllParameterOptions,
   createDensity,
+  updateDensity,
   createTemperature,
+  updateTemperature,
   createDimension,
   getDensityOptionsById,
   getTemperatureOptionsById,
   getDimensionOptionsById,
+  getDensitys,
 
 } from '../controllers/parameterController.js';
 import auth, { roleAuth } from '../middleware/authMiddleware.js';
@@ -23,20 +26,25 @@ router.get('/options', roleAuth('parameters:read'), getAllParameterOptions);
 
 // Individual endpoints
 // GET /api/densities
-router.get('/densities',roleAuth('parameters:densities:read'), getDensityOptions);
+router.get('/densities',roleAuth('parameters:densities:read'), getDensitys);
 router.get('/densities/by-id',roleAuth('parameters:densities:read'), getDensityOptionsById);
+router.post('/densities', roleAuth('parameters:densities:create'), createDensity);
+router.put('/densities/:id', roleAuth('parameters:densities:update'), updateDensity);
+// router.get('/densitiesOptions',roleAuth('parameters:densities:read'), getDensityOptions);
 
 // GET /api/temperatures
-router.get('/temperatures',roleAuth('parameters:temperatures:read'), getTemperatureOptions);
+router.get('/temperatures',roleAuth('parameters:temperatures:read'), getAllTemperature);
 router.get('/temperatures/by-id',roleAuth('parameters:temperatures:read'), getTemperatureOptionsById);
+router.post('/temperatures', roleAuth('parameters:temperatures:create'), createTemperature);
+router.put('/temperatures/:id', roleAuth('parameters:temperatures:update'), updateTemperature);
 
 // GET /api/dimensions
 router.get('/dimensions',roleAuth('parameters:dimensions:read'), getDimensionOptions);
 router.get('/dimensions/by-id',roleAuth('parameters:dimensions:read'), getDimensionOptionsById);
 
 // CREATE endpoints
-router.post('/densities', roleAuth('parameters:temperatures:create'), createDensity);
-router.post('/temperatures', roleAuth('parameters:temperatures:create'), createTemperature);
+
+
 router.post('/dimensions', roleAuth('parameters:dimensions:create'), createDimension);
 
 export default router;

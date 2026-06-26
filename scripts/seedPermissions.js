@@ -17,7 +17,7 @@ try {
 const all = [
   // owner (full) — you can tag owner on every permission or treat owner as bypass
   'campaigns:full','users:full','items:full','inventory:full','settings:full','categories:full',
-  'parameters:full','producttypes:full','campaigns:full','rawmaterials:full','rawmterials:full',
+  'parameters:full','campaigns:full','rawmaterials:full','rawmterials:full',
   'batches:full','parties:full','dashboard:full','manufacturing:full','crm:full','warehouses:full',
 
   // granular

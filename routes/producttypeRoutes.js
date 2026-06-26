@@ -10,6 +10,9 @@ router.post('/', roleAuth('parameters:producttypes:create'), productTypeControll
 // Get all product types
 router.get('/', roleAuth('parameters:producttypes:read'), productTypeController.getProductTypes);
 
+// Get all product types for option
+router.get('/options', roleAuth('parameters:producttypes:read'), productTypeController.getProductTypesOptions);
+
 // Get a single product type by ID
 router.get('/:id', roleAuth('parameters:producttypes:read'), productTypeController.getProductTypeById);
 

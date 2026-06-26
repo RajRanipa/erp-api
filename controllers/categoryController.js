@@ -1,6 +1,8 @@
 import Category from "../models/Category.js";
 import { handleError } from '../utils/errorHandler.js';
 import { applyAuditCreate, applyAuditUpdate } from '../utils/auditHelper.js';
+import Item from "../models/Item.js";
+import ProductType from "../models/ProductType.js";
 
 // Create a new Category
 export const createCategory = async (req, res) => {
@@ -9,7 +11,7 @@ export const createCategory = async (req, res) => {
     if (!category) {
       return res.status(400).json({ message: "Category name is required" });
     }
-    let  payload = {name : category}
+    let payload = { name: category }
     payload = applyAuditCreate(req, payload);
     // Create new category
     const newCategory = new Category(payload);
@@ -57,8 +59,20 @@ export const deleteCategory = async (req, res) => {
   try {
     const { categoryId } = req.params;
 
+    // Basic checking before deleting and give a message if catagory is linked to any items or not 
+
     if (!categoryId) {
       return res.status(400).json({ message: "Category ID is required" });
+    }
+    const itemCount = await Item.countDocuments({ category: categoryId });
+    const productTypeCount = await ProductType.countDocuments({ category: categoryId });
+
+    if (itemCount > 0 || productTypeCount > 0) {
+      return res.status(400).json({
+        message: `You can't delete this category. It is linked to ${itemCount} item(s) and ${productTypeCount} product type(s). Please delete the linked records first.`,
+        itemCount,
+        productTypeCount,
+      });
     }
 
     const deletedCategory = await Category.findByIdAndDelete(categoryId);

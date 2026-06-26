@@ -104,7 +104,7 @@ async function resolveProductType(productCode) {
         2: "bulk",
         3: "board",
         4: "module",
-        5: "ET",
+        5: "et",
     };
 
     const name = PRODUCT_CODE_MAP[productCode];
@@ -112,7 +112,7 @@ async function resolveProductType(productCode) {
 
     // ProductType schema only has `name` (lowercased enum)
     const pt = await ProductType?.findOne({ name }).lean();
-
+    console.log("gateway --- resolveProductType ", name, pt);
     if (!pt) return { id: null, err: `ProductType '${name}' not found in DB` };
     return { id: pt._id, err: null };
 }

@@ -15,6 +15,15 @@ const mapDimension = (dm) => {
 };
 const mapPacking = (p) => ({ label: p.productName, value: String(p._id) });
 
+export const getDensitys = async (req, res) => {
+  try {
+    const rows = await Density.find({}).populate('productType', 'name').lean();
+    res.status(200).json(rows);
+  } catch (err) {
+    console.error('density error', err);
+    handleError(res, err);
+  }
+};
 export const getDensityOptions = async (req, res) => {
   try {
     const rows = await Density.find({}).sort({ value: 1 }).lean();
@@ -25,12 +34,11 @@ export const getDensityOptions = async (req, res) => {
   }
 };
 
-export const getTemperatureOptions = async (req, res) => {
+export const getAllTemperature = async (req, res) => {
   try {
-    const rows = await Temperature.find({}).sort({ value: 1 }).lean();
-    // console.log(rows);
+    const rows = await Temperature.find({}).populate('productType', 'name').sort({ value: 1 }).lean();
     // console.log(rows.map(mapTemperature));
-    res.status(200).json(rows.map(mapTemperature));
+    res.status(200).json(rows);
   } catch (err) {
     console.error('temperature error', err);
     handleError(res, err);
@@ -53,8 +61,6 @@ export const getDimensionOptionsById = async (req, res) => {
   // Expect query: /.../dimensions/by-id?productType=<id>&category=<id>
   try {
     const { productType, category } = req.query || {};
-    // console.log("productType, category");
-    // console.log(productType, category);
     // Basic validation
     if (!productType || !category) {
       return res.status(400).json({ message: 'productType and category are required query params' });
@@ -72,8 +78,6 @@ export const getDimensionOptionsById = async (req, res) => {
     })
       .sort({ length: 1, width: 1, thickness: 1 })
       .lean();
-    // console.log("rows.map(mapDimension)");
-    // console.log(rows);
     return res.status(200).json(rows.map(mapDimension));
   } catch (err) {
     console.error('dimension options error', err);
@@ -85,7 +89,7 @@ export const getDensityOptionsById = async (req, res) => {
   // Expect query: /.../densities/by-id?productType=<id>
   try {
     const { productType } = req.query || {};
-
+    console.log('productType densities', productType);
     if (!productType) {
       return res.status(400).json({ message: 'productType is a required query param' });
     }
@@ -156,7 +160,6 @@ export const getAllParameterOptions = async (req, res) => {
 export const createDensity = async (req, res) => {
   const body = req.body || {};
   try {
-    // console.log("density body ", body)
 
     let doc = await Density.create(body);
     doc = doc.toObject();
@@ -174,6 +177,37 @@ export const createDensity = async (req, res) => {
           success: false,
           data: existing,
           option: mapDensity(existing),
+          message: 'This density already exists, add a new one.'
+        });
+      }
+      // fall through to generic error if not found for some reason
+    } else {
+      console.error('Failed to create dimension', err);
+      handleError(res, err);
+    }
+  }
+};
+
+export const updateDensity = async (req, res) => {
+  const body = req.body || {};
+  try {
+    const { id } = req.params;
+    const density = await Density.findById(id);
+    if (!density) return res.status(404).json({ error: 'Density not found' });
+
+    Object.assign(density, req.body);
+    await density.save();
+    return res.status(201).json({
+      success: true,
+      data: density,
+    });
+  } catch (err) {
+    if (err?.code === 11000) {
+      const existing = await Density.findOne(body).lean();
+      if (existing) {
+        return res.status(409).json({
+          success: false,
+          data: existing,
           message: 'This density already exists, add a new one.'
         });
       }
@@ -207,6 +241,39 @@ export const createTemperature = async (req, res) => {
           success: false,
           data: existing,
           option: mapTemperature(existing),
+          message: 'This temperature already exists, add a new one.'
+        });
+      }
+      // fall through to generic error if not found for some reason
+    } else {
+      console.error('Failed to create dimension', err);
+      handleError(res, err);
+    }
+  }
+};
+
+export const updateTemperature = async (req, res) => {
+  const body = req.body || {};
+  try {
+    const { id } = req.params;  
+    const temperature = await Temperature.findById(id);
+    if (!temperature) return res.status(404).json({ error: 'Temperature not found' });
+    
+    console.log("id from updateTemperature body",id, body);
+    Object.assign(temperature, req.body);
+    console.log("id from updateTemperature", temperature);
+    await temperature.save();
+    return res.status(201).json({
+      success: true,
+      data: temperature,
+    });
+  } catch (err) {
+    if (err?.code === 11000) {
+      const existing = await Temperature.findOne(body).lean();
+      if (existing) {
+        return res.status(409).json({
+          success: false,
+          data: existing,
           message: 'This temperature already exists, add a new one.'
         });
       }
@@ -289,7 +356,7 @@ export const createDi_old_mension = async (req, res) => {
     const body = req.body || {};
     // console.log("Dimension body ", body)
     // create validation here there should be any one value needed from length , width and thickness , what ever value is not present make it 0 and unit required 
-    
+
     // Just attempt to create; let Mongo unique index enforce duplicates
     try {
       const docCreated = await Dimension.create(body);
