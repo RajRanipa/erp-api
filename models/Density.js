@@ -20,5 +20,5 @@ const DensitySchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-DensitySchema.index({ value: 1, unit: 1, productType: 1 });
+DensitySchema.index({ value: 1, unit: 1, productType: 1 }, { unique: true });
 export default mongoose.model('Density', DensitySchema);
