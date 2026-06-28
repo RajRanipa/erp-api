@@ -291,7 +291,7 @@ ItemSchema.pre('save', async function (next) {
       let pt = false;
       if (this.productType) {
         pt = await mongoose.models.ProductType.findById(this.productType).select('name').lean();
-        // console.log('pt', pt);
+        console.log('pt', pt);
         if (pt && pt.name) pt.name === 'bulk' ? isBulk = true : isBulk = false;
       }
 
@@ -337,8 +337,8 @@ ItemSchema.pre('save', async function (next) {
       if (this._id) baseQuery._id = { $ne: this._id };
 
       const existingFG = await mongoose.models.Item.findOne(baseQuery).lean();
-      console.log('baseQuery -->> ', baseQuery);
-      console.log('existingFG -->> ', existingFG);
+      // console.log('baseQuery -->> ', baseQuery);
+      // console.log('existingFG -->> ', existingFG);
       if (existingFG) {
         return next(new Error('Duplicate product item detected for the provided combination of fields'));
       }

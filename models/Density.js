@@ -5,7 +5,6 @@ const DensitySchema = new mongoose.Schema(
     value: {
       type: Number,
       required: true,
-      unique: true
     },
     unit: {
       type: String,
@@ -21,4 +20,5 @@ const DensitySchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+DensitySchema.index({ value: 1, unit: 1, productType: 1 });
 export default mongoose.model('Density', DensitySchema);

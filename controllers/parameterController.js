@@ -159,6 +159,7 @@ export const getAllParameterOptions = async (req, res) => {
 
 export const createDensity = async (req, res) => {
   const body = req.body || {};
+  console.log('body', body);
   try {
 
     let doc = await Density.create(body);
@@ -170,8 +171,10 @@ export const createDensity = async (req, res) => {
       option: mapDensity(doc),
     });
   } catch (err) {
+    console.log('error ', err);
     if (err?.code === 11000) {
       const existing = await Density.findOne(body).lean();
+      console.log('existing', existing);
       if (existing) {
         return res.status(409).json({
           success: false,

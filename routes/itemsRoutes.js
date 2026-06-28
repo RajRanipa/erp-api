@@ -8,6 +8,7 @@ import {
   deleteItem,
   getPackingItems,
   getRawItems,
+  getNCItems,
   getFinishedItems,
   getPackingItemsByid,
   getItemUomById
@@ -20,6 +21,7 @@ router.use(auth);
 router.get('/packings', roleAuth('items:read'), getPackingItems);
 router.get('/finished', roleAuth('items:read'), getFinishedItems);
 router.get('/raw', roleAuth('items:read'), getRawItems);
+router.get('/nc', roleAuth('items:read'), getNCItems);
 router.get('/uom/:id', roleAuth('items:read'), getItemUomById);
 //  GET http://localhost:1122/api/items/uom/6909c8b… 404 (Not Found)
 router.get('/packings/by-id', roleAuth('items:read'), getPackingItemsByid);

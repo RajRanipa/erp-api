@@ -303,13 +303,16 @@ export const updateItem = async (req, res) => {
 export const deleteItem = async (req, res) => {
   try {
     const { id } = req.params;
+    console.log('id', id);
     const item = await Item.findById(id);
+    console.log('item', item);
     if (!item) return res.status(404).json({ error: 'Item not found' });
     if (item.status === STATUS.ARCHIVED) {
       // If already archived, allow hard delete (or you can block it based on policy)
       await Item.findByIdAndDelete(id);
       return res.json({ message: 'Item permanently deleted (was archived).' });
     }
+    console.log('STATUS.ARCHIVED', STATUS.ARCHIVED);
     // Prefer archiving instead of immediate delete
     await item.setStatus(STATUS.ARCHIVED, {
       userId: req.user?.userId || req.user?._id,
@@ -318,6 +321,7 @@ export const deleteItem = async (req, res) => {
     });
     return res.json({ message: 'Item archived (soft delete).', item });
   } catch (err) {
+    console.error(err);
     return res.status(500).json({ error: 'Server error' });
   }
 };
@@ -384,6 +388,24 @@ export const getFinishedItems = async (req, res) => {
     return handleError(res, error);
   }
 };
+export const getNCItems = async (req, res) => {
+  try {
+    // console.log('getRawItems');
+    // Simple fixed query: only items with categoryKey PACKING
+    const packings = await Item.find({ categoryKey: 'NC' })
+      .populate('temperature', 'value unit')
+      .populate('createdBy', 'fullName')
+      .populate('updatedBy', 'fullName')
+      .lean();
+    // console.log('RAW', packings[0]);
+
+    return res.status(200).json(packings);
+
+  } catch (error) {
+    return handleError(res, error);
+  }
+};
+
 export const getRawItems = async (req, res) => {
   try {
     // console.log('getRawItems');
