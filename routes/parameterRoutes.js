@@ -3,7 +3,7 @@ import express from 'express';
 import {
   getDensityOptions,
   getAllTemperature,
-  getDimensionOptions,
+  getAllDimension,
   getAllParameterOptions,
   createDensity,
   updateDensity,
@@ -14,6 +14,7 @@ import {
   getTemperatureOptionsById,
   getDimensionOptionsById,
   getDensitys,
+  UpdateDimension,
 
 } from '../controllers/parameterController.js';
 import auth, { roleAuth } from '../middleware/authMiddleware.js';
@@ -39,12 +40,13 @@ router.post('/temperatures', roleAuth('parameters:temperatures:create'), createT
 router.put('/temperatures/:id', roleAuth('parameters:temperatures:update'), updateTemperature);
 
 // GET /api/dimensions
-router.get('/dimensions',roleAuth('parameters:dimensions:read'), getDimensionOptions);
+router.get('/dimensions',roleAuth('parameters:dimensions:read'), getAllDimension);
 router.get('/dimensions/by-id',roleAuth('parameters:dimensions:read'), getDimensionOptionsById);
+router.post('/dimensions', roleAuth('parameters:dimensions:create'), createDimension);
+router.put('/dimensions/', roleAuth('parameters:dimensions:create'), UpdateDimension);
 
 // CREATE endpoints
 
 
-router.post('/dimensions', roleAuth('parameters:dimensions:create'), createDimension);
 
 export default router;

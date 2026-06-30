@@ -1,24 +1,25 @@
 import mongoose from 'mongoose';
 
-const ProductType = new mongoose.Schema(
+const ProductTypeSchema = new mongoose.Schema(
   {
     name: {
       type: String,
       trim: true,
-      unique: true,
       required: true,
+      unique: true, // Keep this unique so you only ever have one "blanket" document
       lowercase: true,
       enum: ['blanket', 'bulk', 'board', 'module', 'et'],
     },
-    categoryID: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Category",
-      required: true,
-    },
+    // Pluralized to 'categories' to make it obvious to other devs that it's an array
+    categories: [ 
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Category",
+        required: true,
+      }
+    ],
   },
   { timestamps: true }
 );
 
-ProductType.index({ name: 1, categoryID: 1 }, { unique: true });
-
-export default mongoose.model('ProductType', ProductType);
+export default mongoose.model('ProductType', ProductTypeSchema);

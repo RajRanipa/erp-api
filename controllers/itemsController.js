@@ -4,6 +4,7 @@ import Category from "../models/Category.js";
 import { handleError } from '../utils/errorHandler.js';
 import { applyAuditCreate, applyAuditUpdate } from '../utils/auditHelper.js';
 import InventorySnapshot from '../models/InventorySnapshot.js';
+import ProductType from "../models/ProductType.js";
 export const createUser = async (req, res) => {
   try {
     const user = await User.create(req.body);
@@ -61,15 +62,21 @@ function deriveCategoryKeyFromName(name) {
 
 export const createItem = async (req, res) => {
   try {
-
+    // console.log('req.body', req.body);
+    const duplicate = await Item.findOne(req?.body);
+    
+    if (duplicate) {
+      console.log('duplicate', duplicate);
+      return res.status(409).json({ message: 'Item already exists.' });
+    }
 
     const { sku, category } = req.body;
     const rest = { ...req.body };
     // Populate category to get name
     const cat = await Category.findById(category);
-    // console.log('rest', rest); //  packing is here 
-    console.log('cat', cat); // but why it's not here
-    // if (!cat) throw new AppError('Invalid category.', { statusCode: 400, code: 'INVALID_CATEGORY' });
+    
+    // console.log('cat', cat); 
+    if (!cat) throw new AppError('Invalid category.', { statusCode: 400, code: 'INVALID_CATEGORY' });
     // Validate fields
     let payload = { ...rest, sku: rest.sku || sku || null, category };
     // ensure categoryKey present on payload for index/duplicate checks
@@ -438,6 +445,13 @@ export const getPackingItemsByid = async (req, res) => {
     }
     // Simple fixed query: only items with categoryKey PACKING
     const packings = await Item.find({ categoryKey: 'PACKING', productType }, '_id name brandType productColor').populate('dimension', 'width length thickness unit').lean();
+    
+    // console.log('packings', packings, packings , " && ",  packings.length === 0);
+    if(packings && packings.length === 0) {
+        const product_Type = await ProductType.findById(productType);
+        console.log("product_Type",product_Type);
+    }
+
     const mapped = valueandlabel(packings)
 
     // console.log('packings by id', mapped[0]);
