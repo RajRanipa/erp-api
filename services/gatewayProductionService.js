@@ -113,7 +113,7 @@ async function resolveProductType(productCode) {
     // ProductType schema only has `name` (lowercased enum)
     const pt = await ProductType?.findOne({ name }).populate("categories", "name").lean();
     console.log("gateway --- resolveProductType ", name, pt);
-   
+
     if (!pt) return { id: null, err: `ProductType '${name}' not found in DB` };
     return { id: pt._id, category: pt.categories[0]._id, err: null };
 }
@@ -249,20 +249,23 @@ export async function ingestBlanketBatch({ companyId, payload }) {
             let matchedItemUom = "roll";
 
             if (productTypeId) {
-                if (!productCode === 5) {
+                if (productCode !== 5) {
                     const dimRes = await resolveDimension({ productTypeId, sizeCode });
                     dimensionId = dimRes.id;
                     if (dimRes.err) resolveErrors.push(dimRes.err);
+                    console.log('dimRes -> ', dimRes);
                 }
                 if (productTypeId) {
                     const temp = await resolveTemp({ productTypeId, temperatureValue });
                     temperatureId = temp.tempId;
                     if (temp.errs?.length) resolveErrors.push(...temp.errs);
+                    console.log('temp -> ', temp);
                 }
-                if (!productCode === 5) {
+                if (productCode !== 5) {
                     const dens = await resolveDensity({ productTypeId, densityValue });
                     densityId = dens.densId;
                     if (dens.errs?.length) resolveErrors.push(...dens.errs);
+                    console.log('dens -> ', dens);
                 }
 
                 const bodyformatch = {
@@ -272,12 +275,11 @@ export async function ingestBlanketBatch({ companyId, payload }) {
                     temperature: temperatureId,
                     status: { $in: ["active", "approved"] },
                 }
-                console.log('bodyformatch 11 ', bodyformatch, "productCode 11 ", productCode);
-                if (!productCode === 5) {
+                console.log('bodyformatch 11 ', bodyformatch, "productCode 11 ", productCode, productCode !== 5);
+                if (productCode !== 5) {
                     bodyformatch.packing = packingId;
                     bodyformatch.density = densityId;
                     bodyformatch.dimension = dimensionId;
-                    bodyformatch.save();
                 }
                 console.log('bodyformatch 22 ', bodyformatch, "productCode 22 ", productCode);
                 const matchedItem = await matchFGItem(bodyformatch);
@@ -321,7 +323,7 @@ export async function ingestBlanketBatch({ companyId, payload }) {
 
                 // Inventory posting (1-to-1 Traceability)
                 const shouldPost = productCode === 5 ? statusOk === false && weightKg > 0 : statusOk === true && weightKg > 0;
-                
+
                 console.log("shouldPost - - - - ?/ ", shouldPost);
 
                 if (!shouldPost) {
