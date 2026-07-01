@@ -172,21 +172,14 @@ async function resolveTemp({ productTypeId, temperatureValue }) {
     return { tempId: temp?._id || null, errs };
 }
 
-async function matchFGItem({ companyId, productTypeId, category, temperatureId, densityId, dimensionId, packingId }) {
+async function matchFGItem(body) {
+    console.log('match000FGItem', body);
     // Try strict match first (including packing)
-    let item = await Item.findOne({
-        companyId,
-        category: category,
-        productType: productTypeId,
-        temperature: temperatureId,
-        density: densityId,
-        dimension: dimensionId,
-        packing: packingId,
-        status: { $in: ["active", "approved"] },
-    }).select("_id UOM name").lean();
+    let item = await Item.findOne(body).select("_id UOM name").lean();
 
     // fallback: allow packing mismatch (in case FG items were created without packing)
     if (!item) {
+        console.log('match001FGItem finding without packing');
         item = await Item.findOne({
             companyId,
             category: category,
@@ -196,6 +189,7 @@ async function matchFGItem({ companyId, productTypeId, category, temperatureId, 
             dimension: dimensionId,
             status: { $in: ["active", "approved"] },
         }).select("_id UOM name").lean();
+        console.log('match001FGItem finding without packing', item);
     }
 
     return item;
@@ -286,16 +280,21 @@ export async function ingestBlanketBatch({ companyId, payload }) {
                     if (dens.errs?.length) resolveErrors.push(...dens.errs);
                 }
 
-                const matchedItem = await matchFGItem({
+                const bodyformatch = {
                     companyId,
-                    productTypeId,
-                    category,
-                    temperatureId,
-                    densityId,
-                    dimensionId,
-                    // If productCode is NOT 5, add the packingId key. Otherwise, ignore it.
-                    ...(productCode !== 5 && { packingId }),
-                });
+                    category: category,
+                    productType: productTypeId,
+                    temperature: temperatureId,
+                    density: densityId,
+                    dimension: dimensionId,
+                    status: { $in: ["active", "approved"] },
+                }
+                if (!productCode === 5) {
+                    bodyformatch.packing = packingId;
+                    bodyformatch.density = densityId;
+                    bodyformatch.dimension = dimensionId;
+                }
+                const matchedItem = await matchFGItem(bodyformatch);
 
                 if (matchedItem) {
                     matchedItemId = matchedItem._id;
@@ -326,7 +325,7 @@ export async function ingestBlanketBatch({ companyId, payload }) {
                     temperature: temperatureId,
                     density: densityId,
                     dimension: dimensionId,
-                    packingItem: packingId,
+                    packingItem: productCode === 5 ? null : packingId,
                     matchedItem: matchedItemId,
                     resolveErrors,
                     ingestBatchId: batch._id,
@@ -516,22 +515,27 @@ export async function ingestBlanketBatch_oldOne({ companyId, payload }) {
                     if (dens.errs?.length) resolveErrors.push(...dens.errs);
                 }
 
-                // MOVED UP & OPTIMIZED: Match the FG Item once for the whole record
-                const matchedItem = await matchFGItem({
+                const bodyformatch = {
                     companyId,
-                    productTypeId,
-                    temperatureId,
-                    densityId,
-                    dimensionId,
-                    // If productCode is NOT 5, add the packingId key. Otherwise, ignore it.
-                    ...(productCode !== 5 && { packingId }),
-                });
+                    category: category,
+                    productType: productTypeId,
+                    temperature: temperatureId,
+                    status: { $in: ["active", "approved"] },
+                }
+                if (!productCode === 5) {
+                    bodyformatch.packing = packingId;
+                    bodyformatch.density = densityId;
+                    bodyformatch.dimension = dimensionId;
+                }
+
+                // MOVED UP & OPTIMIZED: Match the FG Item once for the whole record
+                const matchedItem = await matchFGItem(bodyformatch);
 
                 if (matchedItem) {
                     matchedItemId = matchedItem._id;
                     matchedItemUom = matchedItem.UOM || "roll";
                 } else {
-                    resolveErrors.push(`FG Item not found for specs: productType=${productTypeId} temp=${temperatureId} density=${densityId} dimension=${dimensionId} packing=${packingId}`);
+                    resolveErrors.push(`FG Item not found for specs: category=${category} productType=${productTypeId} temp=${temperatureId} density=${densityId} dimension=${dimensionId} ${!productCode === 5 && "packing = "+packingId}}`);
                 }
             } else {
                 resolveErrors.push("productTypeId not resolved; skipping dimension/temperature/density/matchedItem resolution");
@@ -567,7 +571,7 @@ export async function ingestBlanketBatch_oldOne({ companyId, payload }) {
                         temperature: temperatureId,
                         density: densityId,
                         dimension: dimensionId,
-                        packingItem: packingId,
+                        packingItem: productCode === 5 ? null : packingId,
 
                         matchedItem: matchedItemId, // <--- ADDED HERE directly at creation!
 
