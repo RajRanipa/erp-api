@@ -111,7 +111,7 @@ async function resolveProductType(productCode) {
     if (!name) return { id: null, err: `Unsupported productCode: ${productCode}` };
 
     // ProductType schema only has `name` (lowercased enum)
-    const pt = await ProductType?.findOne({ name }).lean();
+    const pt = await ProductType?.findOne({ name }).populate("categories", "name").lean();
     console.log("gateway --- resolveProductType ", name, pt);
     //     gateway --- resolveProductType  et {
     //   _id: new ObjectId('6a241e823bd6aa522a038048'),
@@ -180,15 +180,7 @@ async function matchFGItem(body) {
     // fallback: allow packing mismatch (in case FG items were created without packing)
     if (!item) {
         console.log('match001FGItem finding without packing');
-        item = await Item.findOne({
-            companyId,
-            category: category,
-            productType: productTypeId,
-            temperature: temperatureId,
-            density: densityId,
-            dimension: dimensionId,
-            status: { $in: ["active", "approved"] },
-        }).select("_id UOM name").lean();
+        item = await Item.findOne(body).select("_id UOM name").lean();
         console.log('match001FGItem finding without packing', item);
     }
 
