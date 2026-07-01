@@ -276,12 +276,12 @@ export async function ingestBlanketBatch({ companyId, payload }) {
                     if (dimRes.err) resolveErrors.push(dimRes.err);
                 }
                 if (productTypeId) {
-                    const temp = await resolveDensity({ productTypeId, densityValue });
+                    const temp = await resolveTemp({ productTypeId, temperatureValue });
                     temperatureId = temp.tempId;
                     if (temp.errs?.length) resolveErrors.push(...temp.errs);
                 }
                 if (!productCode === 5) {
-                    const dens = await resolveTemp({ productTypeId, temperatureValue });
+                    const dens = await resolveDensity({ productTypeId, densityValue });
                     densityId = dens.densId;
                     if (dens.errs?.length) resolveErrors.push(...dens.errs);
                 }
@@ -506,12 +506,12 @@ export async function ingestBlanketBatch_oldOne({ companyId, payload }) {
                     if (dimRes.err) resolveErrors.push(dimRes.err);
                 }
                 if (productTypeId) {
-                    const temp = await resolveDensity({ productTypeId, densityValue });
+                    const temp = await resolveTemp({ productTypeId, temperatureValue });
                     temperatureId = temp.tempId;
                     if (temp.errs?.length) resolveErrors.push(...temp.errs);
                 }
                 if (!productCode === 5) {
-                    const dens = await resolveTemp({ productTypeId, temperatureValue });
+                    const dens = await resolveDensity({ productTypeId, densityValue });
                     densityId = dens.densId;
                     if (dens.errs?.length) resolveErrors.push(...dens.errs);
                 }
