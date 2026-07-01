@@ -154,7 +154,7 @@ async function resolveDensity({ productTypeId, densityValue }) {
 
     return { densId: dens?._id || null, errs };
 }
-async function resolveTemp({ productTypeId, densityValue }) {
+async function resolveTemp({ productTypeId, temperatureValue }) {
     const errs = [];
 
     if (!productTypeId) {
