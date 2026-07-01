@@ -122,7 +122,7 @@ async function resolveProductType(productCode) {
     //   categoryID: new ObjectId('6909ae671eb1036890995040')
     // }
     if (!pt) return { id: null, err: `ProductType '${name}' not found in DB` };
-    return { id: pt._id, category: pt.categoryID, err: null };
+    return { id: pt._id, category: pt.categories[0].name, err: null };
 }
 
 // async function resolveTempDensity(companyId, temperatureValue, densityValue) {
