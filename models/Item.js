@@ -291,7 +291,7 @@ ItemSchema.pre('save', async function (next) {
       let pt = false;
       if (this.productType) {
         pt = await mongoose.models.ProductType.findById(this.productType).select('name').lean();
-        console.log('pt', pt);
+        // console.log('pt', pt);
         if (pt && pt.name) pt.name === 'bulk' ? isBulk = true : isBulk = false;
       }
 

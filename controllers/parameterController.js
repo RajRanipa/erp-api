@@ -90,7 +90,7 @@ export const getDensityOptionsById = async (req, res) => {
   // Expect query: /.../densities/by-id?productType=<id>
   try {
     const { productType } = req.query || {};
-    console.log('productType densities', productType);
+    // console.log('productType densities', productType);
     if (!productType) {
       return res.status(400).json({ message: 'productType is a required query param' });
     }
