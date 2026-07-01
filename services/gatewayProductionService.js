@@ -523,7 +523,8 @@ export async function ingestBlanketBatch_oldOne({ companyId, payload }) {
                     temperatureId,
                     densityId,
                     dimensionId,
-                    packingId,
+                    // If productCode is NOT 5, add the packingId key. Otherwise, ignore it.
+                    ...(productCode !== 5 && { packingId }),
                 });
 
                 if (matchedItem) {
