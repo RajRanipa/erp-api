@@ -113,14 +113,14 @@ async function resolveProductType(productCode) {
     // ProductType schema only has `name` (lowercased enum)
     const pt = await ProductType?.findOne({ name }).lean();
     console.log("gateway --- resolveProductType ", name, pt);
-        //     gateway --- resolveProductType  et {
-        //   _id: new ObjectId('6a241e823bd6aa522a038048'),
-        //   name: 'et',
-        //   createdAt: 2026-06-06T13:20:02.768Z,
-        //   updatedAt: 2026-06-26T13:09:08.169Z,
-        //   __v: 0,
-        //   categoryID: new ObjectId('6909ae671eb1036890995040')
-        // }
+    //     gateway --- resolveProductType  et {
+    //   _id: new ObjectId('6a241e823bd6aa522a038048'),
+    //   name: 'et',
+    //   createdAt: 2026-06-06T13:20:02.768Z,
+    //   updatedAt: 2026-06-26T13:09:08.169Z,
+    //   __v: 0,
+    //   categoryID: new ObjectId('6909ae671eb1036890995040')
+    // }
     if (!pt) return { id: null, err: `ProductType '${name}' not found in DB` };
     return { id: pt._id, category: pt.categoryID, err: null };
 }
@@ -136,27 +136,40 @@ async function resolveProductType(productCode) {
 //     return { tempId: temp?._id || null, densId: dens?._id || null, errs };
 // }
 
-async function resolveTempDensity({ productTypeId, temperatureValue, densityValue }) {
+async function resolveDensity({ productTypeId, densityValue }) {
     const errs = [];
 
     if (!productTypeId) {
         return {
-            tempId: null,
             densId: null,
             errs: ["productTypeId is required to resolve temperature/density"],
         };
     }
 
-    const tVal = Number(temperatureValue);
+    // const tVal = Number(temperatureValue);
     const dVal = Number(densityValue);
-
-    const temp = await Temperature?.findOne({ productType: productTypeId, value: tVal }).lean();
-    if (!temp) errs.push(`Temperature not found for productType ${productTypeId} value ${tVal}`);
 
     const dens = await Density?.findOne({ productType: productTypeId, value: dVal }).lean();
     if (!dens) errs.push(`Density not found for productType ${productTypeId} value ${dVal}`);
 
-    return { tempId: temp?._id || null, densId: dens?._id || null, errs };
+    return { densId: dens?._id || null, errs };
+}
+async function resolveTemp({ productTypeId, densityValue }) {
+    const errs = [];
+
+    if (!productTypeId) {
+        return {
+            tempId: null,
+            errs: ["productTypeId is required to resolve temperature/density"],
+        };
+    }
+
+    const tVal = Number(temperatureValue);
+
+    const temp = await Temperature?.findOne({ productType: productTypeId, value: tVal }).lean();
+    if (!temp) errs.push(`Temperature not found for productType ${productTypeId} value ${tVal}`);
+
+    return { tempId: temp?._id || null, errs };
 }
 
 async function matchFGItem({ companyId, productTypeId, category, temperatureId, densityId, dimensionId, packingId }) {
@@ -229,7 +242,7 @@ export async function ingestBlanketBatch({ companyId, payload }) {
         for (const rec of records) {
             const recordId = rec?.recordId;
             console.log("Processing recordId", recordId);
-            
+
             const productCode = Number(rec?.productCode);
             const temperatureValue = Number(rec?.temperature);
             const densityValue = Number(rec?.density);
@@ -247,7 +260,7 @@ export async function ingestBlanketBatch({ companyId, payload }) {
 
             // resolve shared refs
             const resolveErrors = [];
-            const { id: productTypeId, err: ptErr , category } = await resolveProductType(productCode);
+            const { id: productTypeId, err: ptErr, category } = await resolveProductType(productCode);
             if (ptErr) resolveErrors.push(ptErr);
 
             let dimensionId = null;
@@ -257,14 +270,21 @@ export async function ingestBlanketBatch({ companyId, payload }) {
             let matchedItemUom = "roll";
 
             if (productTypeId) {
-                const dimRes = await resolveDimension({ productTypeId, sizeCode });
-                dimensionId = dimRes.id;
-                if (dimRes.err) resolveErrors.push(dimRes.err);
-
-                const tdRes = await resolveTempDensity({ productTypeId, temperatureValue, densityValue });
-                temperatureId = tdRes.tempId;
-                densityId = tdRes.densId;
-                if (tdRes.errs?.length) resolveErrors.push(...tdRes.errs);
+                if (!productCode === 5) {
+                    const dimRes = await resolveDimension({ productTypeId, sizeCode });
+                    dimensionId = dimRes.id;
+                    if (dimRes.err) resolveErrors.push(dimRes.err);
+                }
+                if (productTypeId) {
+                    const temp = await resolveDensity({ productTypeId, densityValue });
+                    temperatureId = temp.tempId;
+                    if (temp.errs?.length) resolveErrors.push(...temp.errs);
+                }
+                if (!productCode === 5) {
+                    const dens = await resolveTemp({ productTypeId, temperatureValue });
+                    densityId = dens.densId;
+                    if (dens.errs?.length) resolveErrors.push(...dens.errs);
+                }
 
                 const matchedItem = await matchFGItem({
                     companyId,
@@ -273,7 +293,8 @@ export async function ingestBlanketBatch({ companyId, payload }) {
                     temperatureId,
                     densityId,
                     dimensionId,
-                    packingId,
+                    // If productCode is NOT 5, add the packingId key. Otherwise, ignore it.
+                    ...(productCode !== 5 && { packingId }),
                 });
 
                 if (matchedItem) {
@@ -306,7 +327,7 @@ export async function ingestBlanketBatch({ companyId, payload }) {
                     density: densityId,
                     dimension: dimensionId,
                     packingItem: packingId,
-                    matchedItem: matchedItemId, 
+                    matchedItem: matchedItemId,
                     resolveErrors,
                     ingestBatchId: batch._id,
                 });
@@ -335,9 +356,9 @@ export async function ingestBlanketBatch({ companyId, payload }) {
                 // post inventory as qty=1 roll
                 const invRes = await invReceive({
                     companyId,
-                    itemId: matchedItemId, 
+                    itemId: matchedItemId,
                     warehouseId,
-                    uom: matchedItemUom,   
+                    uom: matchedItemUom,
                     qty: 1, // <--- EXPLICITLY SET TO 1
                     by: null,
                     note: `Auto receipt from gateway ${gatewayId} recordId ${recordId} scale ${scaleNo}`,
@@ -393,7 +414,7 @@ export async function ingestBlanketBatch({ companyId, payload }) {
             status,
             summary,
         };
-        
+
         console.log('Batch Result:', result);
         return result; // <--- FIXED: Now returns the payload to the controller
 
@@ -470,14 +491,30 @@ export async function ingestBlanketBatch_oldOne({ companyId, payload }) {
             let matchedItemUom = "roll";
 
             if (productTypeId) {
-                const dimRes = await resolveDimension({ productTypeId, sizeCode });
-                dimensionId = dimRes.id;
-                if (dimRes.err) resolveErrors.push(dimRes.err);
+                // const dimRes = await resolveDimension({ productTypeId, sizeCode });
+                // dimensionId = dimRes.id;
+                // if (dimRes.err) resolveErrors.push(dimRes.err);
 
-                const tdRes = await resolveTempDensity({ productTypeId, temperatureValue, densityValue });
-                temperatureId = tdRes.tempId;
-                densityId = tdRes.densId;
-                if (tdRes.errs?.length) resolveErrors.push(...tdRes.errs);
+                // const tdRes = await resolveTempDensity({ productTypeId, temperatureValue, densityValue });
+                // temperatureId = tdRes.tempId;
+                // densityId = tdRes.densId;
+                // if (tdRes.errs?.length) resolveErrors.push(...tdRes.errs);
+
+                if (!productCode === 5) {
+                    const dimRes = await resolveDimension({ productTypeId, sizeCode });
+                    dimensionId = dimRes.id;
+                    if (dimRes.err) resolveErrors.push(dimRes.err);
+                }
+                if (productTypeId) {
+                    const temp = await resolveDensity({ productTypeId, densityValue });
+                    temperatureId = temp.tempId;
+                    if (temp.errs?.length) resolveErrors.push(...temp.errs);
+                }
+                if (!productCode === 5) {
+                    const dens = await resolveTemp({ productTypeId, temperatureValue });
+                    densityId = dens.densId;
+                    if (dens.errs?.length) resolveErrors.push(...dens.errs);
+                }
 
                 // MOVED UP & OPTIMIZED: Match the FG Item once for the whole record
                 const matchedItem = await matchFGItem({
