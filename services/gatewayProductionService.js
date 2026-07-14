@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import GatewayIngestBatch from "../models/GatewayIngestBatch.js";
 import ProductionBlanketRoll from "../models/ProductionBlanketRoll.js";
 import Item from "../models/Item.js";
+import Campaign from "../models/Campaign.js";
 import { receive as invReceive } from "../services/inventoryService.js";
 import Temperature from "../models/Temperature.js";
 import Density from "../models/Density.js";
@@ -180,6 +181,11 @@ async function matchFGItem(body) {
     return item;
 }
 
+async function resolveCampaign() {
+    const campaign = await Campaign.findOne({ status: "RUNNING" }).lean();
+    return campaign?._id;
+}
+
 export async function ingestBlanketBatch({ companyId, payload }) {
     try {
         if (!companyId) {
@@ -194,7 +200,13 @@ export async function ingestBlanketBatch({ companyId, payload }) {
             throw new AppError("records must be an array", { statusCode: 400, code: "INVALID_PAYLOAD" });
         }
 
+        const campaign = await resolveCampaign();
+        if (!campaign) {
+            throw new AppError("Campaign not found", { statusCode: 400, code: "INVALID_SITUATION" });
+        }
+
         const batch = await GatewayIngestBatch.create({
+            campaign,
             companyId,
             gatewayId,
             sentAt: safeDate(sentAt),
@@ -215,6 +227,14 @@ export async function ingestBlanketBatch({ companyId, payload }) {
             postedToInventory: 0,
             failed: 0,
             errors: [],
+        };
+
+        const campaignSummary = {
+            blanketRolls: 0,
+            bulkKg: 0,
+            fiberKg: 0,
+            goodFiberKg: 0,
+            rejectedFiberKg: 0,
         };
 
         // --- FLAT ARRAY LOOP STARTS HERE ---
@@ -298,6 +318,7 @@ export async function ingestBlanketBatch({ companyId, payload }) {
                 // insert normalized roll line (idempotent)
                 const doc = await ProductionBlanketRoll.create({
                     companyId,
+                    campaign,
                     gatewayId,
                     recordId,
                     at,
@@ -321,6 +342,32 @@ export async function ingestBlanketBatch({ companyId, payload }) {
 
                 summary.inserted++;
 
+                switch (productCode) {
+                    case 1:
+                        campaignSummary.blanketRolls++;
+                        campaignSummary.fiberKg += weightKg;
+                        if (statusOk) {
+                            // we'll add to goodFiber after inventory succeeds
+                        } else {
+                            campaignSummary.rejectedFiberKg += weightKg;
+                        }
+                        break;
+
+                    case 2:
+                        campaignSummary.fiberKg += weightKg;
+                        if (statusOk) {
+                            campaignSummary.bulkKg += weightKg;
+                        } else {
+                            campaignSummary.rejectedFiberKg += weightKg;
+                        }
+                        break;
+
+                    case 5:
+                        campaignSummary.fiberKg += weightKg;
+                        campaignSummary.rejectedFiberKg += weightKg;
+                        break;
+
+                }
                 // Inventory posting (1-to-1 Traceability)
                 const shouldPost = productCode === 5 ? statusOk === false && weightKg > 0 : statusOk === true && weightKg > 0;
 
@@ -357,6 +404,7 @@ export async function ingestBlanketBatch({ companyId, payload }) {
                     batchNo: "Production Testing 01",
                 });
 
+
                 await ProductionBlanketRoll.updateOne(
                     { _id: doc._id },
                     {
@@ -371,6 +419,7 @@ export async function ingestBlanketBatch({ companyId, payload }) {
                 );
 
                 summary.postedToInventory++;
+                campaignSummary.goodFiberKg += weightKg;
             } catch (err) {
                 // Duplicate safe handling (MongoDB Error 11000)
                 if (err?.code === 11000) {
@@ -396,6 +445,29 @@ export async function ingestBlanketBatch({ companyId, payload }) {
             { $set: { processingStatus: status, processingSummary: summary } }
         );
 
+        if (
+            campaignSummary.blanketRolls ||
+            campaignSummary.bulkKg ||
+            campaignSummary.fiberKg ||
+            campaignSummary.goodFiberKg ||
+            campaignSummary.rejectedFiberKg
+        ) {
+            const result = await Campaign.updateOne(
+                { _id: campaign },
+                {
+                    $inc: {
+                        totalBlanketRollsProduced: campaignSummary.blanketRolls,
+                        totalBulkKgProduced: campaignSummary.bulkKg,
+                        totalFiberProduced: campaignSummary.fiberKg,
+                        totalGoodFiberProduced: campaignSummary.goodFiberKg,
+                        totalRejectedFiber: campaignSummary.rejectedFiberKg,
+                    },
+                }
+            );
+            if (result.matchedCount === 0) {
+                throw new Error("Running campaign disappeared while processing batch.");
+            }
+        }
         const result = {
             ok: true,
             gatewayId: payload.gatewayId,

@@ -245,3 +245,21 @@ export async function gateWayRefreshToken(req, res) {
     return res.status(403).json({ status: false, message: 'Invalid or expired refresh token' });
   }
 };
+
+export async function gateWayLogout(req, res) {
+    try {
+        const { device = 'gateway' } = req.body;
+
+        await RefreshToken.deleteMany({
+            userId: req.user.id,
+            device
+        });
+
+        return res.status(200).json({
+            status: true,
+            message: "Logged out successfully."
+        });
+    } catch (error) {
+        return handleError(res, error);
+    }
+}

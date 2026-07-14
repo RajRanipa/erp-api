@@ -4,6 +4,7 @@ const { Schema } = mongoose;
 const ProductionBlanketRollSchema = new Schema(
   {
     companyId: { type: Schema.Types.ObjectId, ref: "Company", required: true, index: true },
+    campaign: { type: Schema.Types.ObjectId, ref: "Campaign", required: true, index: true },
     gatewayId: { type: String, required: true, index: true },
 
     recordId: { type: String, required: true },
@@ -30,7 +31,7 @@ const ProductionBlanketRollSchema = new Schema(
     dimension: { type: Schema.Types.ObjectId, ref: "Dimension" },
     packingItem: { type: Schema.Types.ObjectId, ref: "Item" },
     matchedItem: { type: Schema.Types.ObjectId, ref: "Item" },
-
+    campaign: { type: Schema.Types.ObjectId, ref: "Campaign" },
     resolveErrors: [{ type: String }],
 
     // inventory linkage

@@ -4,6 +4,7 @@ const { Schema } = mongoose;
 const GatewayIngestBatchSchema = new Schema(
   {
     companyId: { type: Schema.Types.ObjectId, ref: "Company", required: true, index: true },
+    campaign: { type: Schema.Types.ObjectId, ref: "Campaign", required: true, index: true },
     gatewayId: { type: String, required: true, index: true },
 
     sentAt: { type: Date },

@@ -7,4 +7,6 @@ router.post('/login', Auth.gateWayLogin);
 
 router.post('/refresh-token', gatewayAuth, Auth.gateWayRefreshToken);
 
+router.post('/logout', gatewayAuth, Auth.gateWayLogout);
+
 export default router;
