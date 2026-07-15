@@ -145,8 +145,9 @@ export const getCampaignById = async (req, res) => {
   try {
     const { id } = req.params;
     const row = await Campaign.findById(id).lean();
+    // console.log("getCampaignById", row);
     if (!row) return res.status(404).json({ success: false, message: 'Campaign not found' });
-    return res.status(200).json(pickCampaign(row));
+    return res.status(200).json(row);
   } catch (err) {
     console.error('getCampaignById error:', err);
     return res.status(500).json({ success: false, message: 'Failed to fetch campaign', error: err.message });
