@@ -5,6 +5,44 @@ import BOM from '../models/BOM.js';
 import WorkOrder from '../models/WorkOrder.js'; // Import the new WorkOrder model
 import Item from '../models/Item.js';
 import mongoose from "mongoose";
+import { DateTime } from 'luxon';
+
+const REPORT_TIMEZONE = 'Asia/Kolkata';
+
+function getTodayDayShiftRange(date = null) {
+    const reportDate = date
+        ? DateTime.fromISO(date, {
+            zone: REPORT_TIMEZONE,
+        })
+        : DateTime.now().setZone(REPORT_TIMEZONE);
+
+    if (!reportDate.isValid) {
+        throw new Error(`Invalid report date: ${date}`);
+    }
+
+    const startIST = reportDate.startOf('day').set({
+        hour: 8,
+        minute: 0,
+        second: 0,
+        millisecond: 0,
+    });
+
+    const endIST = reportDate.startOf('day').set({
+        hour: 20,
+        minute: 0,
+        second: 0,
+        millisecond: 0,
+    });
+
+    return {
+        start: startIST.toUTC().toJSDate(),
+        end: endIST.toUTC().toJSDate(),
+
+        // Only useful for logs and API response
+        startIST: startIST.toISO(),
+        endIST: endIST.toISO(),
+    };
+}
 
 export const fetchproduction = async (start, end) => {
     console.log("fetchproduction called with start:", start, "and end:", end);
@@ -159,27 +197,26 @@ export const getAllProduction = async (req, res) => {
 export const getProductionReportAM = async (req, res) => {
     try {
         const { companyId } = req?.user; // or from params
-        // const { date } = req.query;
-
-        let date = null;
+        const { date } = req.query;
+        // let date = null;
         let today0830, today2030;
+        const {
+            start,
+            end,
+            startIST,
+            endIST,
+        } =  (date);
 
-        if (date) {
-            today0830 = new Date(date);
-            today2030 = new Date(date);
-        } else {
-            today0830 = new Date();
-            today2030 = new Date();
-        }
+        console.log('Production report range:', {
+            startIST,
+            endIST,
+            startUTC: start.toISOString(),
+            endUTC: end.toISOString(),
+        });
 
-        today0830.setUTCHours(8, 0, 0, 0);
-        today2030.setUTCHours(20, 0, 0, 0);
+        const data = await fetchproduction(start, end)
 
-        console.log(today0830, today2030);
-
-        const data = await fetchproduction(today0830, today2030)
-
-        if (companyId) {
+        if (res) {
             return res.json({
                 success: true,
                 count: data.length,
