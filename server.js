@@ -72,7 +72,6 @@ app.get('/', (req, res) => {
 
 // Use routes
 app.use('/auth',authRoutes); // This makes the route http://localhost:5000/api/send-contact-email
-// app.use('/api', productionRoutes);
 // app.use('/api/raw', rawmaterialRoutes);
 app.use('/api/product-type', producttypeRoutes);
 app.use('/api', parameterRoutes);

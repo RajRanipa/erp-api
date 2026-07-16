@@ -122,7 +122,7 @@ export const fetchproduction = async (start, end) => {
             $sort: { totalWeight: -1 },
         },
     ]);
-    
+
     console.log("fetchproduction data ::::::: ", data);
     return data;
 }
@@ -158,9 +158,9 @@ export const getAllProduction = async (req, res) => {
 
 export const getProductionReportAM = async (req, res) => {
     try {
-        // const { companyId } = req.user; // or from params
+        const { companyId } = req?.user; // or from params
         // const { date } = req.query;
-        
+
         let date = null;
         let today0830, today2030;
 
@@ -174,18 +174,20 @@ export const getProductionReportAM = async (req, res) => {
 
         today0830.setUTCHours(8, 0, 0, 0);
         today2030.setUTCHours(20, 0, 0, 0);
-        
+
         console.log(today0830, today2030);
 
         const data = await fetchproduction(today0830, today2030)
 
-        return data;
-
-        return res.json({
-            success: true,
-            count: data.length,
-            data,
-        });
+        if (companyId) {
+            return res.json({
+                success: true,
+                count: data.length,
+                data,
+            });
+        } else {
+            return data;
+        }
 
     } catch (error) {
         console.error("Production Summary Error:", error);
@@ -198,7 +200,7 @@ export const getProductionReportPM = async (req, res) => {
         // const { date } = req.query;
 
         let date = null;
-        let today0830, yesterday2030 ;
+        let today0830, yesterday2030;
 
         if (date) {
             today0830 = new Date(date);
