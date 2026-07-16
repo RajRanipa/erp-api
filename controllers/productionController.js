@@ -6,143 +6,226 @@ import WorkOrder from '../models/WorkOrder.js'; // Import the new WorkOrder mode
 import Item from '../models/Item.js';
 import mongoose from "mongoose";
 
-export const getAllProduction = async (req, res) => {
-  try {
-    const { companyId } = req.user; // or from params
-    const { startDate, endDate } = req.query;
-
-    if (!startDate || !endDate) {
-      return res.status(400).json({ message: "startDate and endDate required" });
-    }
-
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-    end.setHours(23, 59, 59, 999);
+export const fetchproduction = async (start, end) => {
+    console.log("fetchproduction called with start:", start, "and end:", end);
 
     const data = await ProductionBlanketRoll.aggregate([
-      // 1. FILTER
-      {
-        $match: {
-        //   companyId: new mongoose.Types.ObjectId(companyId),
-          createdAt: { $gte: start, $lte: end },
-          matchedItem: { $ne: null }, // only valid items
+        // 1. FILTER
+        {
+            $match: {
+                //   companyId: new mongoose.Types.ObjectId(companyId),
+                createdAt: { $gte: start, $lte: end },
+                matchedItem: { $ne: null }, // only valid items
+            },
         },
-      },
 
-      // 2. GROUP BY matchedItem and statusOk
-      {
-        $group: {
-          _id: {
-            matchedItem: "$matchedItem",
-            statusOk: "$statusOk",
-          },
+        // 2. GROUP BY matchedItem and statusOk
+        {
+            $group: {
+                _id: {
+                    matchedItem: "$matchedItem",
+                    statusOk: "$statusOk",
+                },
 
-          totalRolls: { $sum: 1 },
-          totalWeight: { $sum: "$weightKg" },
+                totalRolls: { $sum: 1 },
+                totalWeight: { $sum: "$weightKg" },
 
-          // take first values (same for group)
-          productType: { $first: "$productType" },
-          temperature: { $first: "$temperature" },
-          density: { $first: "$density" },
-          dimension: { $first: "$dimension" },
-          packingItem: { $first: "$packingItem" },
+                // take first values (same for group)
+                productType: { $first: "$productType" },
+                temperature: { $first: "$temperature" },
+                density: { $first: "$density" },
+                dimension: { $first: "$dimension" },
+                packingItem: { $first: "$packingItem" },
+            },
         },
-      },
 
-    //   3. LOOKUPS (populate)
-      {
-        $lookup: {
-          from: "producttypes",
-          localField: "productType",
-          foreignField: "_id",
-          as: "productType",
+        //   3. LOOKUPS (populate)
+        {
+            $lookup: {
+                from: "producttypes",
+                localField: "productType",
+                foreignField: "_id",
+                as: "productType",
+            },
         },
-      },
-      { $unwind: { path: "$productType", preserveNullAndEmptyArrays: true } },
+        { $unwind: { path: "$productType", preserveNullAndEmptyArrays: true } },
 
-      {
-        $lookup: {
-          from: "temperatures",
-          localField: "temperature",
-          foreignField: "_id",
-          as: "temperature",
+        {
+            $lookup: {
+                from: "temperatures",
+                localField: "temperature",
+                foreignField: "_id",
+                as: "temperature",
+            },
         },
-      },
-      { $unwind: { path: "$temperature", preserveNullAndEmptyArrays: true } },
+        { $unwind: { path: "$temperature", preserveNullAndEmptyArrays: true } },
 
-      {
-        $lookup: {
-          from: "densities",
-          localField: "density",
-          foreignField: "_id",
-          as: "density",
+        {
+            $lookup: {
+                from: "densities",
+                localField: "density",
+                foreignField: "_id",
+                as: "density",
+            },
         },
-      },
-      { $unwind: { path: "$density", preserveNullAndEmptyArrays: true } },
+        { $unwind: { path: "$density", preserveNullAndEmptyArrays: true } },
 
-      {
-        $lookup: {
-          from: "dimensions",
-          localField: "dimension",
-          foreignField: "_id",
-          as: "dimension",
+        {
+            $lookup: {
+                from: "dimensions",
+                localField: "dimension",
+                foreignField: "_id",
+                as: "dimension",
+            },
         },
-      },
-      { $unwind: { path: "$dimension", preserveNullAndEmptyArrays: true } },
+        { $unwind: { path: "$dimension", preserveNullAndEmptyArrays: true } },
 
-      {
-        $lookup: {
-          from: "items",
-          localField: "packingItem",
-          foreignField: "_id",
-          as: "packingItem",
+        {
+            $lookup: {
+                from: "items",
+                localField: "packingItem",
+                foreignField: "_id",
+                as: "packingItem",
+            },
         },
-      },
-      { $unwind: { path: "$packingItem", preserveNullAndEmptyArrays: true } },
+        { $unwind: { path: "$packingItem", preserveNullAndEmptyArrays: true } },
 
-      // OPTIONAL: populate matchedItem also
-      {
-        $lookup: {
-          from: "items",
-          localField: "_id.matchedItem",
-          foreignField: "_id",
-          as: "matchedItem",
+        // OPTIONAL: populate matchedItem also
+        {
+            $lookup: {
+                from: "items",
+                localField: "_id.matchedItem",
+                foreignField: "_id",
+                as: "matchedItem",
+            },
         },
-      },
-      { $unwind: { path: "$matchedItem", preserveNullAndEmptyArrays: true } },
+        { $unwind: { path: "$matchedItem", preserveNullAndEmptyArrays: true } },
 
-      // 4. CLEAN OUTPUT
-      {
-        $project: {
-          _id: 0,
-          matchedItem: 1,
-          productType: 1,
-          temperature: 1,
-          density: 1,
-          dimension: 1,
-          packingItem: 1,
-          totalRolls: 1,
-          totalWeight: 1,
-          statusOk: "$_id.statusOk",
+        // 4. CLEAN OUTPUT
+        {
+            $project: {
+                _id: 0,
+                matchedItem: 1,
+                productType: 1,
+                temperature: 1,
+                density: 1,
+                dimension: 1,
+                packingItem: 1,
+                totalRolls: 1,
+                totalWeight: 1,
+                statusOk: "$_id.statusOk",
+            },
         },
-      },
 
-      // 5. SORT (optional)
-      {
-        $sort: { totalWeight: -1 },
-      },
+        // 5. SORT (optional)
+        {
+            $sort: { totalWeight: -1 },
+        },
     ]);
+    
+    console.log("fetchproduction data ::::::: ", data);
+    return data;
+}
 
-    return res.json({
-      success: true,
-      count: data.length,
-      data,
-    });
+export const getAllProduction = async (req, res) => {
+    try {
+        const { companyId } = req.user; // or from params
+        const { startDate, endDate } = req.query;
 
-  } catch (error) {
-    console.error("Production Summary Error:", error);
-    return res.status(500).json({ message: "Internal server error" });
-  }
+        if (!startDate || !endDate) {
+            return res.status(400).json({ message: "startDate and endDate required" });
+        }
+
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+
+        start.setHours(0, 0, 0, 0);
+        end.setHours(23, 59, 59, 999);
+
+        const data = await fetchproduction(start, end)
+
+        return res.json({
+            success: true,
+            count: data.length,
+            data,
+        });
+
+    } catch (error) {
+        console.error("Production Summary Error:", error);
+        return res.status(500).json({ message: "Internal server error" });
+    }
+};
+
+export const getProductionReportAM = async (req, res) => {
+    try {
+        // const { companyId } = req.user; // or from params
+        // const { date } = req.query;
+        
+        let date = null;
+        let today0830, today2030;
+
+        if (date) {
+            today0830 = new Date(date);
+            today2030 = new Date(date);
+        } else {
+            today0830 = new Date();
+            today2030 = new Date();
+        }
+
+        today0830.setUTCHours(8, 0, 0, 0);
+        today2030.setUTCHours(20, 0, 0, 0);
+        
+        console.log(today0830, today2030);
+
+        const data = await fetchproduction(today0830, today2030)
+
+        return data;
+
+        return res.json({
+            success: true,
+            count: data.length,
+            data,
+        });
+
+    } catch (error) {
+        console.error("Production Summary Error:", error);
+        return res.status(500).json({ message: "Internal server error" });
+    }
+};
+export const getProductionReportPM = async (req, res) => {
+    try {
+        // const { companyId } = req.user; // or from params
+        // const { date } = req.query;
+
+        let date = null;
+        let today0830, yesterday2030 ;
+
+        if (date) {
+            today0830 = new Date(date);
+            yesterday2030 = new Date(date);
+        } else {
+            today0830 = new Date();
+            yesterday2030 = new Date();
+            yesterday2030.setDate(yesterday2030.getDate() - 1);
+        }
+
+        yesterday2030.setHours(20, 1, 0, 0);
+        today0830.setHours(7, 59, 0, 0);
+
+        const data = await fetchproduction(yesterday2030, today0830)
+
+        return data;
+
+        return res.json({
+            success: true,
+            count: data.length,
+            data,
+        });
+
+    } catch (error) {
+        console.error("Production Summary Error:", error);
+        return res.status(500).json({ message: "Internal server error" });
+    }
 };
 
 export const createWorkOrder = async (req, res) => {
@@ -277,7 +360,7 @@ export const updateWorkOrder = async (req, res) => {
 
             // If it's a bulk product and packing is done, or if it's a blanket and all steps are complete
             if (productDetails.productType === 'bulk' || newStatus === 'Complete') {
-                 // Add finished product to Inventory
+                // Add finished product to Inventory
                 let inventoryItem = await Inventory.findOne({
                     item: workOrder.product,
                     itemType: 'Product',
@@ -435,7 +518,7 @@ export const getAllInventory = async (req, res) => {
 export const getAllProduction1 = async (req, res) => {
     try {
         const { startDate, endDate } = req.query;
-        
+
         // 1. Initialize empty match filter
         let queryFilter = {};
 
@@ -444,12 +527,12 @@ export const getAllProduction1 = async (req, res) => {
             queryFilter.createdAt = {};
 
             if (startDate) {
-                queryFilter.createdAt.$gte = new Date(startDate); 
+                queryFilter.createdAt.$gte = new Date(startDate);
             }
 
             if (endDate) {
                 const end = new Date(endDate);
-                end.setHours(23, 59, 59, 999); 
+                end.setHours(23, 59, 59, 999);
                 queryFilter.createdAt.$lte = end;
             }
         }
@@ -511,9 +594,9 @@ export const getAllProduction1 = async (req, res) => {
         res.status(200).json(aggregatedProduction);
     } catch (error) {
         console.error('Error fetching aggregated production data:', error);
-        res.status(500).json({ 
-            message: 'Server error while fetching production data.', 
-            error: error.message 
+        res.status(500).json({
+            message: 'Server error while fetching production data.',
+            error: error.message
         });
     }
 };

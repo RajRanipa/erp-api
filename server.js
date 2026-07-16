@@ -25,6 +25,7 @@ import { inviteRoutes, inviteAuthRoutes, settingRoutes} from './routes/usersRout
 import { startBounceWatcher } from './services/bounceWatcher.js';
 import { fileURLToPath } from 'url';
 import permissionsRoute from './routes/permissionsRoute.js';
+import { startReportScheduler } from './services/scheduler.js';
 // import { initGlobalErrorHandlers, expressErrorHandler } from './utils/errorHandler.js';
 // initGlobalErrorHandlers({ logger: console, exitOnFatal: false });
 
@@ -93,6 +94,8 @@ app.use('/', inviteAuthRoutes);
 app.use("/auth/gateway", gatewayAuthRoutes); 
 app.use("/gateway", gatewayRoutes); 
 // Start server
+await startReportScheduler();
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(chalk.green(`🚀 Server running on http://localhost:${PORT}`));
