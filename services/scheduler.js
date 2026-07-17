@@ -1,6 +1,6 @@
 import cron from 'node-cron';
 import sendMail from '../utils/sendMail.js';
-import { getProductionReportAM, getProductionReportPM } from '../controllers/productionController.js';
+import { getProductionDay, getProductionNight} from '../controllers/productionController.js';
 // import { db } from './your-database-config.js'; // Import your DB connection here
 
 // 1. Create the core function that fetches data and sends the email
@@ -13,12 +13,12 @@ async function fetchAndSendReport(timeOfDay) {
         // Example: const users = await db.collection('users').find({ wantsUpdates: true }).toArray();
         let report;
 
-        if (timeOfDay === 'PM') {
-            report = await getProductionReportPM();
+        if (timeOfDay === 'NIGHT') {
+            report = await getProductionNight();
         }
 
-        if (timeOfDay === 'AM') {
-            report = await getProductionReportAM();
+        if (timeOfDay === 'DAY') {
+            report = await getProductionDay();
         }
 
         console.log('==================================================');
@@ -68,7 +68,7 @@ export function startReportScheduler() {
     cron.schedule('30 8 * * *', async () => {
         console.log('8:00 AM Task');
         try {
-            await fetchAndSendReport('PM');
+            await fetchAndSendReport('NIGHT');
         } catch (error) {
             console.error('❌ Report cron failed:', error);
         }
@@ -80,7 +80,7 @@ export function startReportScheduler() {
     cron.schedule('30 20 * * *', async () => {
         console.log('8:00 PM Task');
         try {
-            await fetchAndSendReport('AM');
+            await fetchAndSendReport('DAY');
         } catch (error) {
             console.error('❌ Report cron failed:', error);
         }

@@ -9,7 +9,9 @@ import { DateTime } from 'luxon';
 
 const REPORT_TIMEZONE = 'Asia/Kolkata';
 
-function getTodayDayShiftRange(date = null) {
+const PRODUCTION_TIME_FIELD = 'at';
+
+function parseReportDate(date = null) {
     const reportDate = date
         ? DateTime.fromISO(date, {
             zone: REPORT_TIMEZONE,
@@ -20,14 +22,20 @@ function getTodayDayShiftRange(date = null) {
         throw new Error(`Invalid report date: ${date}`);
     }
 
-    const startIST = reportDate.startOf('day').set({
+    return reportDate.startOf('day');
+}
+
+function getTodayDayShiftRange(date = null) {
+    const reportDate = parseReportDate(date);
+
+    const startIST = reportDate.set({
         hour: 8,
         minute: 0,
         second: 0,
         millisecond: 0,
     });
 
-    const endIST = reportDate.startOf('day').set({
+    const endIST = reportDate.set({
         hour: 20,
         minute: 0,
         second: 0,
@@ -38,21 +46,109 @@ function getTodayDayShiftRange(date = null) {
         start: startIST.toUTC().toJSDate(),
         end: endIST.toUTC().toJSDate(),
 
-        // Only useful for logs and API response
         startIST: startIST.toISO(),
         endIST: endIST.toISO(),
     };
 }
 
-export const fetchproduction = async (start, end) => {
+function getTodayNightShiftRange(date = null) {
+    const reportDate = parseReportDate(date);
+
+    const startIST = reportDate.minus({ days: 1 })({
+        hour: 20,
+        minute: 0,
+        second: 0,
+        millisecond: 0,
+    });
+
+    const endIST = reportDate.set({
+        hour: 8,
+        minute: 0,
+        second: 0,
+        millisecond: 0,
+    });
+
+    return {
+        start: startIST.toUTC().toJSDate(),
+        end: endIST.toUTC().toJSDate(),
+
+        startIST: startIST.toISO(),
+        endIST: endIST.toISO(),
+    };
+}
+
+export const getProductionDay = async (date = null) => {
+    try {
+        const {
+            start,
+            end,
+            startIST,
+            endIST,
+        } = getTodayDayShiftRange(date);
+
+        console.log('Production report range:', {
+            startIST,
+            endIST,
+            startUTC: start.toISOString(),
+            endUTC: end.toISOString(),
+        });
+
+        const data = await fetchproduction(start, end);
+
+        return data;
+    } catch (error) {
+        throw new Error('Production day report error', {
+            cause: error,
+        });
+    }
+}
+
+export const getProductionNight = async (date = null) => {
+    try {
+
+        const {
+            start,
+            end,
+            startIST,
+            endIST,
+        } = getTodayNightShiftRange(date);
+
+        console.log('Production report range:', {
+            startIST,
+            endIST,
+            startUTC: start.toISOString(),
+            endUTC: end.toISOString(),
+        });
+
+        const data = await fetchproduction(start, end);
+
+        return data;
+    } catch (error) {
+        throw new Error('Production night report error:', error);
+    }
+
+}
+export const fetchproduction = async (start, end, companyId) => {
+    if (!(start instanceof Date)
+        || Number.isNaN(start.getTime())
+    ) {
+        throw new Error('Valid start date is required');
+    }
+
+    if (!(end instanceof Date)
+        || Number.isNaN(end.getTime())
+    ) {
+        throw new Error('Valid end date is required');
+    }
+
     console.log("fetchproduction called with start:", start, "and end:", end);
 
     const data = await ProductionBlanketRoll.aggregate([
         // 1. FILTER
         {
             $match: {
-                //   companyId: new mongoose.Types.ObjectId(companyId),
-                createdAt: { $gte: start, $lte: end },
+                // companyId: new mongoose.Types.ObjectId(companyId),
+                at: { $gte: start, $lt: end },
                 matchedItem: { $ne: null }, // only valid items
             },
         },
@@ -66,7 +162,11 @@ export const fetchproduction = async (start, end) => {
                 },
 
                 totalRolls: { $sum: 1 },
-                totalWeight: { $sum: "$weightKg" },
+                totalWeight: {
+                    $sum: {
+                        $ifNull: ['$weightKg', 0],
+                    },
+                },
 
                 // take first values (same for group)
                 productType: { $first: "$productType" },
@@ -194,66 +294,30 @@ export const getAllProduction = async (req, res) => {
     }
 };
 
-export const getProductionReportAM = async (req, res) => {
+export const getProductionReportDay = async (req, res) => {
     try {
         const { companyId } = req?.user; // or from params
         const { date } = req.query;
         // let date = null;
-        let today0830, today2030;
-        const {
-            start,
-            end,
-            startIST,
-            endIST,
-        } =  (date);
+        const data = await getProductionDay(date);
 
-        console.log('Production report range:', {
-            startIST,
-            endIST,
-            startUTC: start.toISOString(),
-            endUTC: end.toISOString(),
+        return res.json({
+            success: true,
+            count: data.length,
+            data,
         });
-
-        const data = await fetchproduction(start, end)
-
-        if (res) {
-            return res.json({
-                success: true,
-                count: data.length,
-                data,
-            });
-        } else {
-            return data;
-        }
 
     } catch (error) {
         console.error("Production Summary Error:", error);
         return res.status(500).json({ message: "Internal server error" });
     }
 };
-export const getProductionReportPM = async (req, res) => {
+export const getProductionReportNight = async (req, res) => {
     try {
-        // const { companyId } = req.user; // or from params
-        // const { date } = req.query;
-
-        let date = null;
-        let today0830, yesterday2030;
-
-        if (date) {
-            today0830 = new Date(date);
-            yesterday2030 = new Date(date);
-        } else {
-            today0830 = new Date();
-            yesterday2030 = new Date();
-            yesterday2030.setDate(yesterday2030.getDate() - 1);
-        }
-
-        yesterday2030.setHours(20, 1, 0, 0);
-        today0830.setHours(7, 59, 0, 0);
-
-        const data = await fetchproduction(yesterday2030, today0830)
-
-        return data;
+        const { companyId } = req?.user; // or from params
+        const { date } = req.query;
+        // let date = null;
+        const data = await getProductionNight(date);
 
         return res.json({
             success: true,
@@ -347,6 +411,7 @@ export const createWorkOrder = async (req, res) => {
         res.status(500).json({ message: 'Server error during work order creation.', error: error.message });
     }
 };
+
 
 // --- Controller to Fetch All Work Orders ---
 export const getAllWorkOrders = async (req, res) => {

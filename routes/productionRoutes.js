@@ -1,6 +1,6 @@
 // routes/productionRoutes.js
 import express from 'express';
-import { createWorkOrder, getAllWorkOrders,updateWorkOrder, rePackProduct, getAllRePackingLogs, getAllInventory, getAllProduction, getProductionReportAM } from '../controllers/productionController.js'; // Assuming the controller is here
+import { createWorkOrder, getAllWorkOrders,updateWorkOrder, rePackProduct, getAllRePackingLogs, getAllInventory, getAllProduction, getProductionReportDay, getProductionReportNight } from '../controllers/productionController.js'; // Assuming the controller is here
 import Auth, { roleAuth } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
@@ -16,5 +16,6 @@ router.get('/repack-logs',roleAuth('production:read'), getAllRePackingLogs);
 // New route for fetching all inventory items
 router.get('/inventory',roleAuth('production:read'), getAllInventory);
 router.get('/',roleAuth('production:read'), getAllProduction);
-router.get('/report',roleAuth('production:read'), getProductionReportAM);
+router.get('/day',roleAuth('production:read'), getProductionReportDay);
+router.get('/night',roleAuth('production:read'), getProductionReportNight);
 export default router;
