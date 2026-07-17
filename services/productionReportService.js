@@ -281,12 +281,12 @@ export const getProductionDay = async (date = null) => {
             endIST,
         } = getTodayDayShiftRange(date);
 
-        // console.log('Production report range:', {
-        //     startIST,
-        //     endIST,
-        //     startUTC: start.toISOString(),
-        //     endUTC: end.toISOString(),
-        // });
+        console.log('Production report range:', {
+            startIST,
+            endIST,
+            startUTC: start.toISOString(),
+            endUTC: end.toISOString(),
+        });
 
         const data = await fetchproduction(start, end);
 
