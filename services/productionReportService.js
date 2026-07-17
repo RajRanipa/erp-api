@@ -215,6 +215,62 @@ export const fetchproduction = async (start, end, companyId) => {
     return data;
 }
 
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+}
+
+
+function formatDimension(dimension) {
+    if (!dimension) return '-';
+
+    const {
+        length,
+        width,
+        thickness,
+        unit = 'mm',
+    } = dimension;
+
+    return `${length ?? '-'} × ${width ?? '-'} × ${thickness ?? '-'} ${unit}`;
+}
+
+function formatReportDate(dateValue) {
+    const date = new Date(dateValue);
+
+    if (Number.isNaN(date.getTime())) {
+        return '-';
+    }
+
+    return new Intl.DateTimeFormat('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+    }).format(date);
+}
+
+function formatReportDateTime(dateValue) {
+    const date = new Date(dateValue);
+
+    if (Number.isNaN(date.getTime())) {
+        return '-';
+    }
+
+    return new Intl.DateTimeFormat('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+    }).format(date);
+}
+
 export const getProductionDay = async (date = null) => {
     try {
         const {
