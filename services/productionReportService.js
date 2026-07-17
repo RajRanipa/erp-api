@@ -6,6 +6,7 @@ import WorkOrder from '../models/WorkOrder.js'; // Import the new WorkOrder mode
 import Item from '../models/Item.js';
 import mongoose from "mongoose";
 import { DateTime } from 'luxon';
+import sendMail from '../utils/sendMail.js';
 
 
 const REPORT_TIMEZONE = 'Asia/Kolkata';
