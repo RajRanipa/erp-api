@@ -476,7 +476,7 @@ export async function ingestBlanketBatch({ companyId, payload }) {
             summary,
         };
 
-        console.log('Batch Result:', result);
+        console.log('Batch Result : ', result.status, result.summary);
         return result; // <--- FIXED: Now returns the payload to the controller
 
     } catch (error) {

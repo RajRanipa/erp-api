@@ -132,7 +132,7 @@ export async function gateWayRefreshToken(req, res) {
 
   const { device, userId } = req.body || {};
   const bodyUserId = userId;
-  console.log('request body', device, bodyUserId);
+  console.log('request body , device :- ', device);
 
   const now = new Date();
   const timestamp = now.toLocaleString('en-IN', {

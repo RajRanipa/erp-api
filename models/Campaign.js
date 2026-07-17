@@ -27,7 +27,6 @@ const campaignSchema = mongoose.Schema(
 }
 );
 
-campaignSchema.index({ status: 1 });
 campaignSchema.index({ startDate: 1 });
 
 campaignSchema.index(

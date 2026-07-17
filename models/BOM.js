@@ -41,7 +41,6 @@ const BomSchema = new Schema({
 }, { timestamps: true });
 
 // Indexes to speed up common queries
-BomSchema.index({ product: 1 });
 BomSchema.index({ revision: 1 });
 BomSchema.index({ effectiveFrom: 1, effectiveTo: 1 });
 

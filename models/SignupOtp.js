@@ -19,7 +19,6 @@ const SignupOtpSchema = new Schema(
     expiresAt: {
       type: Date,
       required: true,
-      index: true,
     },
     verified: {
       type: Boolean,
