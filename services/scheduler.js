@@ -8,7 +8,7 @@ import { fetchAndSendReport, getProductionDay, getProductionNight } from './prod
 export function startReportScheduler() {
     console.log('✅ Report scheduler initialized');
 
-    cron.schedule('30 8 * * *', async () => {
+    cron.schedule('0 8 * * *', async () => {
         console.log('8:00 AM Task');
         try {
             await fetchAndSendReport('NIGHT');
@@ -20,7 +20,7 @@ export function startReportScheduler() {
         timezone: "Asia/Kolkata" // Adjust timezone as needed
     });
 
-    cron.schedule('30 20 * * *', async () => {
+    cron.schedule('0 20 * * *', async () => {
         console.log('8:00 PM Task');
         try {
             await fetchAndSendReport('DAY');
