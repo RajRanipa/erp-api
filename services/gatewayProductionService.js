@@ -113,7 +113,7 @@ async function resolveProductType(productCode) {
 
     // ProductType schema only has `name` (lowercased enum)
     const pt = await ProductType?.findOne({ name }).populate("categories", "name").lean();
-    console.log("gateway --- resolveProductType ", name, pt);
+    // console.log("gateway --- resolveProductType ", name, pt);
 
     if (!pt) return { id: null, err: `ProductType '${name}' not found in DB` };
     return { id: pt._id, category: pt.categories[0]._id, err: null };
@@ -167,15 +167,15 @@ async function resolveTemp({ productTypeId, temperatureValue }) {
 }
 
 async function matchFGItem(body) {
-    console.log('match000FGItem', body);
+    // console.log('match000FGItem', body);
     // Try strict match first (including packing)
     let item = await Item.findOne(body).select("_id UOM name").lean();
 
     // fallback: allow packing mismatch (in case FG items were created without packing)
     if (!item) {
-        console.log('match001FGItem finding without packing');
+        // console.log('match001FGItem finding without packing');
         item = await Item.findOne(body).select("_id UOM name").lean();
-        console.log('match001FGItem finding without packing', item);
+        // console.log('match001FGItem finding without packing', item);
     }
 
     return item;
@@ -240,7 +240,7 @@ export async function ingestBlanketBatch({ companyId, payload }) {
         // --- FLAT ARRAY LOOP STARTS HERE ---
         for (const rec of records) {
             const recordId = rec?.recordId;
-            console.log("Processing recordId", recordId);
+            // console.log("Processing recordId", recordId);
 
             const productCode = Number(rec?.productCode);
             const temperatureValue = Number(rec?.temperature);
@@ -273,19 +273,19 @@ export async function ingestBlanketBatch({ companyId, payload }) {
                     const dimRes = await resolveDimension({ productTypeId, sizeCode });
                     dimensionId = dimRes.id;
                     if (dimRes.err) resolveErrors.push(dimRes.err);
-                    console.log('dimRes -> ', dimRes);
+                    // console.log('dimRes -> ', dimRes);
                 }
                 if (productTypeId) {
                     const temp = await resolveTemp({ productTypeId, temperatureValue });
                     temperatureId = temp.tempId;
                     if (temp.errs?.length) resolveErrors.push(...temp.errs);
-                    console.log('temp -> ', temp);
+                    // console.log('temp -> ', temp);
                 }
                 if (productCode !== 5) {
                     const dens = await resolveDensity({ productTypeId, densityValue });
                     densityId = dens.densId;
                     if (dens.errs?.length) resolveErrors.push(...dens.errs);
-                    console.log('dens -> ', dens);
+                    // console.log('dens -> ', dens);
                 }
 
                 const bodyformatch = {
@@ -295,13 +295,13 @@ export async function ingestBlanketBatch({ companyId, payload }) {
                     temperature: temperatureId,
                     status: { $in: ["active", "approved"] },
                 }
-                console.log('bodyformatch 11 ', bodyformatch, "productCode 11 ", productCode, productCode !== 5);
+                // console.log('bodyformatch 11 ', bodyformatch, "productCode 11 ", productCode, productCode !== 5);
                 if (productCode !== 5) {
                     bodyformatch.packing = packingId;
                     bodyformatch.density = densityId;
                     bodyformatch.dimension = dimensionId;
                 }
-                console.log('bodyformatch 22 ', bodyformatch, "productCode 22 ", productCode);
+                // console.log('bodyformatch 22 ', bodyformatch, "productCode 22 ", productCode);
                 const matchedItem = await matchFGItem(bodyformatch);
 
                 if (matchedItem) {
@@ -371,7 +371,7 @@ export async function ingestBlanketBatch({ companyId, payload }) {
                 // Inventory posting (1-to-1 Traceability)
                 const shouldPost = productCode === 5 ? statusOk === false && weightKg > 0 : statusOk === true && weightKg > 0;
 
-                console.log("shouldPost - - - - ?/ ", shouldPost);
+                // console.log("shouldPost - - - - ?/ ", shouldPost);
 
                 if (!shouldPost) {
                     continue;
