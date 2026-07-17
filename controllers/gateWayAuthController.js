@@ -8,11 +8,6 @@ import RefreshToken from '../models/RefreshToken.js';
 import { handleError } from '../utils/errorHandler.js';
 
 
-const APP_NAME = process.env.APP_NAME || 'Orient ERP';
-
-process.env.CLIENT_URL
-
-
 export async function gateWayLogin(req, res) {
   try {
     const { email, password } = req.body;
