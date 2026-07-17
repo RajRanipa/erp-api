@@ -54,7 +54,7 @@ function getTodayDayShiftRange(date = null) {
 function getTodayNightShiftRange(date = null) {
     const reportDate = parseReportDate(date);
 
-    const startIST = reportDate.minus({ days: 1 })({
+    const startIST = reportDate.minus({ days: 1 }).set({
         hour: 20,
         minute: 0,
         second: 0,
