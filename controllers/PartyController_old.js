@@ -210,8 +210,8 @@ const parsePaging = (query = {}) => {
 export const createParty = async (req, res) => {
   try {
     const normalized = normalizePartyInput(req.body || {});
-    console.log("req.body :- ", req.body)
-    console.log("normalized :- ", normalized)
+    // console.log("req.body :- ", req.body)
+    // console.log("normalized :- ", normalized)
     // return;
     const { ok, errors } = validatePartyInput(normalized);
     if (!ok) return res.status(400).json({ success: false, message: 'Validation failed', errors });

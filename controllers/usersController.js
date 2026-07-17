@@ -438,7 +438,6 @@ export async function meUser(req, res) {
     const actingUser = req.user; // set by auth middleware
     const { id } = req.params;
     if (String(actingUser.userId.trim()) !== String(id.trim())) {
-      console.log('actingUser',actingUser.userId, "id :- ",id);
       return res.status(401).json({ status: false, message: 'Unauthorized' });
     }
 

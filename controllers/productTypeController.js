@@ -4,7 +4,6 @@ import ProductType from "../models/ProductType.js";
 // Create a new ProductType
 const createProductType = async (req, res) => {
   try {
-    console.log("req.body product Type ", req.body);
 
     // Extract both productType and the newly required categoryID
     const { categories, name } = req.body;

@@ -281,12 +281,12 @@ export const getProductionDay = async (date = null) => {
             endIST,
         } = getTodayDayShiftRange(date);
 
-        console.log('Production report range:', {
-            startIST,
-            endIST,
-            startUTC: start.toISOString(),
-            endUTC: end.toISOString(),
-        });
+        // console.log('Production report range:', {
+        //     startIST,
+        //     endIST,
+        //     startUTC: start.toISOString(),
+        //     endUTC: end.toISOString(),
+        // });
 
         const data = await fetchproduction(start, end);
 
@@ -615,12 +615,12 @@ export const getProductionNight = async (date = null) => {
             endIST,
         } = getTodayNightShiftRange(date);
 
-        console.log('Production report range:', {
-            startIST,
-            endIST,
-            startUTC: start.toISOString(),
-            endUTC: end.toISOString(),
-        });
+        // console.log('Production report range:', {
+        //     startIST,
+        //     endIST,
+        //     startUTC: start.toISOString(),
+        //     endUTC: end.toISOString(),
+        // });
 
         const data = await fetchproduction(start, end);
 
@@ -656,11 +656,11 @@ export async function fetchAndSendReport(timeOfDay) {
         // --- STEP B: Loop through the data and send emails ---
         console.log('==================================================');
 
-        console.log('Report range:', reportRange);
+        // console.log('Report range:', reportRange);
 
-        console.dir(report, {
-            depth: null,
-        });
+        // console.dir(report, {
+        //     depth: null,
+        // });
 
         if (!Array.isArray(report) || report.length === 0) {
             console.log(

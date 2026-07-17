@@ -426,7 +426,7 @@ export async function signupResendOtp(req, res) {
 // @access  Public
 export async function loginStartOtp(req, res) {
   try {
-    console.log(' loginStartOtp hit _ ');
+    // console.log(' loginStartOtp hit _ ');
     const { email } = req.body || {};
 
     if (!email || typeof email !== 'string') {
@@ -639,7 +639,7 @@ export async function loginVerifyOtp(req, res) {
     // OTP consumed; delete record
     await SignupOtp.deleteOne({ _id: record._id });
 
-    console.log('Login via OTP successful');
+    // console.log('Login via OTP successful');
     return res.status(200).json({
       status: true,
       message: 'Login successful',
@@ -743,7 +743,7 @@ export async function loginResendOtp(req, res) {
 export async function signup(req, res) {
   try {
     const { fullName, email, password } = req.body;
-    console.log(" signup hit _ ")
+    // console.log(" signup hit _ ")
     // Enforce that email has a verified signup OTP before allowing account creation
     const normalizedEmail = String(email).trim().toLowerCase();
     const otpRecord = await SignupOtp.findOne({ email: normalizedEmail });

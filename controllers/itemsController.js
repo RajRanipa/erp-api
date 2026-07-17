@@ -189,13 +189,13 @@ export const getAllItems = async (req, res) => {
     if (dimension) filter.dimension = dimension;
     if (packing) filter.packing = packing;
     // 🔥 NEW: filter only items that have stock
-    console.log('inStockOnly', inStockOnly);
+    // console.log('inStockOnly', inStockOnly);
     if (inStockOnly === 'true' || inStockOnly === '1') {
       const snapFilter = { };
       const companyId = req.user?.companyId || req.user?.company?._id || req.user?.company || null;
       if (companyId) snapFilter.companyId = companyId;
       
-      console.log('snapFilter', snapFilter);
+      // console.log('snapFilter', snapFilter);
       const snapshots = await InventorySnapshot.find(snapFilter)
       .select('itemId')
       .lean();
@@ -310,16 +310,14 @@ export const updateItem = async (req, res) => {
 export const deleteItem = async (req, res) => {
   try {
     const { id } = req.params;
-    console.log('id', id);
     const item = await Item.findById(id);
-    console.log('item', item);
     if (!item) return res.status(404).json({ error: 'Item not found' });
     if (item.status === STATUS.ARCHIVED) {
       // If already archived, allow hard delete (or you can block it based on policy)
       await Item.findByIdAndDelete(id);
       return res.json({ message: 'Item permanently deleted (was archived).' });
     }
-    console.log('STATUS.ARCHIVED', STATUS.ARCHIVED);
+    // console.log('STATUS.ARCHIVED', STATUS.ARCHIVED);
     // Prefer archiving instead of immediate delete
     await item.setStatus(STATUS.ARCHIVED, {
       userId: req.user?.userId || req.user?._id,

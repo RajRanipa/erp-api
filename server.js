@@ -54,7 +54,7 @@ app.use('/uploads', express.static(uploadsDir));
 app.use(express.json());
 
 // Use CORS middleware to allow requests from the frontend
-console.log(chalk.green("CLIENT_URL ***** : ", process.env.CLIENT_URL));
+// console.log(chalk.green("CLIENT_URL ***** : ", process.env.CLIENT_URL));
 app.use(cors({
   origin: process.env.CLIENT_URL,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],

@@ -34,8 +34,8 @@ export default async function sendMail({
     // We are keeping SMTP_USER exactly as you requested!
     const fromEmail = process.env.MAIL_FROM || process.env.SMTP_USER;
 
-    console.log("SMTP_USER =", process.env.SMTP_USER);
-    console.log('📧 Sending email via Gmail HTTP API (Bypassing Render Port Blocks)...');
+    // console.log("SMTP_USER =", process.env.SMTP_USER);
+    // console.log('📧 Sending email via Gmail HTTP API (Bypassing Render Port Blocks)...');
 
     // 3. Construct the raw MIME email message
     const utf8Subject = `=?utf-8?B?${Buffer.from(subject).toString('base64')}?=`;
@@ -66,7 +66,7 @@ export default async function sendMail({
       },
     });
 
-    console.log('✅ Email sent successfully via Google API! Message ID:', response.data.id);
+    // console.log('✅ Email sent successfully via Google API! Message ID:', response.data.id);
     return response.data;
 
   } catch (err) {
@@ -101,24 +101,24 @@ if (!transporter) {
     const fromName = process.env.MAIL_FROM_NAME || 'JNR ERP System';
 
 
-    console.log("SMTP_USER =", process.env.SMTP_USER);
-    console.log("SMTP_USER type =", typeof process.env.SMTP_USER);
-    console.log("SMTP_PASS exists =", !!process.env.SMTP_PASS);
-    console.log("SMTP_PASS type =", typeof process.env.SMTP_PASS);
-    console.log("SMTP_PASS length =", process.env.SMTP_PASS?.length);
-    console.log("SMTP_PASS length =", process.env.SMTP_PASS);
+    // console.log("SMTP_USER =", process.env.SMTP_USER);
+    // console.log("SMTP_USER type =", typeof process.env.SMTP_USER);
+    // console.log("SMTP_PASS exists =", !!process.env.SMTP_PASS);
+    // console.log("SMTP_PASS type =", typeof process.env.SMTP_PASS);
+    // console.log("SMTP_PASS length =", process.env.SMTP_PASS?.length);
+    // console.log("SMTP_PASS length =", process.env.SMTP_PASS);
 
    
     const fromEmail =
       process.env.MAIL_FROM ||
       process.env.SMTP_USER;
 
-    console.log('📧 Sending email via Gmail SMTP...');
-    console.log({
-      from: fromEmail,
-      to,
-      subject,
-    });
+    // console.log('📧 Sending email via Gmail SMTP...');
+    // console.log({
+    //   from: fromEmail,
+    //   to,
+    //   subject,
+    // });
 
     const info = await transporter.sendMail({
       from: `"${fromName}" <${fromEmail}>`,
@@ -128,10 +128,10 @@ if (!transporter) {
       text: text || html?.replace(/<[^>]+>/g, ''),
     });
 
-    console.log(
-      '✅ Email sent:',
-      info.messageId
-    );
+    // console.log(
+    //   '✅ Email sent:',
+    //   info.messageId
+    // );
 
     return info;
   } catch (err) {

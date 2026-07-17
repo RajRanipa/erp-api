@@ -160,7 +160,7 @@ export const getAllParameterOptions = async (req, res) => {
 
 export const createDensity = async (req, res) => {
   const body = req.body || {};
-  console.log('body', body);
+  // console.log('body', body);
   try {
 
     let doc = await Density.create(body);
@@ -172,10 +172,10 @@ export const createDensity = async (req, res) => {
       option: mapDensity(doc),
     });
   } catch (err) {
-    console.log('error ', err);
+    // console.log('error ', err);
     if (err?.code === 11000) {
       const existing = await Density.findOne(body).lean();
-      console.log('existing', existing);
+      // console.log('existing', existing);
       if (existing) {
         return res.status(409).json({
           success: false,
@@ -292,7 +292,6 @@ export const updateTemperature = async (req, res) => {
 export const UpdateDimension = async (req, res) => {
   try {
     const body = req.body || {};
-    console.log('body', body);
     const dimension = await Dimension.findById(body._id);
     if (!dimension) return res.status(404).json({ error: 'Dimension not found' });
     // Normalize inputs

@@ -25,7 +25,7 @@ export const createCategory = async (req, res) => {
 };
 export const updateCategories = async (req, res) => {
   try {
-    console.log("updateCategories req.body", req.body);
+    // console.log("updateCategories req.body", req.body);
 
     const { categoryId, category } = req.body;
     const name = category?.trim();

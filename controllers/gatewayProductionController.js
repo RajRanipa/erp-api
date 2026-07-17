@@ -6,7 +6,7 @@ export async function ingestBlanketProduction(req, res) {
   res.on('finish', () => {
     const endNs = process.hrtime.bigint();
     const ms = Number(endNs - startNs) / 1e6;
-    console.log(`[gateway] ingestBlanketProduction ${req.method} ${req.originalUrl} -> ${res.statusCode} (${ms.toFixed(2)} ms)`);
+    // console.log(`[gateway] ingestBlanketProduction ${req.method} ${req.originalUrl} -> ${res.statusCode} (${ms.toFixed(2)} ms)`);
   });
   try {
     // i want to set timer like when this controller started start counting time and when it sent response end counting and print total time this controller takes for execution
