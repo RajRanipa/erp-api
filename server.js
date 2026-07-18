@@ -95,6 +95,62 @@ app.use("/gateway", gatewayRoutes);
 // Start server
 await startReportScheduler();
 
+
+// This is the password you will enter in the Meta Dashboard
+const VERIFY_TOKEN = 'orient123'; 
+
+// ==========================================
+// 1. THE VERIFICATION ENDPOINT (GET)
+// ==========================================
+app.get('/webhook', (req, res) => {
+    const mode = req.query['hub.mode'];
+    const token = req.query['hub.verify_token'];
+    const challenge = req.query['hub.challenge'];
+
+    // Check if the request is a subscription and the token matches
+    if (mode === 'subscribe' && token === VERIFY_TOKEN) {
+        console.log('✅ Webhook verified successfully!');
+        // You MUST return the challenge code exactly as it was sent
+        res.status(200).send(challenge);
+    } else {
+        // Token didn't match
+        res.sendStatus(403);
+    }
+});
+
+// ==========================================
+// 2. THE RECEIVING ENDPOINT (POST)
+// ==========================================
+app.post('/webhook', (req, res) => {
+    const body = req.body;
+
+    // Meta requires a 200 OK response within 20 seconds, or it will retry
+    res.sendStatus(200);
+
+    // Verify this is a WhatsApp API event
+    if (body.object === 'whatsapp_business_account') {
+        body.entry.forEach(entry => {
+            const changes = entry.changes[0];
+            const value = changes.value;
+
+            // Check if the payload contains a customer message
+            if (value.messages && value.messages.length > 0) {
+                const message = value.messages[0];
+                const fromNumber = message.from; // The customer's phone number
+                
+                // If the customer sent a text message
+                if (message.type === 'text') {
+                    const messageText = message.text.body;
+                    console.log(`📩 New Message from ${fromNumber}: ${messageText}`);
+                    
+                    // Here is where you would write logic to auto-reply or save to a database
+                }
+            }
+        });
+    }
+});
+
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(chalk.green(`🚀 Server running on http://localhost:${PORT}`));
