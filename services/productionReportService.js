@@ -752,8 +752,8 @@ export async function fetchAndSendReport(timeOfDay) {
             );
         }
 
-        // const recipientEmail = "orientfibertechllp@gmail.com";
-        const recipientEmail = "rajranipa47@gmail.com";
+        const recipientEmail = "orientfibertechllp@gmail.com";
+        // const recipientEmail = "rajranipa47@gmail.com";
 
         if (!recipientEmail) {
             throw new Error(
