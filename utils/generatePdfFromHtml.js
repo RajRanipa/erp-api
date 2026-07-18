@@ -10,6 +10,10 @@ export default async function generatePdfFromHtml(html) {
     let browser;
 
     try {
+        console.log(
+            'Puppeteer executable path:',
+            puppeteer.executablePath(),
+        );
         browser = await puppeteer.launch({
             headless: true,
             args: [
