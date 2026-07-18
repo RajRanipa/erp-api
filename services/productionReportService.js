@@ -708,6 +708,41 @@ export const getProductionNight = async (date = null) => {
 
 }
 
+function normalizeRecipients(to) {
+    let recipients;
+
+    if (Array.isArray(to)) {
+        recipients = to;
+    } else if (typeof to === 'string') {
+        recipients = to
+            .replace(/^\[|\]$/g, '')
+            .split(',')
+            .map(number => number.trim())
+            .filter(Boolean);
+    } else {
+        recipients = [to];
+    }
+
+    const normalizedRecipients = recipients.map(recipient =>
+        String(recipient).replace(/\D/g, '')
+    );
+
+    if (normalizedRecipients.length === 0) {
+        throw new Error(
+            'At least one WhatsApp recipient is required',
+        );
+    }
+
+    for (const recipient of normalizedRecipients) {
+        if (!/^\d{10,15}$/.test(recipient)) {
+            throw new Error(
+                `Invalid WhatsApp recipient number: ${recipient}`,
+            );
+        }
+    }
+
+    return normalizedRecipients;
+}
 // 1. Create the core function that fetches data and sends the email
 export async function fetchAndSendReport(timeOfDay) {
     try {
@@ -732,12 +767,6 @@ export async function fetchAndSendReport(timeOfDay) {
 
         // --- STEP B: Loop through the data and send emails ---
         console.log('==================================================');
-
-        // console.log('Report range:', reportRange);
-
-        // console.dir(report, {
-        //     depth: null,
-        // });
 
         if (!Array.isArray(report) || report.length === 0) {
             console.log(
@@ -785,7 +814,7 @@ export async function fetchAndSendReport(timeOfDay) {
         ).toFormat('dd-LL-yyyy');
 
         const filename = (
-            `jnr-production-report-`
+            `JNR-PR-`
             + `${timeOfDay.toLowerCase()}-`
             + `${reportDate}.pdf`
         );
@@ -809,28 +838,13 @@ export async function fetchAndSendReport(timeOfDay) {
 
         let whatsappSent = 0;
 
-        // try {
-        //     await sendProductionReport({
-        //         to: process.env.WHATSAPP_RECIPIENT_NUMBER,
-        //         summary: whatsappSummary,
-        //         pdfBuffer,
-        //         filename,
-        //         shift: timeOfDay,
-        //     });
+        let recipients = process.env.WHATSAPP_RECIPIENT_NUMBER
 
-        //     whatsappSent = true;
+        if(recipients) {
+            recipients = normalizeRecipients(recipients);
+        }
+        console.log('recipients :-- ', recipients);
 
-        //     console.log(
-        //         `✅ ${timeOfDay} WhatsApp report sent successfully`,
-        //     );
-        // } catch (error) {
-        //     console.error(
-        //         `❌ ${timeOfDay} WhatsApp report failed:`,
-        //         error,
-        //     );
-        // }
-
-        const recipients = process.env.WHATSAPP_RECIPIENT_NUMBER
         for (const to of recipients) {
             try {
                 await sendProductionReport({
