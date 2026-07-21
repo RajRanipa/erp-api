@@ -12,7 +12,7 @@ export default async function generatePdfFromHtml(html) {
     try {
         console.log(
             'Puppeteer executable path:',
-            puppeteer.executablePath(),
+            await puppeteer.executablePath(),
         );
         browser = await puppeteer.launch({
             headless: true,
@@ -56,7 +56,8 @@ export default async function generatePdfFromHtml(html) {
                 </html>
             `,
             {
-                waitUntil: 'networkidle0',
+                waitUntil: 'domcontentloaded',
+                timeout: 120000,
             },
         );
 

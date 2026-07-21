@@ -444,10 +444,6 @@ function buildProductionReportHtml(report, timeOfDay, reportRange) {
                     </td>
 
                     <td style="padding:10px;border:1px solid #ddd;">
-                        ${escapeHtml(item.productType?.name || '-')}
-                    </td>
-
-                    <td style="padding:10px;border:1px solid #ddd;">
                         ${escapeHtml(temperature)}
                     </td>
 
@@ -635,10 +631,6 @@ function buildProductionReportHtml(report, timeOfDay, reportRange) {
 
                             <th style="padding:10px;border:1px solid #ddd;">
                                 Item
-                            </th>
-
-                            <th style="padding:10px;border:1px solid #ddd;">
-                                Product Type
                             </th>
 
                             <th style="padding:10px;border:1px solid #ddd;">
