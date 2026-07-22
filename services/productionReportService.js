@@ -216,6 +216,187 @@ export const fetchproduction = async (start, end, companyId) => {
     // console.log("fetchproduction data ::::::: ", data);
     return data;
 }
+export const fetchproductionALL = async (start, end, companyId) => {
+    if (!(start instanceof Date) || Number.isNaN(start.getTime())) {
+        throw new Error("Valid start date is required");
+    }
+
+    if (!(end instanceof Date) || Number.isNaN(end.getTime())) {
+        throw new Error("Valid end date is required");
+    }
+
+    if (!companyId || !mongoose.Types.ObjectId.isValid(companyId)) {
+        throw new Error("Valid companyId is required");
+    }
+
+    console.log(
+        "fetchproductionALL called with start:",
+        start,
+        "end:",
+        end,
+        "companyId:",
+        companyId
+    );
+
+    const data = await ProductionBlanketRoll.aggregate([
+        // 1. FILTER INDIVIDUAL PRODUCTION RECORDS
+        {
+            $match: {
+                companyId: new mongoose.Types.ObjectId(companyId),
+                at: {
+                    $gte: start,
+                    $lt: end,
+                },
+                matchedItem: {
+                    $ne: null,
+                },
+            },
+        },
+
+        // 2. POPULATE PRODUCT TYPE
+        {
+            $lookup: {
+                from: "producttypes",
+                localField: "productType",
+                foreignField: "_id",
+                as: "productType",
+            },
+        },
+        {
+            $unwind: {
+                path: "$productType",
+                preserveNullAndEmptyArrays: true,
+            },
+        },
+
+        // 3. POPULATE TEMPERATURE
+        {
+            $lookup: {
+                from: "temperatures",
+                localField: "temperature",
+                foreignField: "_id",
+                as: "temperature",
+            },
+        },
+        {
+            $unwind: {
+                path: "$temperature",
+                preserveNullAndEmptyArrays: true,
+            },
+        },
+
+        // 4. POPULATE DENSITY
+        {
+            $lookup: {
+                from: "densities",
+                localField: "density",
+                foreignField: "_id",
+                as: "density",
+            },
+        },
+        {
+            $unwind: {
+                path: "$density",
+                preserveNullAndEmptyArrays: true,
+            },
+        },
+
+        // 5. POPULATE DIMENSION
+        {
+            $lookup: {
+                from: "dimensions",
+                localField: "dimension",
+                foreignField: "_id",
+                as: "dimension",
+            },
+        },
+        {
+            $unwind: {
+                path: "$dimension",
+                preserveNullAndEmptyArrays: true,
+            },
+        },
+
+        // 6. POPULATE PACKING ITEM
+        {
+            $lookup: {
+                from: "items",
+                localField: "packingItem",
+                foreignField: "_id",
+                as: "packingItem",
+            },
+        },
+        {
+            $unwind: {
+                path: "$packingItem",
+                preserveNullAndEmptyArrays: true,
+            },
+        },
+
+        // 7. POPULATE MATCHED ITEM
+        {
+            $lookup: {
+                from: "items",
+                localField: "matchedItem",
+                foreignField: "_id",
+                as: "matchedItem",
+            },
+        },
+        {
+            $unwind: {
+                path: "$matchedItem",
+                preserveNullAndEmptyArrays: true,
+            },
+        },
+
+        // 8. RETURN INDIVIDUAL PRODUCTION DATA
+        {
+            $project: {
+                _id: 1,
+
+                companyId: 1,
+                campaign: 1,
+                gatewayId: 1,
+                recordId: 1,
+                ingestBatchId: 1,
+
+                at: 1,
+                weightKg: {
+                    $ifNull: ["$weightKg", 0],
+                },
+                statusOk: 1,
+
+                productCode: 1,
+                temperatureValue: 1,
+                densityValue: 1,
+                sizeCode: 1,
+                batchNo: 1,
+                scaleNo: 1,
+
+                resolveErrors: 1,
+
+                matchedItem: 1,
+                productType: 1,
+                temperature: 1,
+                density: 1,
+                dimension: 1,
+                packingItem: 1,
+
+                createdAt: 1,
+                updatedAt: 1,
+            },
+        },
+
+        // 9. SORT BY PRODUCTION TIME
+        {
+            $sort: {
+                at: 1,
+            },
+        },
+    ]);
+
+    return data;
+};
 
 function escapeHtml(value) {
     return String(value ?? '')
