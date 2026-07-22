@@ -29,7 +29,7 @@ function parseReportDate(date = null) {
     return reportDate.startOf('day');
 }
 
-function getTodayDayShiftRange(date = null) {
+export const  getTodayDayShiftRange = (date = null) => {
     const reportDate = parseReportDate(date);
 
     const startIST = reportDate.set({

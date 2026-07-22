@@ -4,7 +4,7 @@ import ProductionBlanketRoll from '../models/ProductionBlanketRoll.js';
 import BOM from '../models/BOM.js';
 import WorkOrder from '../models/WorkOrder.js'; // Import the new WorkOrder model
 import Item from '../models/Item.js';
-import { fetchAndSendReport, fetchproduction, fetchproductionALL, getProductionDay, getProductionNight } from '../services/productionReportService.js';
+import { fetchAndSendReport, fetchproduction, fetchproductionALL, getProductionDay, getProductionNight, getTodayDayShiftRange } from '../services/productionReportService.js';
 
 export const getAllProduction = async (req, res) => {
     try {
@@ -15,11 +15,15 @@ export const getAllProduction = async (req, res) => {
             return res.status(400).json({ message: "startDate and endDate required" });
         }
 
-        const start = new Date(startDate);
-        const end = new Date(endDate);
+        const newDate = new Date(startDate);
+        // const end = new Date(endDate);
 
-        start.setHours(7, 30, 0, 0);
-        end.setHours(19, 30, 0, 0);
+        const {
+            start,
+            end,
+            startIST,
+            endIST,
+        } = getTodayDayShiftRange(newDate);
 
         const data = await fetchproduction(start, end)
         const specificData = await fetchproductionALL(start, end, companyId);
