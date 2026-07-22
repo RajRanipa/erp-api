@@ -15,6 +15,8 @@ export const getAllProduction = async (req, res) => {
             return res.status(400).json({ message: "startDate and endDate required" });
         }
 
+        console.log("startDate, :- ");
+        console.log(startDate);
         const newDate = new Date(startDate);
         // const end = new Date(endDate);
 
@@ -23,7 +25,7 @@ export const getAllProduction = async (req, res) => {
             end,
             startIST,
             endIST,
-        } = getTodayDayShiftRange(newDate);
+        } = getTodayDayShiftRange(startDate);
 
         const data = await fetchproduction(start, end)
         const specificData = await fetchproductionALL(start, end, companyId);
