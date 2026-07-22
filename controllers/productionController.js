@@ -22,7 +22,7 @@ export const getAllProduction = async (req, res) => {
         end.setHours(19, 30, 0, 0);
 
         const data = await fetchproduction(start, end)
-        const specificData = await fetchproductionALL(start, end);
+        const specificData = await fetchproductionALL(start, end, companyId);
 
         return res.json({
             success: true,
