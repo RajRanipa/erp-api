@@ -4,6 +4,7 @@ import { DateTime } from 'luxon';
 import sendMail from '../utils/sendMail.js';
 import generatePdfFromHtml from '../utils/generatePdfFromHtml.js';
 import { sendProductionReport } from './whatsappService.js';
+import mongoose from "mongoose";
 
 // 1. Generate a PDF from your existing HTML
 // 2. Generate the short WhatsApp summary text
