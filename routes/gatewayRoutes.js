@@ -8,6 +8,7 @@ router.get('/test', gatewayAuth, (req, res) => {
     res.json({ message: 'Test route working added' });
 });
 
-router.post("/blanket/production", gatewayAuth, ingestBlanketProduction);
+// router.post("/blanket/production", gatewayAuth, ingestBlanketProduction);
+router.post("/blanket/production", ingestBlanketProduction);
 
 export default router;
