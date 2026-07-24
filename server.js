@@ -130,8 +130,10 @@ app.post('/webhook', (req, res) => {
 
     // Verify this is a WhatsApp API event
     if (body.object === 'whatsapp_business_account') {
+        console.log('✅ Received a WhatsApp API event', body.entry);
         body.entry.forEach(entry => {
             const changes = entry.changes[0];
+            console.log("Webhook changes", entry.changes);
             const value = changes.value;
 
             // Check if the payload contains a customer message
