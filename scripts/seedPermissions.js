@@ -21,7 +21,13 @@ const all = [
   'batches:full','parties:full','dashboard:full','manufacturing:full','crm:full','warehouses:full',
 
   // granular
-  'items:read','items:create','items:update','items:status:update',
+  'items:read','items:create','items:update','items:delete','items:status:update',
+  'parameters:read',
+  'parameters:categories:read','parameters:categories:create','parameters:categories:update','parameters:categories:delete',
+  'parameters:producttypes:read','parameters:producttypes:create','parameters:producttypes:update','parameters:producttypes:delete',
+  'parameters:densities:read','parameters:densities:create','parameters:densities:update','parameters:densities:delete',
+  'parameters:temperatures:read','parameters:temperatures:create','parameters:temperatures:update','parameters:temperatures:delete',
+  'parameters:dimensions:read','parameters:dimensions:create','parameters:dimensions:update','parameters:dimensions:delete',
   'inventory:read','inventory:receipt','inventory:issue','inventory:adjust','inventory:repack',
   'users:invite:read','users:read','users:invite:create','users:invite:resend','users:invite:revoke','users:remove',
   'warehouses:read','warehouses:update','warehouses:create','warehouses:delete',
@@ -47,6 +53,8 @@ await Permission.updateMany({}, { $addToSet: { roles: 'owner' } });
 // manager
 await Permission.updateMany({ key: { $in: [
   'items:read','items:create','items:update','items:status:update',
+  'parameters:read','parameters:categories:read','parameters:producttypes:read',
+  'parameters:densities:read','parameters:temperatures:read','parameters:dimensions:read',
   'inventory:read','inventory:receipt','inventory:repack',
   'users:invite:read','users:read','users:invite:create','users:invite:resend','users:invite:revoke','users:remove',
   'warehouses:read','warehouses:update','warehouses:create','warehouses:delete'
@@ -55,6 +63,8 @@ await Permission.updateMany({ key: { $in: [
 // store_operator
 await Permission.updateMany({ key: { $in: [
   'items:read','items:create','items:update',
+  'parameters:read','parameters:categories:read','parameters:producttypes:read',
+  'parameters:densities:read','parameters:temperatures:read','parameters:dimensions:read',
   'inventory:read','inventory:receipt','inventory:issue','inventory:adjust','inventory:repack',
   'users:invite:read','users:invite:resend',
   'warehouses:read','warehouses:update','warehouses:create','warehouses:delete'
@@ -63,6 +73,8 @@ await Permission.updateMany({ key: { $in: [
 // production_manager
 await Permission.updateMany({ key: { $in: [
   'items:read','items:create','items:update',
+  'parameters:read','parameters:categories:read','parameters:producttypes:read',
+  'parameters:densities:read','parameters:temperatures:read','parameters:dimensions:read',
   'inventory:read','inventory:receipt','inventory:repack','inventory:adjust',
   'warehouses:read','warehouses:update','warehouses:create','warehouses:delete'
 ]}}, { $addToSet: { roles: 'production_manager' } });

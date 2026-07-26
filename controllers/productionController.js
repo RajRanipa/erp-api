@@ -154,22 +154,25 @@ export const createWorkOrder = async (req, res) => {
     }
 
     const [product, bom] = await Promise.all([
-      Item.findById(productId).select('_id companyId name categoryKey UOM').lean(),
+      Item.findOne({ _id: productId, companyId })
+        .select('_id companyId name categoryKey UOM status')
+        .lean(),
       BOM.findOne({ product: productId }).lean(),
     ]);
     if (!product) throw fail('Finished-goods item not found', 404);
     if (product.categoryKey !== 'FG') throw fail('Work-order output must be an FG item');
-    if (product.companyId && String(product.companyId) !== String(companyId)) {
-      throw fail('Item does not belong to this company', 403);
-    }
+    if (product.status !== 'active') throw fail('Work-order output Item must be active');
     if (!bom) throw fail('Bill of Materials not found for this item', 404);
     if (!Array.isArray(bom.items) || bom.items.length === 0) {
       throw fail('Bill of Materials has no component items');
     }
 
     const componentIds = bom.items.map((line) => line.item);
-    const componentItems = await Item.find({ _id: { $in: componentIds } })
-      .select('_id companyId name categoryKey UOM')
+    const componentItems = await Item.find({
+      _id: { $in: componentIds },
+      companyId,
+    })
+      .select('_id companyId name categoryKey UOM status')
       .lean();
     const componentById = new Map(
       componentItems.map((item) => [String(item._id), item])
@@ -181,10 +184,9 @@ export const createWorkOrder = async (req, res) => {
       if (!['RAW', 'PACKING'].includes(item.categoryKey)) {
         throw fail(`${item.name} must be a RAW or PACKING component`);
       }
-      if (item.companyId && String(item.companyId) !== String(companyId)) {
-        throw fail(`${item.name} does not belong to this company`, 403);
+      if (item.status !== 'active') {
+        throw fail(`${item.name} must be active before it can be consumed`);
       }
-
       const requiredInBomUom =
         Number(line.qtyPer) * quantity * (1 + Number(line.scrapPct || 0) / 100);
       return {

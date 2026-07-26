@@ -26,9 +26,11 @@ const DimensionSchema = new mongoose.Schema(
 
 DimensionSchema.index({
   productType: 1,
-  'length': 1,
-  'width': 1,
-  'thickness': 1,
-}, { unique: true });
+  category: 1,
+  length: 1,
+  width: 1,
+  thickness: 1,
+  unit: 1,
+}, { unique: true, name: 'uniq_dimension_spec' });
 
 export default mongoose.model('Dimension', DimensionSchema);

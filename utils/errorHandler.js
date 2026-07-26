@@ -23,24 +23,20 @@ export function handleError(res, err) {
     let appErr;
     // MongoDB duplicate key error
     if (err.code === 11000) {
-        const duplicateField = Object.keys(err.keyValue);
-        let msg = '';
-        if (Array.isArray(duplicateField) && duplicateField.length > 0) {
-            duplicateField.map((field, index) => {
-                msg += `${field} - "${err.keyValue[field]}" and `;
-            })
-            // console.log("err Rmsg :- ", msg, err.code)
-            // if (!msg.length > 0) return;
-            appErr = new AppError(
-                `${msg} already exists`,
-                { statusCode: 422, code: 'DUPLICATE_ENTRY', details: err.keyValue }
-            );
-        } else {
-            appErr = new AppError(
-                `${duplicateField[0]} "${err.keyValue[duplicateField[0]]}" already exists`,
-                { statusCode: 422, code: 'DUPLICATE_ENTRY', details: err.keyValue }
-            );
-        }
+        const keyValue = err.keyValue || {};
+        const duplicateDescription = Object.entries(keyValue)
+            .map(([field, value]) => `${field} "${value}"`)
+            .join(', ');
+        appErr = new AppError(
+            duplicateDescription
+                ? `${duplicateDescription} already exists`
+                : 'A record with the same unique values already exists',
+            {
+                statusCode: 409,
+                code: 'DUPLICATE_ENTRY',
+                details: keyValue,
+            }
+        );
     }
     // Mongoose validation error
     else if (err.name === 'ValidationError') {
@@ -55,6 +51,13 @@ export function handleError(res, err) {
             details: errors
         });
     }
+    else if (err.name === 'CastError') {
+        appErr = new AppError(`Invalid ${err.path || 'identifier'}`, {
+            statusCode: 400,
+            code: 'INVALID_VALUE',
+            details: { path: err.path, value: err.value },
+        });
+    }
     // JWT errors
     else if (err.name === 'JsonWebTokenError') {
         appErr = new AppError('Invalid token', { statusCode: 401, code: 'INVALID_TOKEN' });
@@ -65,6 +68,13 @@ export function handleError(res, err) {
     // Already a custom AppError
     else if (err instanceof AppError) {
         appErr = err;
+    }
+    else if (Number.isInteger(err.statusCode) && err.statusCode >= 400 && err.statusCode < 600) {
+        appErr = new AppError(err.message || 'Request failed', {
+            statusCode: err.statusCode,
+            code: typeof err.code === 'string' ? err.code : 'REQUEST_ERROR',
+            details: err.details || null,
+        });
     }
     // Fallback for any other error
     else {

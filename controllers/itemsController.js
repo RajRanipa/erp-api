@@ -1,413 +1,508 @@
-// backend-api/controllers/itemsController.js
-import Item, { STATUS } from "../models/Item.js";
-import Category from "../models/Category.js";
-import { handleError } from '../utils/errorHandler.js';
-import { applyAuditCreate, applyAuditUpdate } from '../utils/auditHelper.js';
+import mongoose from 'mongoose';
+import Item, { STATUS } from '../models/Item.js';
+import Category from '../models/Category.js';
 import InventorySnapshot from '../models/InventorySnapshot.js';
-import ProductType from "../models/ProductType.js";
-export const createUser = async (req, res) => {
-  try {
-    const user = await User.create(req.body);
-    return res.status(201).json({ status: true, status_code: 201, message: 'User created', data: user });
-  } catch (error) {
-    return handleError(res, error);
+import InventoryLedger from '../models/InventoryLedger.js';
+import { AppError, handleError } from '../utils/errorHandler.js';
+import { applyAuditCreate, applyAuditUpdate } from '../utils/auditHelper.js';
+
+const ITEM_MUTABLE_FIELDS = new Set([
+  'name',
+  'sku',
+  'category',
+  'UOM',
+  'minimumStock',
+  'purchasePrice',
+  'salePrice',
+  'description',
+  'raw_specificField1',
+  'raw_specificField2',
+  'grade',
+  'productType',
+  'temperature',
+  'density',
+  'dimension',
+  'packing',
+  'brandType',
+  'productColor',
+]);
+
+const REFERENCE_FIELDS = new Set([
+  'category',
+  'productType',
+  'temperature',
+  'density',
+  'dimension',
+  'packing',
+]);
+
+const NUMBER_FIELDS = new Set([
+  'minimumStock',
+  'purchasePrice',
+  'salePrice',
+]);
+
+const ITEM_IDENTITY_FIELDS = new Set([
+  'name',
+  'sku',
+  'category',
+  'UOM',
+  'grade',
+  'productType',
+  'temperature',
+  'density',
+  'dimension',
+  'packing',
+  'brandType',
+  'productColor',
+]);
+
+const INVENTORY_IDENTITY_FIELDS = new Set([
+  'category',
+  'UOM',
+  'productType',
+]);
+
+const ITEM_LIST_POPULATE = [
+  { path: 'category', select: 'name' },
+  { path: 'productType', select: 'name categories' },
+  { path: 'temperature', select: 'value unit productType' },
+  { path: 'density', select: 'value unit productType' },
+  { path: 'dimension', select: 'length width thickness unit category productType' },
+  { path: 'packing', select: 'name sku brandType productColor dimension' },
+  { path: 'createdBy', select: 'fullName' },
+  { path: 'updatedBy', select: 'fullName' },
+];
+
+const STATUS_VALUES = new Set(Object.values(STATUS));
+
+const fail = (message, statusCode = 400, code = 'ITEM_ERROR', details = null) =>
+  new AppError(message, { statusCode, code, details });
+
+const escapeRegex = value =>
+  String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+function companyIdFromRequest(req) {
+  const companyId =
+    req.user?.companyId ||
+    req.user?.company?._id ||
+    req.user?.company;
+
+  if (!companyId || !mongoose.isValidObjectId(companyId)) {
+    throw fail('A valid company is required', 401, 'COMPANY_REQUIRED');
   }
-};
 
-
-// Helper: Validation based on category
-function validateItemFields(data, categoryName) {
-  // Common required fields
-  if (!data.name || typeof data.name !== 'string' || !String(data.name).trim()) return 'Name is required.';
-  if (!data.UOM || typeof data.UOM !== 'string' || !String(data.UOM).trim()) return 'Product unit is required.';
-  if (!data.category) return 'Category is required.';
-  // productType is required for many FG items but optional for RAW depending on business rules
-
-  // Normalize category name for comparisons
-  const cat = (categoryName || '').toString().toLowerCase();
-  const isFG = cat === 'fg' || cat === 'finished goods' || cat.includes('finish');
-
-  if (isFG) {
-    if (!data.productType) return 'Product type is required for finished goods.';
-    if (!data.temperature) return 'Temperature is required for finished goods.';
-    // accept either packing (frontend key) or packingType (backend key)
-    if (!data.packing && !data.packingType) return 'Packing is required for finished goods.';
-  }
-
-  // RAW-specific checks (if you want to enforce):
-  const isRaw = cat === 'raw' || cat === 'raw material' || cat.includes('raw');
-  if (isRaw) {
-    // temperature and density typical for raw materials
-    // if (!data.temperature) return 'Temperature is required for raw materials.';
-    // if (!data.density) return 'Density is required for raw materials.';
-  }
-
-  // PACKING-specific checks
-  // const isPacking = cat === 'packing' || cat === 'packing material' || cat.includes('pack');
-  // if (isPacking) {
-  //   if (!data.dimension) return 'Dimension is required for packing materials.';
-  // }
-
-  return null;
+  return companyId;
 }
 
-function deriveCategoryKeyFromName(name) {
-  const n = String(name || '').toLowerCase();
-  if (n.includes('raw')) return 'RAW';
-  if (n.includes('finish') || n.includes('finished')) return 'FG';
-  if (n.includes('pack')) return 'PACKING';
-  if (n.includes('non-conformance')) return 'NC';
-  return null;
+function validateObjectId(value, fieldName) {
+  if (!mongoose.isValidObjectId(value)) {
+    throw fail(`${fieldName} is invalid`, 400, 'INVALID_ID', { field: fieldName });
+  }
+}
+
+function categoryKeyFromName(name) {
+  const normalized = String(name || '').trim().toLowerCase();
+  const keys = {
+    'raw material': 'RAW',
+    'finished goods': 'FG',
+    'packing material': 'PACKING',
+    'non-conformance': 'NC',
+  };
+  return keys[normalized] || null;
+}
+
+function normalizeItemPayload(body = {}) {
+  const payload = {};
+
+  for (const [field, rawValue] of Object.entries(body)) {
+    if (!ITEM_MUTABLE_FIELDS.has(field)) continue;
+
+    if (REFERENCE_FIELDS.has(field)) {
+      if (rawValue === '' || rawValue === null) {
+        payload[field] = null;
+      } else {
+        validateObjectId(rawValue, field);
+        payload[field] = rawValue;
+      }
+      continue;
+    }
+
+    if (NUMBER_FIELDS.has(field)) {
+      if (rawValue === '' || rawValue === null || rawValue === undefined) {
+        payload[field] = 0;
+        continue;
+      }
+      const numberValue = Number(rawValue);
+      if (!Number.isFinite(numberValue) || numberValue < 0) {
+        throw fail(`${field} must be a non-negative number`, 400, 'INVALID_NUMBER', {
+          field,
+        });
+      }
+      payload[field] = numberValue;
+      continue;
+    }
+
+    if (typeof rawValue === 'string') {
+      payload[field] = rawValue.trim();
+    } else {
+      payload[field] = rawValue;
+    }
+  }
+
+  if ('name' in payload) payload.name = String(payload.name || '').replace(/\s+/g, ' ').trim();
+  if ('sku' in payload) payload.sku = String(payload.sku || '').toUpperCase();
+  if ('UOM' in payload) payload.UOM = String(payload.UOM || '').toLowerCase();
+  if ('grade' in payload) payload.grade = String(payload.grade || '').toLowerCase();
+  if ('brandType' in payload && !payload.brandType) payload.brandType = undefined;
+  if ('productColor' in payload) payload.productColor = String(payload.productColor || '').toLowerCase();
+
+  return payload;
+}
+
+const valuesDiffer = (left, right) =>
+  String(left ?? '') !== String(right ?? '');
+
+async function resolveCategory(categoryId) {
+  if (!categoryId) {
+    throw fail('Category is required', 400, 'CATEGORY_REQUIRED');
+  }
+  validateObjectId(categoryId, 'category');
+
+  const category = await Category.findById(categoryId).select('_id name').lean();
+  if (!category) {
+    throw fail('Category not found', 400, 'INVALID_CATEGORY');
+  }
+
+  const categoryKey = categoryKeyFromName(category.name);
+  if (!categoryKey) {
+    throw fail(
+      `Unsupported Item category: ${category.name}`,
+      400,
+      'UNSUPPORTED_CATEGORY',
+    );
+  }
+
+  return { category, categoryKey };
+}
+
+async function populateItem(item) {
+  if (!item) return null;
+  await item.populate(ITEM_LIST_POPULATE);
+  return item;
+}
+
+function toEditPayload(item) {
+  const doc = item?.toObject ? item.toObject() : item;
+  if (!doc) return null;
+
+  return {
+    ...doc,
+    category: doc.category?._id || doc.category || '',
+    category_label: doc.category?.name || '',
+    productType: doc.productType?._id || doc.productType || '',
+    productType_label: doc.productType?.name || '',
+    temperature: doc.temperature?._id || doc.temperature || '',
+    density: doc.density?._id || doc.density || '',
+    dimension: doc.dimension?._id || doc.dimension || '',
+    packing: doc.packing?._id || doc.packing || '',
+  };
+}
+
+function applyItemFilters(req, baseFilter = {}, defaultStatus = STATUS.ACTIVE) {
+  const filter = { ...baseFilter, companyId: companyIdFromRequest(req) };
+  const {
+    categoryKey,
+    productType,
+    temperature,
+    density,
+    dimension,
+    packing,
+    status,
+    search,
+  } = req.query || {};
+
+  if (categoryKey) {
+    const normalizedKey = String(categoryKey).toUpperCase();
+    if (!['FG', 'RAW', 'PACKING', 'NC'].includes(normalizedKey)) {
+      throw fail('categoryKey must be FG, RAW, PACKING or NC', 400, 'INVALID_CATEGORY_KEY');
+    }
+    filter.categoryKey = normalizedKey;
+  }
+
+  for (const [field, value] of Object.entries({
+    productType,
+    temperature,
+    density,
+    dimension,
+    packing,
+  })) {
+    if (!value) continue;
+    validateObjectId(value, field);
+    filter[field] = value;
+  }
+
+  if (typeof status === 'string' && status.toLowerCase() !== 'all') {
+    const statuses = status
+      .split(',')
+      .map(value => value.trim().toLowerCase())
+      .filter(Boolean);
+    const invalid = statuses.find(value => !STATUS_VALUES.has(value));
+    if (invalid) {
+      throw fail(`Invalid Item status: ${invalid}`, 400, 'INVALID_STATUS');
+    }
+    if (statuses.length) filter.status = { $in: statuses };
+  } else if (!status && defaultStatus) {
+    filter.status = defaultStatus;
+  }
+
+  if (search && String(search).trim()) {
+    const pattern = new RegExp(escapeRegex(String(search).trim()), 'i');
+    filter.$or = [
+      { name: pattern },
+      { sku: pattern },
+      { grade: pattern },
+      { description: pattern },
+    ];
+  }
+
+  return filter;
+}
+
+async function listItems(req, baseFilter = {}, defaultStatus = STATUS.ACTIVE) {
+  const filter = applyItemFilters(req, baseFilter, defaultStatus);
+
+  if (req.query?.inStockOnly === 'true' || req.query?.inStockOnly === '1') {
+    const itemIds = await InventorySnapshot.distinct('itemId', {
+      companyId: filter.companyId,
+      onHand: { $gt: 0 },
+    });
+    if (!itemIds.length) return [];
+    filter._id = { $in: itemIds };
+  }
+
+  return Item.find(filter)
+    .populate(ITEM_LIST_POPULATE)
+    .sort({ name: 1, grade: 1, createdAt: -1 })
+    .lean();
 }
 
 export const createItem = async (req, res) => {
   try {
-    // console.log('req.body', req.body);
-    const duplicate = await Item.findOne(req?.body);
-    
-    if (duplicate) {
-      console.log('duplicate', duplicate);
-      return res.status(409).json({ message: 'Item already exists.' });
-    }
+    const companyId = companyIdFromRequest(req);
+    const normalized = normalizeItemPayload(req.body);
+    const { categoryKey } = await resolveCategory(normalized.category);
 
-    const { sku, category } = req.body;
-    const rest = { ...req.body };
-    // Populate category to get name
-    const cat = await Category.findById(category);
-    
-    // console.log('cat', cat); 
-    if (!cat) throw new AppError('Invalid category.', { statusCode: 400, code: 'INVALID_CATEGORY' });
-    // Validate fields
-    let payload = { ...rest, sku: rest.sku || sku || null, category };
-    // ensure categoryKey present on payload for index/duplicate checks
-    const derivedKey = deriveCategoryKeyFromName(cat.name);
-    if (derivedKey) payload.categoryKey = derivedKey;
-    // Apply audit fields from authenticated user (createdBy, updatedBy, companyId)
-    payload = applyAuditCreate(req, payload);
-    const error = validateItemFields(payload, cat.name);
-    // console.log('error', error);
-    if (error) {
-      throw new Error(String(error));
-    }
-    // Check unique SKU (only if provided)
-    // console.log('payload.sku', payload);
-    // Create
-    const item = new Item(payload);
-    // console.log('item', item);
-    await item.save();
-    return res.status(201).json({ message: 'Item created', item });
+    const payload = applyAuditCreate(req, {
+      ...normalized,
+      companyId,
+      categoryKey,
+      status: STATUS.DRAFT,
+    });
+
+    const item = await Item.create(payload);
+    await populateItem(item);
+
+    return res.status(201).json({
+      success: true,
+      message: 'Item created as draft',
+      data: item,
+      item,
+    });
   } catch (error) {
     return handleError(res, error);
   }
 };
 
-// Get Item by ID (with population)
 export const getItemById = async (req, res) => {
   try {
-    const { id } = req.query;
-    // console.log('getItemById id', id);
-    const item = await Item.findById(
-      id,
-      'name UOM minimumStock description category productType temperature density dimension packing brandType productColor grade status'
-    )
-      // .populate('category', 'name')
-      // .populate('productType', 'name')
-      // .populate('temperature', 'name value')
-      // .populate('density', 'name value')
-      // .populate('dimension', 'width length thickness unit')
-      // .populate('packing', 'name brandType productColor')
-      .lean();
-    if (!item) return res.status(404).json({ error: 'Item not found' });
-    // console.log('item getItemById', item);
-    return res.json(item);
-  } catch (err) {
-    return res.status(500).json({ error: 'Server error' });
-  }
-};
+    const id = req.params.id || req.query.id;
+    validateObjectId(id, 'item id');
 
-// Get All Items (with filtering)
-export const oldgetAllItems = async (req, res) => {
-  // console.log('req.query in getAllItems', req.query);
-  try {
-    const { status, categoryKey, productType, temperature, density, dimension, packing } = req.query || {};
-    const filter = {};
+    const item = await Item.findOne({
+      _id: id,
+      companyId: companyIdFromRequest(req),
+    }).populate(ITEM_LIST_POPULATE);
 
-    // Filter by categoryKey if provided
-    if (categoryKey) filter.categoryKey = categoryKey;
-    if (productType) filter.productType = productType;
-    if (temperature) filter.temperature = temperature;
-    if (density) filter.density = density;
-    if (dimension) filter.dimension = dimension;
-    if (packing) filter.packing = packing;
-    // i want to set one filter as if that come then send only those items which is present in inventorySnapshot
-    
-    // Status filtering:
-    // - If status=all -> no filter
-    // - If status is provided as comma-separated -> IN query
-    // - Else default to active
-    if (typeof status === 'string') {
-      if (status.toLowerCase() !== 'all') {
-        const list = status.split(',').map(s => s.trim()).filter(Boolean);
-        if (list.length) filter.status = { $in: list };
-      }
-    } else {
-      filter.status = STATUS.ACTIVE;
-    }
-
-    const items = await Item.find(filter)
-      .populate('temperature', 'value unit')
-      .populate('density', 'value unit')
-      .populate('packing', 'name brandType productColor')
-      .populate('dimension', 'width length thickness unit')
-      .lean();
-
-    // // console.log('items in getAllItems (count)', items?.length || 0, 'items', items);
-    return res.json(items);
-  } catch (err) {
-    return res.status(500).json({ error: 'Server error' });
+    if (!item) throw fail('Item not found', 404, 'ITEM_NOT_FOUND');
+    return res.json(toEditPayload(item));
+  } catch (error) {
+    return handleError(res, error);
   }
 };
 
 export const getAllItems = async (req, res) => {
   try {
-    const {
-      status,
-      categoryKey,
-      productType,
-      temperature,
-      density,
-      dimension,
-      packing,
-      inStockOnly,
-    } = req.query || {};
-    const filter = {};
-    if (req.user?.companyId) filter.companyId = req.user.companyId;
-
-    if (categoryKey) filter.categoryKey = categoryKey;
-    if (productType) filter.productType = productType;
-    if (temperature) filter.temperature = temperature;
-    if (density) filter.density = density;
-    if (dimension) filter.dimension = dimension;
-    if (packing) filter.packing = packing;
-    // 🔥 NEW: filter only items that have stock
-    // console.log('inStockOnly', inStockOnly);
-    if (inStockOnly === 'true' || inStockOnly === '1') {
-      const snapFilter = { };
-      const companyId = req.user?.companyId || req.user?.company?._id || req.user?.company || null;
-      if (companyId) snapFilter.companyId = companyId;
-      
-      // console.log('snapFilter', snapFilter);
-      const snapshots = await InventorySnapshot.find(snapFilter)
-      .select('itemId')
-      .lean();
-      // console.log('snapshots', snapshots);
-
-      const itemIds = [...new Set(snapshots.map(s => String(s.itemId)))];
-
-      if (!itemIds.length) {
-        return res.json([]);
-      }
-
-      filter._id = { $in: itemIds };
-    }
-
-    // Status filtering (your existing logic) ...
-    if (typeof status === 'string') {
-      if (status.toLowerCase() !== 'all') {
-        const list = status.split(',').map(s => s.trim()).filter(Boolean);
-        if (list.length) filter.status = { $in: list };
-      }
-    } else {
-      filter.status = STATUS.ACTIVE;
-    }
-    // console.log('filter', filter);
-    const items = await Item.find(filter)
-    .populate('temperature', 'value unit')
-    .populate('density', 'value unit')
-    .populate('packing', 'name brandType productColor')
-    .populate('dimension', 'width length thickness unit')
-    .lean();
-    
-    // console.log('items', items);
-    return res.json(items);
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: 'Server error' });
+    return res.json(await listItems(req));
+  } catch (error) {
+    return handleError(res, error);
   }
 };
 
-// Get All Items (with filtering)
 export const getAllItemsOptions = async (req, res) => {
-  // console.log('req.query in getAllItems', req.query);
   try {
-    const { status, categoryKey } = req.query || {};
-    const filter = {};
-    if (req.user?.companyId) filter.companyId = req.user.companyId;
+    const filter = applyItemFilters(req);
+    const items = await Item.find(filter)
+      .select('_id name sku grade UOM categoryKey productType status')
+      .sort({ name: 1, grade: 1 })
+      .lean();
 
-    // Filter by categoryKey if provided
-    if (categoryKey) filter.categoryKey = categoryKey;
-
-    // Status filtering:
-    // - If status=all -> no filter
-    // - If status is provided as comma-separated -> IN query
-    // - Else default to active
-    if (typeof status === 'string') {
-      if (status.toLowerCase() !== 'all') {
-        const list = status.split(',').map(s => s.trim()).filter(Boolean);
-        if (list.length) filter.status = { $in: list };
-      }
-    } else {
-      filter.status = STATUS.ACTIVE;
-    }
-
-    const items = await Item.find(filter).lean();
-    // // console.log('items in getAllItems (count)', items?.length || 0, 'items', items[0]);
     return res.json(items);
-  } catch (err) {
-    return res.status(500).json({ error: 'Server error' });
+  } catch (error) {
+    return handleError(res, error);
   }
 };
 
-// Update Item
 export const updateItem = async (req, res) => {
   try {
     const { id } = req.params;
-    const item = await Item.findById(id);
-    if (!item) return res.status(404).json({ error: 'Item not found' });
-    // normalize incoming update payload
-    const normalized = { ...req.body };
-    // Stamp updatedBy from authenticated user
-    // console.log('req.user in updateItem', req.user);
-    const updateWithAudit = applyAuditUpdate(req, normalized);
-    // console.log('updateWithAudit applyAuditUpdate', updateWithAudit);
-    // If SKU is being updated, check uniqueness
-    if (normalized.sku && normalized.sku !== item.sku) {
-      const existing = await Item.findOne({ sku: normalized.sku });
-      if (existing) return res.status(409).json({ error: 'SKU already exists.' });
+    validateObjectId(id, 'item id');
+
+    const item = await Item.findOne({
+      _id: id,
+      companyId: companyIdFromRequest(req),
+    });
+    if (!item) throw fail('Item not found', 404, 'ITEM_NOT_FOUND');
+    if (item.status === STATUS.ARCHIVED) {
+      throw fail('Archived Items cannot be edited', 409, 'ITEM_ARCHIVED');
     }
-    // If category is being updated or present, get category name for validation
-    let catName = null;
-    if (normalized.category) {
-      const cat = await Category.findById(normalized.category);
-      if (!cat) return res.status(400).json({ error: 'Invalid category.' });
-      catName = cat.name;
-    } else {
-      const cat = await Category.findById(item.category);
-      catName = cat ? cat.name : null;
+
+    const normalized = normalizeItemPayload(req.body);
+    const changedIdentityFields = Object.keys(normalized).filter(field =>
+      ITEM_IDENTITY_FIELDS.has(field) &&
+      valuesDiffer(normalized[field], item[field])
+    );
+    if (
+      changedIdentityFields.length &&
+      ![STATUS.DRAFT, STATUS.REJECTED].includes(item.status)
+    ) {
+      throw fail(
+        'Item specifications can only be changed while the Item is draft or rejected',
+        409,
+        'ITEM_SPECIFICATIONS_LOCKED',
+        { fields: changedIdentityFields },
+      );
     }
-    // Validate fields
-    const error = validateItemFields({ ...item.toObject(), ...normalized }, catName);
-    if (error) return res.status(400).json({ error });
-    // Update
-    Object.assign(item, updateWithAudit);
+
+    const changedInventoryIdentityFields = changedIdentityFields.filter(field =>
+      INVENTORY_IDENTITY_FIELDS.has(field)
+    );
+    if (changedInventoryIdentityFields.length) {
+      const [hasLedger, hasSnapshot] = await Promise.all([
+        InventoryLedger.exists({ companyId: item.companyId, itemId: item._id }),
+        InventorySnapshot.exists({ companyId: item.companyId, itemId: item._id }),
+      ]);
+      if (hasLedger || hasSnapshot) {
+        throw fail(
+          'Category, UOM and product type cannot change after inventory activity exists',
+          409,
+          'INVENTORY_IDENTITY_LOCKED',
+          { fields: changedInventoryIdentityFields },
+        );
+      }
+    }
+
+    const categoryId = normalized.category || item.category;
+    const { categoryKey } = await resolveCategory(categoryId);
+    const update = applyAuditUpdate(req, {
+      ...normalized,
+      category: categoryId,
+      categoryKey,
+    });
+
+    Object.assign(item, update);
     await item.save();
-    return res.json({ message: 'Item updated', item });
+    await populateItem(item);
+
+    return res.json({
+      success: true,
+      message: 'Item updated',
+      data: item,
+      item,
+    });
   } catch (error) {
-    // // console.log('err', error);
     return handleError(res, error);
   }
 };
 
-// Delete Item
+/**
+ * DELETE archives an Item. It never hard-deletes master data because inventory,
+ * BOM, batch, QC, and production records retain Item references for audit.
+ */
 export const deleteItem = async (req, res) => {
   try {
     const { id } = req.params;
-    const item = await Item.findById(id);
-    if (!item) return res.status(404).json({ error: 'Item not found' });
-    if (item.status === STATUS.ARCHIVED) {
-      // If already archived, allow hard delete (or you can block it based on policy)
-      await Item.findByIdAndDelete(id);
-      return res.json({ message: 'Item permanently deleted (was archived).' });
-    }
-    // console.log('STATUS.ARCHIVED', STATUS.ARCHIVED);
-    // Prefer archiving instead of immediate delete
-    await item.setStatus(STATUS.ARCHIVED, {
-      userId: req.user?.userId || req.user?._id,
-      reason: 'Soft delete via delete endpoint',
-      companyId: req.user?.companyId
+    validateObjectId(id, 'item id');
+
+    const item = await Item.findOne({
+      _id: id,
+      companyId: companyIdFromRequest(req),
     });
-    return res.json({ message: 'Item archived (soft delete).', item });
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: 'Server error' });
+    if (!item) throw fail('Item not found', 404, 'ITEM_NOT_FOUND');
+
+    if (item.status !== STATUS.ARCHIVED) {
+      await item.setStatus(STATUS.ARCHIVED, {
+        userId: req.user?.userId || req.user?.id || req.user?._id,
+        reason: 'Archived from Item module',
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: 'Item archived',
+      data: item,
+      item,
+    });
+  } catch (error) {
+    return handleError(res, error);
   }
 };
-// PATCH /items/:id/status
-// body: { to: 'active', reason?: 'QC ok' }
+
 export const updateItemStatus = async (req, res) => {
   try {
     const { id } = req.params;
-    const { to, reason } = req.body || {};
-    if (!to) return res.status(400).json({ error: 'Missing target status "to".' });
+    const targetStatus = String(req.body?.to || req.body?.status || '')
+      .trim()
+      .toLowerCase();
+    validateObjectId(id, 'item id');
 
-    const item = await Item.findById(id);
-    if (!item) return res.status(404).json({ error: 'Item not found' });
+    if (!STATUS_VALUES.has(targetStatus)) {
+      throw fail('A valid target status is required', 400, 'INVALID_STATUS');
+    }
 
-    await item.setStatus(to, {
-      userId:  req.user?.userId || req.user?._id,
-      reason: reason || '',
-      companyId: req.user?.companyId
+    const item = await Item.findOne({
+      _id: id,
+      companyId: companyIdFromRequest(req),
+    });
+    if (!item) throw fail('Item not found', 404, 'ITEM_NOT_FOUND');
+
+    await item.setStatus(targetStatus, {
+      userId: req.user?.userId || req.user?.id || req.user?._id,
+      reason: String(req.body?.reason || '').trim(),
     });
 
-    // Optionally return latest history entry + item
-    return res.json({ message: 'Status updated', item });
+    return res.json({
+      success: true,
+      message: 'Item status updated',
+      data: item,
+      item,
+    });
   } catch (error) {
     return handleError(res, error);
   }
 };
 
-// Fetch summary of items where categoryKey === 'PACKING' (only _id, name, brandType)
 export const getPackingItems = async (req, res) => {
   try {
-    // console.log('getPackingItems');
-    // Simple fixed query: only items with categoryKey PACKING
-    const packings = await Item.find({ categoryKey: 'PACKING' })
-      .populate('productType', 'name')
-      .populate('dimension', 'width length thickness unit')
-      .populate('createdBy', 'fullName')
-      .populate('updatedBy', 'fullName')
-      .lean();
-    // // console.log('packings', packings[0]); // i need to give productType name or i need to populate name of productType
-    return res.status(200).json(packings);
-
+    return res.json(await listItems(req, { categoryKey: 'PACKING' }, null));
   } catch (error) {
     return handleError(res, error);
   }
 };
+
 export const getFinishedItems = async (req, res) => {
   try {
-    // console.log('getFinishedItems');
-    // Simple fixed query: only items with categoryKey PACKING
-    const FG = await Item.find({ categoryKey: 'FG' })
-      .populate('productType', 'name')
-      .populate('dimension', 'width length thickness unit')
-      .populate('density', 'value unit')
-      .populate('temperature', 'value unit')
-      .populate('packing', 'name brandType productColor')
-      .populate('createdBy', 'fullName')
-      .populate('updatedBy', 'fullName')
-      .lean();
-
-    // // console.log('FG', mapFG[0]); // i need to give productType name or i need to populate name of productType
-    return res.status(200).json(FG);
-
-  } catch (error) {
-    return handleError(res, error);
-  }
-};
-export const getNCItems = async (req, res) => {
-  try {
-    // console.log('getRawItems');
-    // Simple fixed query: only items with categoryKey PACKING
-    const packings = await Item.find({ categoryKey: 'NC' })
-      .populate('temperature', 'value unit')
-      .populate('createdBy', 'fullName')
-      .populate('updatedBy', 'fullName')
-      .lean();
-    // console.log('RAW', packings[0]);
-
-    return res.status(200).json(packings);
-
+    return res.json(await listItems(req, { categoryKey: 'FG' }, null));
   } catch (error) {
     return handleError(res, error);
   }
@@ -415,146 +510,110 @@ export const getNCItems = async (req, res) => {
 
 export const getRawItems = async (req, res) => {
   try {
-    // console.log('getRawItems');
-    // Simple fixed query: only items with categoryKey PACKING
-    const filter = { categoryKey: 'RAW' };
-    if (req.user?.companyId) filter.companyId = req.user.companyId;
-    const packings = await Item.find(filter)
-      .populate('createdBy', 'fullName')
-      .populate('updatedBy', 'fullName')
-      .lean();
-    // console.log('RAW', packings[0]);
-
-    return res.status(200).json(packings);
-
+    return res.json(await listItems(req, { categoryKey: 'RAW' }, null));
   } catch (error) {
     return handleError(res, error);
   }
 };
 
-// Fetch summary of items where categoryKey === 'PACKING' (only _id, name, brandType)
+export const getNCItems = async (req, res) => {
+  try {
+    return res.json(await listItems(req, { categoryKey: 'NC' }, null));
+  } catch (error) {
+    return handleError(res, error);
+  }
+};
+
 export const getPackingItemsByid = async (req, res) => {
   try {
     const { productType } = req.query || {};
-    // console.log('productType', productType);
-    if (!productType) {
-      return res.status(400).json({ message: 'productType is a required query param' });
-    }
+    validateObjectId(productType, 'productType');
 
-    const isValidObjectId = (v) => typeof v === 'string' && /^[0-9a-fA-F]{24}$/.test(v);
-    if (!isValidObjectId(productType)) {
-      return res.status(400).json({ message: 'Invalid productType id format' });
-    }
-    // Simple fixed query: only items with categoryKey PACKING
-    const packings = await Item.find({ categoryKey: 'PACKING', productType }, '_id name brandType productColor').populate('dimension', 'width length thickness unit').lean();
-    
-    // console.log('packings', packings, packings , " && ",  packings.length === 0);
-    if(packings && packings.length === 0) {
-        const product_Type = await ProductType.findById(productType);
-        console.log("product_Type",product_Type);
-    }
+    const packings = await Item.find({
+      companyId: companyIdFromRequest(req),
+      categoryKey: 'PACKING',
+      productType,
+      status: STATUS.ACTIVE,
+    })
+      .select('_id name sku brandType productColor grade dimension')
+      .populate('dimension', 'width length thickness unit')
+      .sort({ name: 1, grade: 1 })
+      .lean();
 
-    const mapped = valueandlabel(packings)
+    const options = packings.map(item => {
+      const dimension = item.dimension
+        ? [
+          item.dimension.length,
+          item.dimension.width,
+          item.dimension.thickness,
+        ].filter(value => value !== null && value !== undefined).join(' × ')
+        : '';
+      const dimensionLabel = dimension
+        ? `${dimension} ${item.dimension.unit || ''}`.trim()
+        : '';
+      const specification = [
+        item.brandType,
+        item.productColor,
+        item.grade,
+        dimensionLabel,
+      ].filter(Boolean).join(' · ');
 
-    // console.log('packings by id', mapped[0]);
-    return res.status(200).json(mapped);
+      return {
+        value: String(item._id),
+        label: specification ? `${item.name} — ${specification}` : item.name,
+      };
+    });
+
+    return res.json(options);
   } catch (error) {
     return handleError(res, error);
   }
 };
 
-// You can wire this controller in your routes like:
-// router.get('/items/packing', getPackingItems);
-
-function valueandlabel(packings) {
-  if (!Array.isArray(packings)) return [];
-  const mapped = packings.map((p) => {
-    const nameLine = `
-    <p>
-      ${mapPacking(p)}
-    </p>
-  `;
-    const dimensionLine = `<span class="text-xs text-white-500">${mapDimension(p?.dimension) || ''}</span>`;
-
-    return {
-      value: String(p._id),
-      label: `${nameLine}${dimensionLine}`,
-    };
-  });
-  return mapped;
-}
-
-const mapDimension = (dm) => {
-  const unit = dm.unit ? ` ${dm.unit}` : '';
-  const l = dm.length ?? '';
-  const w = dm.width ?? '';
-  const th = dm.thickness ?? '';
-
-  const parts = [l, w, th].filter(Boolean);
-  if (parts.length === 0) return '';
-  return `${parts.join(' × ')}${unit}`.trim();
-  // return `${l} × ${w} × ${th}${unit}`.trim();
-  // return { label: `${l} × ${w} × ${th}${unit}`.trim(), value: String(dm._id) };
-};
-
-const mapPacking = (p) => {
-  return `${[p.name,
-  p?.brandType && !p?.brandType.includes('branded') ? p.brandType : '',
-  p?.productColor || '']
-    .filter(Boolean)
-    .join(' ')
-    }`
-}
-
-
-
-// GET /items/:id/status-history
 export const getItemStatusHistory = async (req, res) => {
   try {
     const { id } = req.params;
-    const item = await Item.findById(id, 'statusHistory').lean();
-    if (!item) return res.status(404).json({ error: 'Item not found' });
-    const history = (item.statusHistory || []).sort((a, b) => new Date(b.at) - new Date(a.at));
+    validateObjectId(id, 'item id');
+    const item = await Item.findOne({
+      _id: id,
+      companyId: companyIdFromRequest(req),
+    })
+      .select('statusHistory')
+      .populate('statusHistory.userId', 'fullName')
+      .lean();
+
+    if (!item) throw fail('Item not found', 404, 'ITEM_NOT_FOUND');
+    const history = [...(item.statusHistory || [])].sort(
+      (a, b) => new Date(b.at) - new Date(a.at),
+    );
     return res.json(history);
   } catch (error) {
     return handleError(res, error);
   }
 };
 
-// Get default UOM for a single item by id
 export const getItemUomById = async (req, res) => {
   try {
     const { id } = req.params;
-    if (!id) {
-      return res.status(400).json({ status: false, message: 'Item id is required' });
-    }
-    // Multi-tenant safety: prefer companyId from auth if available
-    const companyId = req.user?.companyId || req.user?.company?._id || req.user?.company || null;
-    const query = companyId ? { _id: id, companyId } : { _id: id };
-    // Select a broad set of possible UOM fields to be safe with schema variants
-    const projection = {
-      UOM: 1,
-      _id: 0,
-    };
-    const doc = await Item.findOne(query).select(projection).lean();
-    if (!doc) {
-      return res.status(404).json({ status: false, message: 'Item not found' });
-    }
+    validateObjectId(id, 'item id');
+    const item = await Item.findOne({
+      _id: id,
+      companyId: companyIdFromRequest(req),
+    })
+      .select('UOM categoryKey status')
+      .lean();
 
-    const uom =
-      doc.uom ??
-      doc.UOM ??
-      doc.baseUom ??
-      doc.defaultUom ??
-      doc.unit ??
-      null;
-
-    return res.status(200).json({
+    if (!item) throw fail('Item not found', 404, 'ITEM_NOT_FOUND');
+    return res.json({
       status: true,
       message: 'UOM fetched',
-      data: { uom },
+      data: {
+        uom: item.UOM,
+        categoryKey: item.categoryKey,
+        status: item.status,
+      },
     });
   } catch (error) {
-    return handleError(res, error, 'Failed to fetch UOM');
+    return handleError(res, error);
   }
 };

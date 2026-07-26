@@ -15,7 +15,9 @@ import {
   getDimensionOptionsById,
   getDensitys,
   UpdateDimension,
-
+  deleteDensity,
+  deleteTemperature,
+  deleteDimension,
 } from '../controllers/parameterController.js';
 import auth, { roleAuth } from '../middleware/authMiddleware.js';
 
@@ -31,6 +33,7 @@ router.get('/densities',roleAuth('parameters:densities:read'), getDensitys);
 router.get('/densities/by-id',roleAuth('parameters:densities:read'), getDensityOptionsById);
 router.post('/densities', roleAuth('parameters:densities:create'), createDensity);
 router.put('/densities/:id', roleAuth('parameters:densities:update'), updateDensity);
+router.delete('/densities/:id', roleAuth('parameters:densities:delete'), deleteDensity);
 // router.get('/densitiesOptions',roleAuth('parameters:densities:read'), getDensityOptions);
 
 // GET /api/temperatures
@@ -38,12 +41,15 @@ router.get('/temperatures',roleAuth('parameters:temperatures:read'), getAllTempe
 router.get('/temperatures/by-id',roleAuth('parameters:temperatures:read'), getTemperatureOptionsById);
 router.post('/temperatures', roleAuth('parameters:temperatures:create'), createTemperature);
 router.put('/temperatures/:id', roleAuth('parameters:temperatures:update'), updateTemperature);
+router.delete('/temperatures/:id', roleAuth('parameters:temperatures:delete'), deleteTemperature);
 
 // GET /api/dimensions
 router.get('/dimensions',roleAuth('parameters:dimensions:read'), getAllDimension);
 router.get('/dimensions/by-id',roleAuth('parameters:dimensions:read'), getDimensionOptionsById);
 router.post('/dimensions', roleAuth('parameters:dimensions:create'), createDimension);
-router.put('/dimensions/', roleAuth('parameters:dimensions:create'), UpdateDimension);
+router.put('/dimensions', roleAuth('parameters:dimensions:update'), UpdateDimension);
+router.put('/dimensions/:id', roleAuth('parameters:dimensions:update'), UpdateDimension);
+router.delete('/dimensions/:id', roleAuth('parameters:dimensions:delete'), deleteDimension);
 
 // CREATE endpoints
 

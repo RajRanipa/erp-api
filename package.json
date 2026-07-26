@@ -9,7 +9,9 @@
     "dev": "nodemon --watch ./ --ext js,json,env --ignore node_modules server.js",
     "debug": "node --inspect server.js",
     "debug:break": "node --inspect-brk server.js",
-    "migrate:inventory-items": "node scripts/migrateInventoryItemMetadata.js"
+    "migrate:inventory-items": "node scripts/migrateInventoryItemMetadata.js",
+    "audit:item-module-data": "node scripts/migrateItemModule.js",
+    "migrate:item-module": "node scripts/migrateItemModule.js --apply"
   },
   "keywords": [],
   "author": "Raj",

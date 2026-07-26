@@ -64,6 +64,7 @@ async function resolvePackingItem(companyId) {
     const packing = await Item.findOne({
         companyId,
         categoryKey: "PACKING",
+        status: "active",
         name: { $regex: /plastic\s*bag/i },
     }).select("_id name").lean();
 
@@ -293,7 +294,7 @@ export async function ingestBlanketBatch({ companyId, payload }) {
                     category: category,
                     productType: productTypeId,
                     temperature: temperatureId,
-                    status: { $in: ["active", "approved"] },
+                    status: "active",
                 }
                 // console.log('bodyformatch 11 ', bodyformatch, "productCode 11 ", productCode, productCode !== 5);
                 if (productCode !== 5) {

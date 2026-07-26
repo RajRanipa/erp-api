@@ -11,7 +11,9 @@ import {
   getNCItems,
   getFinishedItems,
   getPackingItemsByid,
-  getItemUomById
+  getItemUomById,
+  getItemStatusHistory,
+  updateItemStatus,
 } from '../controllers/itemsController.js'; 
 import auth, { roleAuth } from '../middleware/authMiddleware.js';
 
@@ -27,11 +29,13 @@ router.get('/uom/:id', roleAuth('items:read'), getItemUomById);
 router.get('/packings/by-id', roleAuth('items:read'), getPackingItemsByid);
 
 router.get('/by-id', roleAuth('items:read'),  getItemById); 
+router.get('/:id/status-history', roleAuth('items:read'), getItemStatusHistory);
 router.post('/', roleAuth('items:create'),  createItem);
 router.get('/', roleAuth('items:read'),  getAllItems);
 router.get('/options', roleAuth('items:read'),  getAllItemsOptions);
 router.put('/:id', roleAuth('items:update'),  updateItem);
-router.put('/status/:id', roleAuth('items:status:update'),  updateItem);
+router.patch('/:id/status', roleAuth('items:status:update'), updateItemStatus);
+router.put('/status/:id', roleAuth('items:status:update'), updateItemStatus);
 router.delete('/:id', roleAuth('items:delete'),  deleteItem);
 
 export default router;

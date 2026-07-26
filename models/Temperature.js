@@ -21,7 +21,7 @@ const TemperatureSchema = new mongoose.Schema(
 );
 
 TemperatureSchema.index(
-  { productType: 1, value: 1},
-  { unique: true, }
+  { productType: 1, value: 1, unit: 1 },
+  { unique: true, name: 'uniq_temperature_spec' }
 );
 export default mongoose.model('Temperature', TemperatureSchema);

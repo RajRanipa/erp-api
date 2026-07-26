@@ -143,7 +143,10 @@ const normalizeCreateInput = (body = {}) => {
 
 const loadMaterialItems = async (lines, companyId, session) => {
   const ids = lines.map((line) => line.itemId);
-  const query = Item.find({ _id: { $in: ids } })
+  const query = Item.find({
+    _id: { $in: ids },
+    companyId,
+  })
     .select('_id companyId name categoryKey UOM status')
     .lean();
   if (session) query.session(session);
@@ -156,11 +159,8 @@ const loadMaterialItems = async (lines, companyId, session) => {
     if (item.categoryKey !== 'RAW') {
       throw httpError(`${item.name} is not a RAW item`);
     }
-    if (item.status === 'archived') {
-      throw httpError(`${item.name} is archived and cannot be consumed`);
-    }
-    if (item.companyId && String(item.companyId) !== String(companyId)) {
-      throw httpError(`${item.name} does not belong to this company`, 403);
+    if (item.status !== 'active') {
+      throw httpError(`${item.name} must be active before it can be consumed`);
     }
     if (!item.UOM) throw httpError(`${item.name} does not have a UOM`);
 
@@ -236,6 +236,7 @@ const reverseMaterialIssues = async ({
       note: reason || `Raw material returned from manufacturing batch ${batchCode}`,
       refType: 'MANUFACTURING_BATCH_REVERSAL',
       refId: String(batchId),
+      allowInactiveItem: true,
       session,
     });
   }

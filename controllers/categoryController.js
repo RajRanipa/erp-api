@@ -3,6 +3,7 @@ import { handleError } from '../utils/errorHandler.js';
 import { applyAuditCreate, applyAuditUpdate } from '../utils/auditHelper.js';
 import Item from "../models/Item.js";
 import ProductType from "../models/ProductType.js";
+import mongoose from 'mongoose';
 
 // Create a new Category
 export const createCategory = async (req, res) => {
@@ -19,8 +20,7 @@ export const createCategory = async (req, res) => {
 
     res.status(201).json(savedCategory); // includes _id by default
   } catch (error) {
-    console.error("Error creating category:", error);
-    res.status(500).json({ message: error.message });
+    return handleError(res, error);
   }
 };
 export const updateCategories = async (req, res) => {
@@ -38,9 +38,34 @@ export const updateCategories = async (req, res) => {
       return res.status(400).json({ message: "Category name is required" });
     }
 
+    if (!mongoose.isValidObjectId(categoryId)) {
+      return res.status(400).json({ message: "Category ID is invalid" });
+    }
+
+    const existingCategory = await Category.findById(categoryId).select('name').lean();
+    if (!existingCategory) {
+      return res.status(404).json({ message: "Category not found" });
+    }
+    if (existingCategory.name !== name.toLowerCase()) {
+      const [itemCount, productTypeCount] = await Promise.all([
+        Item.countDocuments({ category: categoryId }),
+        ProductType.countDocuments({ categories: categoryId }),
+      ]);
+      if (itemCount || productTypeCount) {
+        return res.status(409).json({
+          message: (
+            `This category cannot be renamed because it is linked to `
+            + `${itemCount} Item(s) and ${productTypeCount} Product Type(s).`
+          ),
+          itemCount,
+          productTypeCount,
+        });
+      }
+    }
+
     const updatedCategory = await Category.findByIdAndUpdate(
       categoryId,
-      { name },
+      applyAuditUpdate(req, { name }),
       { new: true, runValidators: true }
     );
 
@@ -50,8 +75,7 @@ export const updateCategories = async (req, res) => {
 
     res.status(200).json(updatedCategory);
   } catch (error) {
-    console.error("Error updating category:", error);
-    res.status(500).json({ message: error.message });
+    return handleError(res, error);
   }
 };
 
@@ -64,11 +88,14 @@ export const deleteCategory = async (req, res) => {
     if (!categoryId) {
       return res.status(400).json({ message: "Category ID is required" });
     }
+    if (!mongoose.isValidObjectId(categoryId)) {
+      return res.status(400).json({ message: "Category ID is invalid" });
+    }
     const itemCount = await Item.countDocuments({ category: categoryId });
-    const productTypeCount = await ProductType.countDocuments({ category: categoryId });
+    const productTypeCount = await ProductType.countDocuments({ categories: categoryId });
 
     if (itemCount > 0 || productTypeCount > 0) {
-      return res.status(400).json({
+      return res.status(409).json({
         message: `You can't delete this category. It is linked to ${itemCount} item(s) and ${productTypeCount} product type(s). Please delete the linked records first.`,
         itemCount,
         productTypeCount,
@@ -86,8 +113,7 @@ export const deleteCategory = async (req, res) => {
       categoryId,
     });
   } catch (error) {
-    console.error("Error deleting category:", error);
-    res.status(500).json({ message: error.message });
+    return handleError(res, error);
   }
 };
 
@@ -104,7 +130,6 @@ export const getCategories = async (req, res) => {
 
     res.status(200).json(formattedCategories);
   } catch (error) {
-    console.error("Error fetching categories:", error);
-    res.status(500).json({ message: error.message });
+    return handleError(res, error);
   }
 };

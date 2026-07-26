@@ -23,7 +23,12 @@ const asNumber = (v) => {
  * is denormalized for FG reporting/filtering, but RAW and PACKING items are
  * valid inventory items without one.
  */
-async function getInventoryItem(itemId, companyId = null, session = null) {
+async function getInventoryItem(
+  itemId,
+  companyId = null,
+  session = null,
+  allowInactive = false
+) {
   const query = Item.findById(itemId)
     .select('_id companyId name categoryKey productType UOM status')
     .lean();
@@ -38,6 +43,10 @@ async function getInventoryItem(itemId, companyId = null, session = null) {
 
   if (!['FG', 'RAW', 'PACKING', 'NC'].includes(item.categoryKey)) {
     throw new Error('Item has an invalid or missing categoryKey');
+  }
+
+  if (!allowInactive && item.status !== 'active') {
+    throw new Error(`${item.name} must be active before it can be used in inventory`);
   }
 
   if (item.categoryKey === 'FG' && !item.productType) {
@@ -97,6 +106,7 @@ export async function postMovement({
   bin = null,
   batchNo = null,
   enforceNonNegative = true,
+  allowInactiveItem = false,
   session: extSession, // optional external session
 }) {
   const session = extSession || (await mongoose.startSession());
@@ -112,7 +122,12 @@ export async function postMovement({
       throw new Error('Invalid txnType');
     }
 
-    const item = await getInventoryItem(itemId, companyId, session);
+    const item = await getInventoryItem(
+      itemId,
+      companyId,
+      session,
+      allowInactiveItem
+    );
     const { categoryKey, productType } = getInventoryMeta(item);
     // console.log("enforceNonNegative", enforceNonNegative);
     // If enforcing non-negative, pre-check (for decreases)
@@ -290,7 +305,7 @@ export async function releaseReservation({
   }
 
   try {
-    const item = await getInventoryItem(itemId, companyId, session);
+    const item = await getInventoryItem(itemId, companyId, session, true);
     const { categoryKey, productType } = getInventoryMeta(item);
     const q = Math.abs(asNumber(qty));
     const snap = await InventorySnapshot.incReserved(

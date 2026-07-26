@@ -18,15 +18,22 @@ const statusTransitions = {
   [STATUS.REJECTED]:     [STATUS.DRAFT, STATUS.ARCHIVED],
   [STATUS.APPROVED]:     [STATUS.ACTIVE, STATUS.ARCHIVED],
   [STATUS.ACTIVE]:       [STATUS.ARCHIVED],
-  [STATUS.ARCHIVED]:     [],
+  [STATUS.ARCHIVED]:     [STATUS.DRAFT],
 };
 
 const { Schema } = mongoose;
 
+const itemError = (message, statusCode = 400, code = 'ITEM_VALIDATION_ERROR') => {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  error.code = code;
+  return error;
+};
+
 const ItemSchema = new Schema({
   // Common fields
-  name: { type: String, required: true, trim: true },
-  sku: { type: String, unique: true, trim: true },
+  name: { type: String, required: true, trim: true, maxlength: 160 },
+  sku: { type: String, unique: true, trim: true, uppercase: true },
   status: { type: String, enum: Object.values(STATUS), default: STATUS.DRAFT },
   // Audit trail for status changes (embedded history)
   statusHistory: [{
@@ -38,19 +45,25 @@ const ItemSchema = new Schema({
   }],
   category: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', required: true },
   // denormalized category key for fast conditional indexing/validation
-  categoryKey: { type: String, enum: ['RAW', 'FG', 'PACKING', 'NC'], index: true },
-  UOM: { type: String, required: true },
-  currentStock: { type: Number, default: 0 },
-  minimumStock: { type: Number, default: 0 },
-  purchasePrice: { type: Number, default: 0 },
-  salePrice: { type: Number, default: 0 },
-  description: { type: String, trim: true },
+  categoryKey: {
+    type: String,
+    enum: ['RAW', 'FG', 'PACKING', 'NC'],
+    required: true,
+    index: true,
+  },
+  UOM: { type: String, required: true, trim: true, lowercase: true },
+  // Legacy cached stock. InventorySnapshot is authoritative.
+  currentStock: { type: Number, default: 0, select: false },
+  minimumStock: { type: Number, default: 0, min: 0 },
+  purchasePrice: { type: Number, default: 0, min: 0 },
+  salePrice: { type: Number, default: 0, min: 0 },
+  description: { type: String, trim: true, maxlength: 2000 },
 
   // RawMaterial specific: optional for FG / Packing
-  raw_specificField1: { type: String },
-  raw_specificField2: { type: String },
+  raw_specificField1: { type: String, trim: true },
+  raw_specificField2: { type: String, trim: true },
   // Optional grade for raw materials. When present, name+grade+categoryKey(RAW) must be unique.
-  grade: { type: String, trim: true, lowercase: true },
+  grade: { type: String, trim: true, lowercase: true, default: '' },
 
   // Product / FG specific
   productType: { type: Schema.Types.ObjectId, ref: 'ProductType' },
@@ -60,22 +73,33 @@ const ItemSchema = new Schema({
   packing: { type: Schema.Types.ObjectId, ref: 'Item' },
   createdBy: { type: Schema.Types.ObjectId, ref: 'User' },
   updatedBy: { type: Schema.Types.ObjectId, ref: 'User' },
-  updatedAt: { type: Date, default: Date.now },
-  // isArchived: { type: Boolean, default: false },
-  companyId: { type: Schema.Types.ObjectId, ref: 'Company' },
+  companyId: {
+    type: Schema.Types.ObjectId,
+    ref: 'Company',
+    required: true,
+    index: true,
+    immutable: true,
+  },
   // Packing specific
   brandType: { type: String, enum: ['branded', 'plain'] },
-  productColor: { type: String },
+  productColor: { type: String, trim: true, lowercase: true },
   //   packing_dimension: { type: Schema.Types.ObjectId, ref: 'Dimension' },
 }, { timestamps: true });
 
 
 // Quick lookup for SKU
 // ItemSchema.index({ sku: 1 }, { unique: true });
-// Unique combination for raw materials by (name + grade). Only applies when categoryKey === 'RAW' and grade exists.
-ItemSchema.index({ name: 1, grade: 1, categoryKey: 1 }, { unique: true, partialFilterExpression: { categoryKey: 'RAW', grade: { $exists: true, $ne: '' } } });
-ItemSchema.index({ status: 1 });
-ItemSchema.index({ categoryKey: 1, status: 1, name: 1 });
+// Enforce RAW identity at the database level, including Items with no grade.
+ItemSchema.index(
+  { companyId: 1, name: 1, grade: 1, categoryKey: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { categoryKey: 'RAW' },
+    name: 'uniq_company_raw_name_grade',
+  },
+);
+ItemSchema.index({ companyId: 1, status: 1 });
+ItemSchema.index({ companyId: 1, categoryKey: 1, status: 1, name: 1 });
 
 // --- Virtuals ---
 ItemSchema.virtual('inStock').get(function () {
@@ -101,7 +125,11 @@ ItemSchema.methods.setStatus = async function (to, { userId, reason } = {}) {
   if (from === to) return this;
 
   if (!this.constructor.canTransition(from, to)) {
-    throw new Error(`Invalid status change: ${from} → ${to}`);
+    throw itemError(
+      `Invalid status change: ${from} → ${to}`,
+      409,
+      'INVALID_STATUS_TRANSITION',
+    );
   }
 
   // Push audit record
@@ -124,49 +152,156 @@ ItemSchema.pre('validate', function (next) {
   const buy = this.purchasePrice != null ? Number(this.purchasePrice) : 0;
   const sell = this.salePrice != null ? Number(this.salePrice) : 0;
   if (sell < 0 || buy < 0) {
-    return next(new Error('Prices cannot be negative'));
+    return next(itemError('Prices cannot be negative'));
   }
   next();
 });
 
-// Populate categoryKey from Category.name when category is set but categoryKey is missing
+// Populate categoryKey from the controlled Category enum.
 ItemSchema.pre('validate', async function (next) {
   if (this.category && !this.categoryKey) {
     try {
       const cat = await mongoose.models.Category.findById(this.category).select('name').lean();
       if (cat && cat.name) {
         const n = String(cat.name).toLowerCase();
-        if (n.includes('raw')) this.categoryKey = 'RAW';
-        else if (n.includes('finish') || n.includes('finished')) this.categoryKey = 'FG';
-        else if (n.includes('pack')) this.categoryKey = 'PACKING';
-        else this.categoryKey = 'FG'; // fallback
+        if (n === 'raw material') this.categoryKey = 'RAW';
+        else if (n === 'finished goods') this.categoryKey = 'FG';
+        else if (n === 'packing material') this.categoryKey = 'PACKING';
+        else if (n === 'non-conformance') this.categoryKey = 'NC';
       }
     } catch (err) {
-      // ignore - fallback required value will raise validation if missing
+      return next(err);
     }
   }
   next();
 });
 
+ItemSchema.pre('validate', async function validateItemReferences(next) {
+  try {
+    const [
+      productType,
+      temperature,
+      density,
+      dimension,
+      packing,
+    ] = await Promise.all([
+      this.productType
+        ? mongoose.models.ProductType.findById(this.productType)
+          .select('name categories')
+          .lean()
+        : null,
+      this.temperature
+        ? mongoose.models.Temperature.findById(this.temperature)
+          .select('productType')
+          .lean()
+        : null,
+      this.density
+        ? mongoose.models.Density.findById(this.density)
+          .select('productType')
+          .lean()
+        : null,
+      this.dimension
+        ? mongoose.models.Dimension.findById(this.dimension)
+          .select('category productType')
+          .lean()
+        : null,
+      this.packing
+        ? mongoose.models.Item.findById(this.packing)
+          .select('companyId categoryKey productType status')
+          .lean()
+        : null,
+    ]);
+
+    if (this.productType && !productType) {
+      return next(itemError('Selected product type does not exist'));
+    }
+    if (
+      productType &&
+      this.category &&
+      !productType.categories.some(categoryId =>
+        String(categoryId) === String(this.category)
+      )
+    ) {
+      return next(itemError('Selected product type is not available for this category'));
+    }
+    if (this.temperature && !temperature) {
+      return next(itemError('Selected temperature does not exist'));
+    }
+    if (
+      temperature &&
+      this.productType &&
+      String(temperature.productType) !== String(this.productType)
+    ) {
+      return next(itemError('Selected temperature does not belong to the product type'));
+    }
+    if (this.density && !density) {
+      return next(itemError('Selected density does not exist'));
+    }
+    if (
+      density &&
+      this.productType &&
+      String(density.productType) !== String(this.productType)
+    ) {
+      return next(itemError('Selected density does not belong to the product type'));
+    }
+    if (this.dimension && !dimension) {
+      return next(itemError('Selected dimension does not exist'));
+    }
+    if (
+      dimension &&
+      (
+        String(dimension.category) !== String(this.category) ||
+        String(dimension.productType) !== String(this.productType)
+      )
+    ) {
+      return next(itemError('Selected dimension does not belong to the category and product type'));
+    }
+    if (this.packing && !packing) {
+      return next(itemError('Selected packing Item does not exist'));
+    }
+    if (
+      packing &&
+      (
+        packing.categoryKey !== 'PACKING' ||
+        String(packing.companyId) !== String(this.companyId) ||
+        (
+          this.status !== STATUS.ARCHIVED &&
+          packing.status !== STATUS.ACTIVE
+        )
+      )
+    ) {
+      return next(itemError('Packing must be an active PACKING Item from the same company'));
+    }
+    if (
+      packing?.productType &&
+      this.productType &&
+      String(packing.productType) !== String(this.productType)
+    ) {
+      return next(itemError('Selected packing Item does not belong to the product type'));
+    }
+
+    this.$locals.productTypeDoc = productType;
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+});
+
 // Auto-generate SKU if not provided
 ItemSchema.pre('save', async function (next) {
   if (!this.sku) {
-    let prefix = 'ITEM-';
-    if (this.category) {
-      try {
-        const categoryDoc = await mongoose.models.Category.findById(this.category).select('name').lean();
-        if (categoryDoc && categoryDoc.name) {
-          const catName = categoryDoc.name.toUpperCase();
-          if (catName === 'RAW') prefix = 'RAW-';
-          else if (catName === 'FG') prefix = 'FG-';
-          else if (catName === 'PACKING') prefix = 'PACK-';
-        }
-      } catch (err) {
-        // fallback to default prefix
-      }
-    }
+    const prefix = {
+      RAW: 'RAW-',
+      FG: 'FG-',
+      PACKING: 'PACK-',
+      NC: 'NC-',
+    }[this.categoryKey] || 'ITEM-';
 
-    const namePart = (this.name ?? 'XXX').substring(0, 3).toUpperCase();
+    const namePart = (this.name ?? 'XXX')
+      .replace(/[^a-z0-9]/gi, '')
+      .substring(0, 3)
+      .toUpperCase()
+      .padEnd(3, 'X');
     let serial = 1;
     let skuCandidate = `${prefix}${namePart}-${serial.toString().padStart(3, '0')}`;
 
@@ -188,15 +323,16 @@ ItemSchema.pre('save', async function (next) {
 
     // dimension is required for packing items
     if (!this.productType) {
-      return next(new Error('product type is required for packing items'));
+      return next(itemError('Product type is required for packing Items'));
     }
     if (!this.dimension) {
-      return next(new Error('dimension is required for packing items'));
+      return next(itemError('Dimension is required for packing Items'));
     }
     // If brandType is NOT provided, enforce uniqueness on (categoryKey, productType, name, dimension)
     // and, when grade is provided, include grade in the unique combination as well.
     if (!this.brandType && !this.productColor) {
       const queryNoBrand = {
+        companyId: this.companyId,
         categoryKey: 'PACKING',
         productType: this.productType,
         name: this.name,
@@ -205,17 +341,22 @@ ItemSchema.pre('save', async function (next) {
 
       // If grade is provided, make it part of the unique combo
       // if (trimmedGrade) {
-        queryNoBrand.grade = trimmedGrade || '';
+        queryNoBrand.grade = trimmedGrade || { $in: ['', null] };
       // }
 
       const existingNoBrand = await mongoose.models.Item.findOne(queryNoBrand).lean();
       if (existingNoBrand && String(existingNoBrand._id) !== String(this._id)) {
-        return next(new Error('Duplicate PACKING item detected: same categoryKey, productType, name, dimension and grade already exist'));
+        return next(itemError(
+          'A PACKING Item with the same name and specifications already exists',
+          409,
+          'DUPLICATE_ITEM',
+        ));
       }
     }
     if (this.brandType) {
       // Base query for all cases
       let query = {
+        companyId: this.companyId,
         categoryKey: 'PACKING',
         productType: this.productType,
         name: this.name,
@@ -225,7 +366,7 @@ ItemSchema.pre('save', async function (next) {
 
       // If grade is provided, make it part of the unique combo
       // if (trimmedGrade) {
-        query.grade = trimmedGrade || '';
+        query.grade = trimmedGrade || { $in: ['', null] };
       // }
 
       // If productColor exists and is not empty, include it in uniqueness check
@@ -248,7 +389,7 @@ ItemSchema.pre('save', async function (next) {
         if (this.productColor) errorMessage += ` with same productColor "${this.productColor}"`;
         if (this.dimension) errorMessage += ` and same dimension`;
         if (trimmedGrade) errorMessage += ` and same grade "${trimmedGrade}"`;
-        return next(new Error(errorMessage));
+        return next(itemError(errorMessage, 409, 'DUPLICATE_ITEM'));
       }
     }
   }
@@ -256,6 +397,7 @@ ItemSchema.pre('save', async function (next) {
   if (this.categoryKey === 'RAW') {
     if (this.grade && String(this.grade).trim() !== '') {
       const query = {
+        companyId: this.companyId,
         categoryKey: 'RAW',
         name: this.name,
         grade: String(this.grade).trim(),
@@ -263,19 +405,28 @@ ItemSchema.pre('save', async function (next) {
       if (this._id) query._id = { $ne: this._id };
       const existingRaw = await mongoose.models.Item.findOne(query).lean();
       if (existingRaw) {
-        return next(new Error('Duplicate RAW material detected: same name and grade already exist'));
+        return next(itemError(
+          'A RAW Item with the same name and grade already exists',
+          409,
+          'DUPLICATE_ITEM',
+        ));
       }
     }else{
       // if no grade provided, ensure name is unique
       const query = {
+        companyId: this.companyId,
         categoryKey: 'RAW',
         name: this.name,
-        grade:'',
+        grade: { $in: ['', null] },
       };
       if (this._id) query._id = { $ne: this._id };
       const existingRaw = await mongoose.models.Item.findOne(query).lean();
       if (existingRaw) {
-        return next(new Error(`duplicate raw material detected: ${this.name} already exist`));
+        return next(itemError(
+          `A RAW Item named ${this.name} already exists`,
+          409,
+          'DUPLICATE_ITEM',
+        ));
       }
     }
   }
@@ -284,47 +435,50 @@ ItemSchema.pre('save', async function (next) {
     try {
       // Determine whether the productType is bulk by reading the ProductType document's isBulk flag
       if (!this.productType) {
-        return next(new Error('product type is required for items'));
+        return next(itemError('Product type is required for finished-goods Items'));
       }
 
-      let isBulk = false;
-      let pt = false;
-      if (this.productType) {
-        pt = await mongoose.models.ProductType.findById(this.productType).select('name').lean();
-        // console.log('pt', pt);
-        if (pt && pt.name) pt.name === 'bulk' ? isBulk = true : isBulk = false;
-      }
+      const pt = this.$locals.productTypeDoc
+        || await mongoose.models.ProductType.findById(this.productType)
+          .select('name')
+          .lean();
+      const productTypeName = String(pt?.name || '').trim().toLowerCase();
+      const isBulk = productTypeName === 'bulk';
 
       // Required-field checks
       if (!this.temperature) {
-        return next(new Error('Temperature is required for items'));
+        return next(itemError('Temperature is required for finished-goods Items'));
       }
       if (!this.packing) {
-        return next(new Error('Packing is required for items'));
+        return next(itemError('Packing is required for finished-goods Items'));
       }
       if (!isBulk) {
         // For non-bulk, dimension and density required
         if (!this.dimension) {
-          return next(new Error('Dimension is required for items'));
+          return next(itemError('Dimension is required for finished-goods Items'));
         }
-        if (!this.density && pt && pt.name !== "board") {
-          return next(new Error('Density is required for items'));
+        if (!this.density && productTypeName !== 'board') {
+          return next(itemError('Density is required for finished-goods Items'));
         }
       }
 
       const trimmedGradeFG = this.grade && String(this.grade).trim();
 
-      const baseQuery = { categoryKey: 'FG', productType: this.productType };
+      const baseQuery = {
+        companyId: this.companyId,
+        categoryKey: 'FG',
+        productType: this.productType,
+      };
 
       // If grade is provided, make it part of the unique combo
       // if (trimmedGradeFG) {
-        baseQuery.grade = trimmedGradeFG || '';
+        baseQuery.grade = trimmedGradeFG || { $in: ['', null] };
       // }
 
       if (!isBulk) {
         // uniqueness: productType + dimension + density + temperature + packing (+ optional grade)
         baseQuery.dimension = this.dimension;
-        if (pt && pt.name !== 'board') baseQuery.density = this.density;
+        if (productTypeName !== 'board') baseQuery.density = this.density;
         baseQuery.temperature = this.temperature;
         baseQuery.packing = this.packing;
       } else {
@@ -340,7 +494,11 @@ ItemSchema.pre('save', async function (next) {
       // console.log('baseQuery -->> ', baseQuery);
       // console.log('existingFG -->> ', existingFG);
       if (existingFG) {
-        return next(new Error('Duplicate product item detected for the provided combination of fields'));
+        return next(itemError(
+          'A finished-goods Item with the same specifications already exists',
+          409,
+          'DUPLICATE_ITEM',
+        ));
       }
     } catch (err) {
       return next(err);
@@ -352,4 +510,4 @@ ItemSchema.pre('save', async function (next) {
 
 export default mongoose.model('Item', ItemSchema);
 
-// need to write controller for fetching all packing items 
+// need to write controller for fetching all packing items
