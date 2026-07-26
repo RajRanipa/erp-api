@@ -20,7 +20,8 @@ export const rolePermissions = {
     'items:read','items:create','items:update', 'items:status:update',
     'parameters:read','parameters:categories:read','parameters:producttypes:read',
     'parameters:densities:read','parameters:temperatures:read','parameters:dimensions:read',
-    'inventory:read', 'inventory:receipt', 'inventory:repack',
+    'inventory:read', 'inventory:receipt', 'inventory:transfer',
+    'inventory:reserve', 'inventory:repack',
     'users:invite:read', 'users:read', 'users:invite:create', 'users:invite:resend', 'users:invite:revoke','users:remove', 
     'warehouses:read', 'warehouses:update', 'warehouses:create', 'warehouses:delete'
   ],
@@ -28,7 +29,8 @@ export const rolePermissions = {
     'items:read', 'items:create', 'items:update', 
     'parameters:read','parameters:categories:read','parameters:producttypes:read',
     'parameters:densities:read','parameters:temperatures:read','parameters:dimensions:read',
-    'inventory:read', 'inventory:receipt', 'inventory:issue','inventory:adjust', 'inventory:repack',
+    'inventory:read', 'inventory:receipt', 'inventory:issue','inventory:adjust',
+    'inventory:transfer', 'inventory:reserve', 'inventory:repack',
     'users:invite:read','users:invite:resend',
     'warehouses:read', 'warehouses:update', 'warehouses:create', 'warehouses:delete'
   ],
@@ -37,6 +39,7 @@ export const rolePermissions = {
     'parameters:read','parameters:categories:read','parameters:producttypes:read',
     'parameters:densities:read','parameters:temperatures:read','parameters:dimensions:read',
     'inventory:read', 'inventory:receipt', 'inventory:repack','inventory:adjust',
+    'inventory:transfer',
     'warehouses:read', 'warehouses:update', 'warehouses:create', 'warehouses:delete'
   ],
   accountant: [

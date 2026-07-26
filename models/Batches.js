@@ -27,6 +27,24 @@ const batchesSchema = new mongoose.Schema(
         unit: { type: String, default: 'kg' },
         issuedQuantity: { type: Number, required: true, min: 0.000001 },
         issuedUom: { type: String, required: true },
+        inventoryAllocations: [
+          {
+            quantity: { type: Number, required: true, min: 0.000001 },
+            uom: { type: String, required: true, trim: true, lowercase: true },
+            bin: { type: String, default: null, trim: true },
+            batchNo: { type: String, default: null, trim: true },
+            snapshotId: {
+              type: mongoose.Schema.Types.ObjectId,
+              ref: 'InventorySnapshot',
+              default: null,
+            },
+            ledgerId: {
+              type: mongoose.Schema.Types.ObjectId,
+              ref: 'InventoryLedger',
+              default: null,
+            },
+          },
+        ],
       }
     ],
     campaign: { type: mongoose.Schema.Types.ObjectId, ref: 'Campaign', required: true },

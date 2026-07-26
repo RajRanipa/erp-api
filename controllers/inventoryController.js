@@ -1,396 +1,327 @@
-// backend-api/controllers/inventoryController.js
-import { handleError } from '../utils/errorHandler.js';
+import mongoose from 'mongoose';
+import { AppError, handleError } from '../utils/errorHandler.js';
 import {
   getSnapshot,
-  getLedger as svcGetLedger,
-  receive as svcReceive,
-  issue as svcIssue,
-  transfer as svcTransfer,
-  adjust as svcAdjust,
-  reserveStock as svcReserve,
-  releaseReservation as svcRelease,
-  repack as svcRepack,
+  getLedger as getLedgerRows,
+  receive as receiveStock,
+  issue as issueStock,
+  transfer as transferStock,
+  adjust as adjustStock,
+  reserveStock,
+  releaseReservation,
+  repack as repackStock,
 } from '../services/inventoryService.js';
 
-/**
- * Build a Mongo filter for snapshot/ledger reads from query params.
- */
-function buildCommonFilter(req) {
-  const {
-    itemId,
-    warehouseId,
-    bin,
-    batchNo,
-    uom,
-    categoryKey,
-    productType,
-    temperature,
-    density,
-    dimension,
-    packing,
-    txnType,
-  } = req.query || {};
+const fail = (message, statusCode = 400, code = 'INVENTORY_REQUEST_ERROR') =>
+  new AppError(message, { statusCode, code });
 
-  const filter = { companyId: req.user?.companyId };
-  if (itemId) filter.itemId = itemId;
-  if (warehouseId) filter.warehouseId = warehouseId;
-  if (typeof bin !== 'undefined') filter.bin = bin || null;
-  if (typeof batchNo !== 'undefined') filter.batchNo = batchNo || null;
-  if (uom) filter.uom = uom;
-  if (categoryKey) filter.categoryKey = categoryKey;
-  if (productType) filter.productType = productType;
-  if (temperature) filter.temperature = temperature;
-  if (density) filter.density = density;
-  if (dimension) filter.dimension = dimension;
-  if (packing) filter.packing = packing;
-  if (txnType) filter.txnType = txnType;
-  return filter;
+const normalizeOptional = value => {
+  const normalized = String(value ?? '').trim();
+  return normalized || null;
+};
+
+function companyIdFromRequest(req) {
+  const companyId = req.user?.companyId;
+  if (!companyId || !mongoose.isValidObjectId(companyId)) {
+    throw fail('A valid company is required', 401, 'COMPANY_REQUIRED');
+  }
+  return companyId;
 }
 
-/**
- * GET /inventory/stock
- * Returns InventorySnapshot rows (fast balances)
- */
+function validateObjectId(value, field) {
+  if (!mongoose.isValidObjectId(value)) {
+    throw fail(`${field} is invalid`, 400, 'INVALID_ID');
+  }
+}
+
+function parseDate(value, field) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    throw fail(`${field} is invalid`, 400, 'INVALID_DATE');
+  }
+  return date;
+}
+
+function decodeLedgerCursor(cursor) {
+  if (!cursor) return null;
+  try {
+    const decoded = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
+    const at = parseDate(decoded.at, 'cursor');
+    validateObjectId(decoded._id, 'cursor');
+    return { at, _id: decoded._id };
+  } catch (error) {
+    if (error instanceof AppError) throw error;
+    throw fail('cursor is invalid', 400, 'INVALID_CURSOR');
+  }
+}
+
+function buildReadFilters(req) {
+  const query = req.query || {};
+  const snapshotFilter = { companyId: companyIdFromRequest(req) };
+  const itemFilter = {};
+
+  for (const field of ['itemId', 'warehouseId']) {
+    if (!query[field]) continue;
+    validateObjectId(query[field], field);
+    snapshotFilter[field] = query[field];
+  }
+  for (const field of ['bin', 'batchNo']) {
+    if (query[field] !== undefined) {
+      snapshotFilter[field] = normalizeOptional(query[field]);
+    }
+  }
+  if (query.uom) snapshotFilter.uom = String(query.uom).trim().toLowerCase();
+
+  if (query.categoryKey) {
+    const categoryKey = String(query.categoryKey).trim().toUpperCase();
+    if (!['FG', 'RAW', 'PACKING', 'NC'].includes(categoryKey)) {
+      throw fail('categoryKey must be FG, RAW, PACKING or NC');
+    }
+    snapshotFilter.categoryKey = categoryKey;
+  }
+  for (const field of ['productType', 'temperature', 'density', 'dimension', 'packing']) {
+    if (!query[field]) continue;
+    validateObjectId(query[field], field);
+    if (field === 'productType') snapshotFilter.productType = query[field];
+    else itemFilter[field] = query[field];
+  }
+  if (query.itemStatus) itemFilter.itemStatus = String(query.itemStatus).trim().toLowerCase();
+  if (query.search) itemFilter.search = String(query.search).trim().slice(0, 160);
+
+  return { snapshotFilter, itemFilter };
+}
+
 export async function getStock(req, res) {
   try {
-    const filter = buildCommonFilter(req);
-    const {
-      categoryKey,
-      productType,
-      temperature,
-      density,
-      dimension,
-      packing,
-      ...snapFilter
-    } = filter;
-
-    const rows = await getSnapshot(snapFilter, {
-      categoryKey,
-      productType,
-      temperature,
-      density,
-      dimension,
-      packing,
+    const { snapshotFilter, itemFilter } = buildReadFilters(req);
+    const result = await getSnapshot(snapshotFilter, itemFilter, {
+      limit: req.query?.limit,
+      cursor: req.query?.cursor || null,
+      includeZero: req.query?.includeZero === 'true',
+      positiveOnly: req.query?.positiveOnly === 'true',
+      reservedOnly: req.query?.reservedOnly === 'true',
     });
-
-    res.json({ status: true, data: rows });
-  } catch (err) {
-    handleError(res, err, 'Failed to fetch stock snapshot');
+    return res.json({
+      status: true,
+      data: result.rows,
+      nextCursor: result.nextCursor,
+    });
+  } catch (error) {
+    return handleError(res, error);
   }
 }
 
-/**
- * GET /inventory/ledger
- * Returns InventoryLedger rows (movements)
-  * Optional query: limit, from, to, cursor (cursor = load older than date)
- */
-// controllers/inventoryController.js (or wherever you have it)
 export async function getLedger(req, res) {
   try {
-    const filter = buildCommonFilter(req);
-    const { limit = 100, from, to, cursor } = req.query || {};
-
-    // Clamp limit to keep the endpoint safe
-    const limitRaw = Number(limit);
-    const limitInt = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 2000) : 100;
-
-    // Date range / cursor
-    // If no range is provided, default to last 30 days (keeps response light)
-    const hasAnyTimeFilter = Boolean(from || to || cursor);
-
-    // Cursor = “load older than this date”
-    if (hasAnyTimeFilter) {
-      filter.at = filter.at || {};
-      if (from) filter.at.$gte = new Date(from);
-      if (to) filter.at.$lte = new Date(to);
-      if (cursor) filter.at.$lt = new Date(cursor);
-    } else {
-      const now = new Date();
-      const from30 = new Date(now);
-      from30.setDate(from30.getDate() - 30);
-      filter.at = { $gte: from30, $lte: now };
+    const { snapshotFilter, itemFilter } = buildReadFilters(req);
+    const filter = { ...snapshotFilter };
+    const txnType = String(req.query?.txnType || '').trim().toUpperCase();
+    if (txnType) {
+      if (!['RECEIPT', 'ISSUE', 'TRANSFER', 'ADJUST', 'REPACK'].includes(txnType)) {
+        throw fail('txnType is invalid');
+      }
+      filter.txnType = txnType;
     }
 
-    // Cursor pagination: fetch 1 extra row to know if there are more
-    const rowsPlusOne = await svcGetLedger(filter, {
-      limit: limitInt + 1,
-      sort: { at: -1 },
+    const result = await getLedgerRows(filter, {
+      limit: req.query?.limit,
+      cursor: decodeLedgerCursor(req.query?.cursor),
+      from: parseDate(req.query?.from, 'from'),
+      to: parseDate(req.query?.to, 'to'),
+      search: String(req.query?.search || '').trim().slice(0, 160),
+      itemFilter: {
+        temperature: itemFilter.temperature,
+        density: itemFilter.density,
+        dimension: itemFilter.dimension,
+        packing: itemFilter.packing,
+        itemStatus: itemFilter.itemStatus,
+      },
     });
-
-    const hasMore = rowsPlusOne.length > limitInt;
-    const rows = hasMore ? rowsPlusOne.slice(0, limitInt) : rowsPlusOne;
-    const nextCursor = hasMore && rows.length ? rows[rows.length - 1].at.toISOString() : null;
-
-    res.json({
+    return res.json({
       status: true,
-      data: rows,
-      nextCursor,
+      data: result.rows,
+      nextCursor: result.nextCursor,
     });
-  } catch (err) {
-    handleError(res, err, 'Failed to fetch stock ledger');
+  } catch (error) {
+    return handleError(res, error);
   }
 }
 
-/**
- * POST /inventory/receipt
- * Body: { itemId, warehouseId, qty, uom, note?, bin?, batchNo?, refType?, refId? }
- */
+function movementInput(req) {
+  const body = req.body || {};
+  const companyId = companyIdFromRequest(req);
+  const itemId = body.itemId;
+  const warehouseId = body.warehouseId;
+  if (!itemId || !warehouseId) {
+    throw fail('itemId and warehouseId are required');
+  }
+  validateObjectId(itemId, 'itemId');
+  validateObjectId(warehouseId, 'warehouseId');
+
+  return {
+    companyId,
+    itemId,
+    warehouseId,
+    qty: body.qty,
+    uom: body.uom,
+    by: req.user?.userId || req.user?.id || req.user?._id || null,
+    note: String(body.note || '').trim(),
+    bin: normalizeOptional(body.bin),
+    batchNo: normalizeOptional(body.batchNo),
+    refType: normalizeOptional(body.refType),
+    refId: normalizeOptional(body.refId),
+    requestId: normalizeOptional(body.requestId),
+    at: body.at || null,
+  };
+}
+
 export async function receive(req, res) {
   try {
-    // console.log("inventory receive controller called ", req.body);
-    const {
-      itemId,
-      warehouseId,
-      qty,
-      uom,
-      note = '',
-      bin = null,
-      batchNo = null,
-      refType = null,
-      refId = null,
-    } = req.body || {};
-
-    const { companyId, userId } = req.user || {};
-    if (!companyId) throw new Error('Missing companyId on user');
-    if (!itemId || !warehouseId || !uom) throw new Error('itemId, warehouseId, uom are required');
-
-    const result = await svcReceive({
-      companyId,
-      itemId,
-      warehouseId,
-      uom,
-      qty,
-      by: userId,
-      note,
-      bin,
-      batchNo,
-      refType,
-      refId,
+    const result = await receiveStock(movementInput(req));
+    return res.json({
+      status: true,
+      message: result.duplicate ? 'Receipt already posted' : 'Stock received',
+      duplicate: result.duplicate,
+      data: result,
     });
-    // console.log("result", result);
-    res.json({ status: true, message: 'Stock received', data: result });
-  } catch (err) {
-    handleError(res, err, 'Failed to receive stock');
+  } catch (error) {
+    return handleError(res, error);
   }
 }
 
-/**
- * POST /inventory/issue
- * Body: { itemId, warehouseId, qty, uom, note?, bin?, batchNo?, refType?, refId? }
- */
 export async function issue(req, res) {
   try {
-    const {
-      itemId,
-      warehouseId,
-      qty,
-      uom,
-      note = '',
-      bin = null,
-      batchNo = null,
-      refType = null,
-      refId = null,
-    } = req.body || {};
-
-    const { companyId, userId } = req.user || {};
-    if (!companyId) throw new Error('Missing companyId on user');
-    if (!itemId || !warehouseId || !uom) throw new Error('itemId, warehouseId, uom are required');
-
-    const result = await svcIssue({
-      companyId,
-      itemId,
-      warehouseId,
-      uom,
-      qty,
-      by: userId,
-      note,
-      bin,
-      batchNo,
-      refType,
-      refId,
+    const result = await issueStock(movementInput(req));
+    return res.json({
+      status: true,
+      message: result.duplicate ? 'Issue already posted' : 'Stock issued',
+      duplicate: result.duplicate,
+      data: result,
     });
-    res.json({ status: true, message: 'Stock issued', data: result });
-  } catch (err) {
-    handleError(res, err, 'Failed to issue stock');
+  } catch (error) {
+    return handleError(res, error);
   }
 }
 
-/**
- * POST /inventory/adjust
- * Body: { itemId, warehouseId, qty(±), uom, note?, bin?, batchNo?, refType?, refId? }
- */
 export async function adjust(req, res) {
   try {
-    const {
-      itemId,
-      warehouseId,
-      qty,
-      uom,
-      note = '',
-      bin = null,
-      batchNo = null,
-      refType = 'ADJUST',
-      refId = null,
-    } = req.body || {};
-
-    const { companyId, userId } = req.user || {};
-    if (!companyId) throw new Error('Missing companyId on user');
-    if (!itemId || !warehouseId || !uom) throw new Error('itemId, warehouseId, uom are required');
-    const result = await svcAdjust({
-      companyId,
-      itemId,
-      warehouseId,
-      uom,
-      qty,
-      by: userId,
-      note,
-      bin,
-      batchNo,
-      refType,
-      refId,
+    const input = movementInput(req);
+    input.refType = input.refType || 'ADJUST';
+    const result = await adjustStock(input);
+    return res.json({
+      status: true,
+      message: result.duplicate ? 'Adjustment already posted' : 'Stock adjusted',
+      duplicate: result.duplicate,
+      data: result,
     });
-    res.json({ status: true, message: 'Stock adjusted', data: result });
-  } catch (err) {
-    handleError(res, err, 'Failed to adjust stock');
+  } catch (error) {
+    return handleError(res, error);
   }
 }
 
-/**
- * POST /inventory/transfer
- * Body: { itemId, fromWarehouseId, toWarehouseId, qty, uom, note?, bin?, batchNo?, refId? }
- */
 export async function transfer(req, res) {
   try {
-    const {
-      itemId,
-      fromWarehouseId,
-      toWarehouseId,
-      qty,
-      uom,
-      note = '',
-      bin = null,
-      batchNo = null,
-      refId = null,
-    } = req.body || {};
-
-    const { companyId, userId } = req.user || {};
-    if (!companyId) throw new Error('Missing companyId on user');
-    if (!itemId || !fromWarehouseId || !toWarehouseId || !uom) {
-      throw new Error('itemId, fromWarehouseId, toWarehouseId, uom are required');
+    const body = req.body || {};
+    const companyId = companyIdFromRequest(req);
+    for (const field of ['itemId', 'fromWarehouseId', 'toWarehouseId']) {
+      if (!body[field]) throw fail(`${field} is required`);
+      validateObjectId(body[field], field);
     }
 
-    const result = await svcTransfer({
+    const result = await transferStock({
       companyId,
-      itemId,
-      fromWarehouseId,
-      toWarehouseId,
-      uom,
-      qty,
-      by: userId,
-      note,
-      refType: 'TRANSFER',
-      refId,
-      bin,
-      batchNo,
+      itemId: body.itemId,
+      fromWarehouseId: body.fromWarehouseId,
+      toWarehouseId: body.toWarehouseId,
+      qty: body.qty,
+      uom: body.uom,
+      by: req.user?.userId || req.user?.id || req.user?._id || null,
+      note: String(body.note || '').trim(),
+      refId: normalizeOptional(body.refId),
+      fromBin: normalizeOptional(body.fromBin ?? body.bin),
+      toBin: normalizeOptional(body.toBin ?? body.bin),
+      batchNo: normalizeOptional(body.batchNo),
+      toBatchNo: normalizeOptional(body.toBatchNo ?? body.batchNo),
+      requestId: normalizeOptional(body.requestId),
     });
-    res.json({ status: true, message: 'Stock transferred', data: result });
-  } catch (err) {
-    handleError(res, err, 'Failed to transfer stock');
+    const duplicate = Boolean(result.out?.duplicate && result.in?.duplicate);
+    return res.json({
+      status: true,
+      message: duplicate ? 'Transfer already posted' : 'Stock transferred',
+      duplicate,
+      data: result,
+    });
+  } catch (error) {
+    return handleError(res, error);
   }
 }
 
-/**
- * POST /inventory/repack
- * Convert stock from one packing-variant item to another (same productType)
- * Body: { fromItemId, toItemId, warehouseId, qty, uom, note?, bin?, batchNo?, refId? }
- */
 export async function repack(req, res) {
   try {
-    const {
-      fromItemId,
-      toItemId,
-      warehouseId,
-      qty,
-      uom,
-      note = '',
-      bin = null,
-      batchNo = null,
-      refId = null,
-    } = req.body || {};
-
-    const { companyId, userId } = req.user || {};
-    if (!companyId) throw new Error('Missing companyId on user');
-    if (!fromItemId || !toItemId || !warehouseId || !uom) {
-      throw new Error('fromItemId, toItemId, warehouseId, uom are required');
+    const body = req.body || {};
+    const companyId = companyIdFromRequest(req);
+    for (const field of ['fromItemId', 'toItemId', 'warehouseId']) {
+      if (!body[field]) throw fail(`${field} is required`);
+      validateObjectId(body[field], field);
     }
-
-    const result = await svcRepack({
+    const result = await repackStock({
       companyId,
-      fromItemId,
-      toItemId,
-      warehouseId,
-      qty,
-      uom,
-      by: userId,
-      note,
-      refId,
-      bin,
-      batchNo,
+      fromItemId: body.fromItemId,
+      toItemId: body.toItemId,
+      warehouseId: body.warehouseId,
+      qty: body.qty,
+      uom: body.uom,
+      by: req.user?.userId || req.user?.id || req.user?._id || null,
+      note: String(body.note || '').trim(),
+      refId: normalizeOptional(body.refId),
+      bin: normalizeOptional(body.bin),
+      batchNo: normalizeOptional(body.batchNo),
+      requestId: normalizeOptional(body.requestId),
     });
-
-    res.json({ status: true, message: 'Packing changed', data: result });
-  } catch (err) {
-    handleError(res, err, 'Failed to repack');
+    const duplicate = Boolean(result.out?.duplicate && result.in?.duplicate);
+    return res.json({
+      status: true,
+      message: duplicate ? 'Packing change already posted' : 'Packing changed',
+      duplicate,
+      data: result,
+    });
+  } catch (error) {
+    return handleError(res, error);
   }
 }
 
-/**
- * POST /inventory/reserve
- * Body: { itemId, warehouseId, qty, uom, bin?, batchNo? }
- */
 export async function reserve(req, res) {
   try {
-    const { itemId, warehouseId, qty, uom, bin = null, batchNo = null } = req.body || {};
-    const { companyId, userId } = req.user || {};
-    if (!companyId) throw new Error('Missing companyId on user');
-    if (!itemId || !warehouseId || !uom) throw new Error('itemId, warehouseId, uom are required');
-
-    const snap = await svcReserve({
-      companyId,
-      itemId,
-      warehouseId,
-      uom,
-      qty,
-      bin,
-      batchNo,
-      by: userId,
+    const result = await reserveStock(movementInput(req));
+    return res.json({
+      status: true,
+      message: result.duplicate ? 'Reservation already posted' : 'Stock reserved',
+      duplicate: result.duplicate,
+      data: result,
     });
-
-    res.json({ status: true, message: 'Stock reserved', data: snap });
-  } catch (err) {
-    handleError(res, err, 'Failed to reserve stock');
+  } catch (error) {
+    return handleError(res, error);
   }
 }
 
-/**
- * POST /inventory/release
- * Body: { itemId, warehouseId, qty, uom, bin?, batchNo? }
- */
 export async function release(req, res) {
   try {
-    const { itemId, warehouseId, qty, uom, bin = null, batchNo = null } = req.body || {};
-    const { companyId } = req.user || {};
-    if (!companyId) throw new Error('Missing companyId on user');
-    if (!itemId || !warehouseId || !uom) throw new Error('itemId, warehouseId, uom are required');
-
-    const snap = await svcRelease({ companyId, itemId, warehouseId, uom, qty, bin, batchNo });
-    res.json({ status: true, message: 'Reservation released', data: snap });
-  } catch (err) {
-    handleError(res, err, 'Failed to release reservation');
+    const result = await releaseReservation(movementInput(req));
+    return res.json({
+      status: true,
+      message: result.duplicate
+        ? 'Reservation release already posted'
+        : 'Reservation released',
+      duplicate: result.duplicate,
+      data: result,
+    });
+  } catch (error) {
+    return handleError(res, error);
   }
 }
 
-const inventoryController = {
+export default {
   getStock,
   getLedger,
   receive,
@@ -401,5 +332,3 @@ const inventoryController = {
   reserve,
   release,
 };
-
-export default inventoryController;

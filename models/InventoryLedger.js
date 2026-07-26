@@ -67,6 +67,7 @@ const InventoryLedgerSchema = new Schema(
       type: String,
       required: true,
       trim: true,
+      lowercase: true,
     },
 
     /**
@@ -93,8 +94,15 @@ const InventoryLedgerSchema = new Schema(
     // Optional cross-module reference
     refType: { type: String, default: null, trim: true }, // e.g., 'PO','SO','PROD','MANUAL'
     refId: { type: String, default: null, trim: true },
+    // Stable request key used to make gateway and retried API writes idempotent.
+    idempotencyKey: {
+      type: String,
+      default: null,
+      trim: true,
+      maxlength: 240,
+    },
 
-    note: { type: String, default: '', trim: true },
+    note: { type: String, default: '', trim: true, maxlength: 2000 },
 
     // Who performed this movement
     by: { type: Schema.Types.ObjectId, ref: 'User', index: true },
@@ -121,18 +129,43 @@ InventoryLedgerSchema.index({
 InventoryLedgerSchema.index({ companyId: 1, at: -1 });
 InventoryLedgerSchema.index({ companyId: 1, txnType: 1, at: -1 });
 InventoryLedgerSchema.index({ companyId: 1, categoryKey: 1, at: -1 });
+InventoryLedgerSchema.index({ companyId: 1, productType: 1, at: -1 });
+InventoryLedgerSchema.index(
+  { companyId: 1, idempotencyKey: 1 },
+  {
+    unique: true,
+    name: 'uniq_inventory_idempotency',
+    partialFilterExpression: { idempotencyKey: { $type: 'string' } },
+  },
+);
 
 /**
  * Safety: Prevent accidental updates after insert.
  * Ledger rows should be immutable; allow only creation.
  */
-InventoryLedgerSchema.pre('findOneAndUpdate', function disallowUpdate() {
-  // console.log('InventoryLedger pre findOneAndUpdate');
-  // eslint-disable-next-line no-param-reassign
-  const err = new Error('InventoryLedger rows are immutable. Insert a new row instead.');
-  // Allow explicit override via option { runValidators: false, context: 'allowUpdate' } if you really must.
-  if (this.getOptions()?.context !== 'allowUpdate') {
-    throw err;
+for (const operation of [
+  'findOneAndUpdate',
+  'updateOne',
+  'updateMany',
+  'replaceOne',
+  'findOneAndDelete',
+  'deleteOne',
+  'deleteMany',
+]) {
+  InventoryLedgerSchema.pre(operation, function disallowLedgerMutation() {
+    if (this.getOptions()?.context !== 'inventoryMigration') {
+      throw new Error(
+        'InventoryLedger rows are immutable. Post a correcting movement instead.'
+      );
+    }
+  });
+}
+
+InventoryLedgerSchema.pre('save', function disallowExistingLedgerSave() {
+  if (!this.isNew) {
+    throw new Error(
+      'InventoryLedger rows are immutable. Post a correcting movement instead.',
+    );
   }
 });
 

@@ -70,22 +70,26 @@ const InventorySnapshotSchema = new Schema(
       type: String,
       required: true,
       trim: true,
+      lowercase: true,
     },
 
     onHand: {
       type: Number,
       default: 0,
+      min: 0,
     },
 
     reserved: {
       type: Number,
       default: 0,
+      min: 0,
     },
 
     // Redundant for fast reads; maintained by hooks/helpers
     available: {
       type: Number,
       default: 0,
+      min: 0,
       index: true,
     },
   },
@@ -97,10 +101,11 @@ const InventorySnapshotSchema = new Schema(
 
 /**
  * Unique key per stock bucket.
- * Note: Include uom so mixed-UOM items don't collide.
+ * Product type/category are metadata, not identity. Item is the canonical
+ * inventory identity, so changing denormalized metadata cannot split stock.
  */
 InventorySnapshotSchema.index(
-  { companyId: 1, itemId: 1, productType: 1, warehouseId: 1, bin: 1, batchNo: 1, uom: 1 },
+  { companyId: 1, itemId: 1, warehouseId: 1, bin: 1, batchNo: 1, uom: 1 },
   { unique: true, name: 'uniq_bucket' }
 );
 
@@ -108,6 +113,8 @@ InventorySnapshotSchema.index(
 InventorySnapshotSchema.index({ companyId: 1, itemId: 1, warehouseId: 1, available: -1 });
 InventorySnapshotSchema.index({ companyId: 1, itemId: 1, available: -1 });
 InventorySnapshotSchema.index({ companyId: 1, warehouseId: 1, available: -1 });
+InventorySnapshotSchema.index({ companyId: 1, categoryKey: 1, available: -1 });
+InventorySnapshotSchema.index({ companyId: 1, productType: 1, available: -1 });
 
 /**
  * Keep `available` in sync automatically.
@@ -124,25 +131,32 @@ InventorySnapshotSchema.pre('save', function recomputeAvailable(next) {
 InventorySnapshotSchema.statics.incOnHand = async function (
   { companyId, itemId, categoryKey, productType = null, warehouseId, uom, bin = null, batchNo = null },
   qty,
-  session
+  session,
+  { enforceNonNegative = true } = {},
 ) {
   const Model = this;
-  const filter = { companyId, itemId, productType, warehouseId, bin, batchNo, uom };
+  const filter = { companyId, itemId, warehouseId, bin, batchNo, uom };
+  if (qty < 0 && enforceNonNegative) {
+    const decrease = Math.abs(qty);
+    filter.onHand = { $gte: decrease };
+    filter.available = { $gte: decrease };
+  }
   const update = {
-    $inc: { onHand: qty },
+    $inc: { onHand: qty, available: qty },
     $set: { categoryKey, productType },
     $setOnInsert: {
-      // identity fields only; do NOT set `onHand` here to avoid conflict with $inc
       companyId, itemId, warehouseId, bin, batchNo, uom,
       reserved: 0,
     },
   };
-  const options = { upsert: true, new: true };
+  const options = {
+    upsert: qty > 0,
+    new: true,
+    runValidators: true,
+  };
   if (session) options.session = session;
 
   const doc = await Model.findOneAndUpdate(filter, update, options);
-  doc.available = (doc.onHand ?? 0) - (doc.reserved ?? 0);
-  await doc.save({ session });
   return doc;
 };
 
@@ -152,22 +166,20 @@ InventorySnapshotSchema.statics.incReserved = async function (
   session
 ) {
   const Model = this;
-  const filter = { companyId, itemId, productType, warehouseId, bin, batchNo, uom };
+  const filter = { companyId, itemId, warehouseId, bin, batchNo, uom };
+  if (qty > 0) {
+    filter.available = { $gte: qty };
+  } else if (qty < 0) {
+    filter.reserved = { $gte: Math.abs(qty) };
+  }
   const update = {
-    $inc: { reserved: qty },
+    $inc: { reserved: qty, available: -qty },
     $set: { categoryKey, productType },
-    $setOnInsert: {
-      // identity fields only; do NOT set `reserved` here to avoid conflict with $inc
-      companyId, itemId, warehouseId, bin, batchNo, uom,
-      onHand: 0,
-    },
   };
-  const options = { upsert: true, new: true };
+  const options = { upsert: false, new: true, runValidators: true };
   if (session) options.session = session;
 
   const doc = await Model.findOneAndUpdate(filter, update, options);
-  doc.available = (doc.onHand ?? 0) - (doc.reserved ?? 0);
-  await doc.save({ session });
   return doc;
 };
 

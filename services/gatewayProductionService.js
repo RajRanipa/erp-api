@@ -37,25 +37,45 @@ function safeDate(v) {
     return d;
 }
 
-async function resolveWarehouseId() {
+const escapeRegex = value =>
+    String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+async function resolveWarehouseId(companyId) {
     // Prefer an explicit fixed warehouse for gateway receipts
     const fixedId = process.env.GATEWAY_WAREHOUSE_ID;
-    if (fixedId) return fixedId;
+    if (fixedId) {
+        const warehouse = await Warehouse.findOne({
+            _id: fixedId,
+            companyId,
+            status: "active",
+        }).select('_id').lean();
+        return warehouse?._id || null;
+    }
 
     const fixedCode = process.env.GATEWAY_WAREHOUSE_CODE;
     if (fixedCode) {
-        const wh = await Warehouse.findOne({ code: fixedCode }).lean();
+        const wh = await Warehouse.findOne({
+            companyId,
+            status: "active",
+            code: { $regex: new RegExp(`^${escapeRegex(fixedCode)}$`, "i") },
+        }).lean();
         return wh?._id || null;
     }
 
     const fixedName = process.env.GATEWAY_WAREHOUSE_NAME;
     if (fixedName) {
-        const wh = await Warehouse.findOne({ name: { $regex: new RegExp(`^${fixedName}$`, "i") } }).lean();
+        const wh = await Warehouse.findOne({
+            companyId,
+            status: "active",
+            name: { $regex: new RegExp(`^${escapeRegex(fixedName)}$`, "i") },
+        }).lean();
         return wh?._id || null;
     }
 
     // Fallback: pick the first/oldest warehouse
-    const wh = await Warehouse.findOne({}).sort({ createdAt: 1 }).lean();
+    const wh = await Warehouse.findOne({ companyId, status: "active" })
+        .sort({ createdAt: 1 })
+        .lean();
     return wh?._id || null;
 }
 
@@ -117,7 +137,16 @@ async function resolveProductType(productCode) {
     // console.log("gateway --- resolveProductType ", name, pt);
 
     if (!pt) return { id: null, err: `ProductType '${name}' not found in DB` };
-    return { id: pt._id, category: pt.categories[0]._id, err: null };
+    const finishedGoodsCategory = (pt.categories || []).find(
+        category => String(category?.name || '').toLowerCase() === 'finished goods'
+    );
+    if (!finishedGoodsCategory) {
+        return {
+            id: null,
+            err: `ProductType '${name}' is not assigned to Finished Goods`,
+        };
+    }
+    return { id: pt._id, category: finishedGoodsCategory._id, err: null };
 }
 
 // async function resolveTempDensity(companyId, temperatureValue, densityValue) {
@@ -168,18 +197,20 @@ async function resolveTemp({ productTypeId, temperatureValue }) {
 }
 
 async function matchFGItem(body) {
-    // console.log('match000FGItem', body);
-    // Try strict match first (including packing)
-    let item = await Item.findOne(body).select("_id UOM name").lean();
+    return Item.findOne(body).select("_id UOM name").lean();
+}
 
-    // fallback: allow packing mismatch (in case FG items were created without packing)
-    if (!item) {
-        // console.log('match001FGItem finding without packing');
-        item = await Item.findOne(body).select("_id UOM name").lean();
-        // console.log('match001FGItem finding without packing', item);
-    }
+function inventoryQuantityForGatewayRecord(productCode, weightKg, itemUom) {
+    if (![2, 5].includes(productCode)) return 1;
 
-    return item;
+    const uom = String(itemUom || '').trim().toLowerCase();
+    if (uom === 'kg') return weightKg;
+    if (['g', 'gram', 'grams'].includes(uom)) return weightKg * 1000;
+    if (['ton', 'tonne', 't'].includes(uom)) return weightKg / 1000;
+    throw new AppError(
+        `Gateway weight cannot be posted to Item UOM "${itemUom}"`,
+        { statusCode: 409, code: "GATEWAY_UOM_MISMATCH" }
+    );
 }
 
 async function resolveCampaign() {
@@ -216,7 +247,7 @@ export async function ingestBlanketBatch({ companyId, payload }) {
             processingStatus: "RECEIVED",
         });
 
-        const warehouseId = await resolveWarehouseId();
+        const warehouseId = await resolveWarehouseId(companyId);
         const packingId = await resolvePackingItem(companyId);
         if (!warehouseId) console.warn("[gateway] No warehouse found (set GATEWAY_WAREHOUSE_ID/CODE/NAME)");
         if (!packingId) console.warn("[gateway] Packing item not found by name 'plastic bag' for companyId", companyId);
@@ -282,7 +313,7 @@ export async function ingestBlanketBatch({ companyId, payload }) {
                     if (temp.errs?.length) resolveErrors.push(...temp.errs);
                     // console.log('temp -> ', temp);
                 }
-                if (productCode !== 5) {
+                if (![3, 5].includes(productCode)) {
                     const dens = await resolveDensity({ productTypeId, densityValue });
                     densityId = dens.densId;
                     if (dens.errs?.length) resolveErrors.push(...dens.errs);
@@ -299,8 +330,10 @@ export async function ingestBlanketBatch({ companyId, payload }) {
                 // console.log('bodyformatch 11 ', bodyformatch, "productCode 11 ", productCode, productCode !== 5);
                 if (productCode !== 5) {
                     bodyformatch.packing = packingId;
-                    bodyformatch.density = densityId;
                     bodyformatch.dimension = dimensionId;
+                }
+                if (![3, 5].includes(productCode)) {
+                    bodyformatch.density = densityId;
                 }
                 // console.log('bodyformatch 22 ', bodyformatch, "productCode 22 ", productCode);
                 const matchedItem = await matchFGItem(bodyformatch);
@@ -316,65 +349,83 @@ export async function ingestBlanketBatch({ companyId, payload }) {
             }
 
             try {
-                // insert normalized roll line (idempotent)
-                const doc = await ProductionBlanketRoll.create({
-                    companyId,
-                    campaign,
-                    gatewayId,
-                    recordId,
-                    at,
-                    productCode,
-                    temperatureValue,
-                    densityValue,
-                    sizeCode,
-                    batchNo,
-                    scaleNo,
-                    weightKg,
-                    statusOk,
-                    productType: productTypeId,
-                    temperature: temperatureId,
-                    density: densityId,
-                    dimension: dimensionId,
-                    packingItem: productCode === 5 ? null : packingId,
-                    matchedItem: matchedItemId,
-                    resolveErrors,
-                    ingestBatchId: batch._id,
-                });
-
-                summary.inserted++;
-
-                switch (productCode) {
-                    case 1:
-                        campaignSummary.blanketRolls++;
-                        campaignSummary.fiberKg += weightKg;
-                        if (statusOk) {
-                            // we'll add to goodFiber after inventory succeeds
-                        } else {
-                            campaignSummary.rejectedFiberKg += weightKg;
+                let doc;
+                let isNewRecord = false;
+                try {
+                    doc = await ProductionBlanketRoll.create({
+                        companyId,
+                        campaign,
+                        gatewayId,
+                        recordId,
+                        at,
+                        productCode,
+                        temperatureValue,
+                        densityValue,
+                        sizeCode,
+                        batchNo,
+                        scaleNo,
+                        weightKg,
+                        statusOk,
+                        productType: productTypeId,
+                        temperature: temperatureId,
+                        density: densityId,
+                        dimension: dimensionId,
+                        packingItem: productCode === 5 ? null : packingId,
+                        matchedItem: matchedItemId,
+                        resolveErrors,
+                        ingestBatchId: batch._id,
+                    });
+                    isNewRecord = true;
+                    summary.inserted++;
+                } catch (error) {
+                    if (error?.code !== 11000) throw error;
+                    doc = await ProductionBlanketRoll.findOne({
+                        companyId,
+                        gatewayId,
+                        recordId,
+                        scaleNo,
+                    });
+                    if (!doc) throw error;
+                    summary.duplicates++;
+                    await ProductionBlanketRoll.updateOne(
+                        { _id: doc._id, inventoryPosted: false },
+                        {
+                            $set: {
+                                productType: productTypeId,
+                                temperature: temperatureId,
+                                density: densityId,
+                                dimension: dimensionId,
+                                packingItem: productCode === 5 ? null : packingId,
+                                matchedItem: matchedItemId,
+                                resolveErrors,
+                            },
                         }
-                        break;
-
-                    case 2:
-                        campaignSummary.fiberKg += weightKg;
-                        if (statusOk) {
-                            campaignSummary.bulkKg += weightKg;
-                        } else {
-                            campaignSummary.rejectedFiberKg += weightKg;
-                        }
-                        break;
-
-                    case 5:
-                        campaignSummary.fiberKg += weightKg;
-                        campaignSummary.rejectedFiberKg += weightKg;
-                        break;
-
+                    );
                 }
+
+                if (isNewRecord) {
+                    switch (productCode) {
+                        case 1:
+                            campaignSummary.blanketRolls++;
+                            campaignSummary.fiberKg += weightKg;
+                            if (!statusOk) campaignSummary.rejectedFiberKg += weightKg;
+                            break;
+                        case 2:
+                            campaignSummary.fiberKg += weightKg;
+                            if (statusOk) campaignSummary.bulkKg += weightKg;
+                            else campaignSummary.rejectedFiberKg += weightKg;
+                            break;
+                        case 5:
+                            campaignSummary.fiberKg += weightKg;
+                            campaignSummary.rejectedFiberKg += weightKg;
+                            break;
+                    }
+                }
+
                 // Inventory posting (1-to-1 Traceability)
                 const shouldPost = productCode === 5 ? statusOk === false && weightKg > 0 : statusOk === true && weightKg > 0;
 
-                // console.log("shouldPost - - - - ?/ ", shouldPost);
-
-                if (!shouldPost) {
+                if (!shouldPost || doc.inventoryPosted) {
                     continue;
                 }
 
@@ -390,24 +441,32 @@ export async function ingestBlanketBatch({ companyId, payload }) {
                     continue;
                 }
 
-                // post inventory as qty=1 roll
+                const inventoryQuantity = inventoryQuantityForGatewayRecord(
+                    productCode,
+                    weightKg,
+                    matchedItemUom
+                );
+                const gatewayMovementKey = (
+                    `PROD_GATEWAY:${companyId}:${gatewayId}:${recordId}:${scaleNo}`
+                );
                 const invRes = await invReceive({
                     companyId,
                     itemId: matchedItemId,
                     warehouseId,
                     uom: matchedItemUom,
-                    qty: productCode === 5 ? weightKg : 1, // <--- EXPLICITLY SET TO 1
+                    qty: inventoryQuantity,
                     by: null,
                     note: `Auto receipt from gateway ${gatewayId} recordId ${recordId} scale ${scaleNo}`,
                     refType: "PROD_GATEWAY",
                     refId: doc._id,
+                    idempotencyKey: gatewayMovementKey,
                     enforceNonNegative: false,
-                    batchNo: "Production Testing 01",
+                    batchNo: batchNo || null,
+                    at,
                 });
 
-
-                await ProductionBlanketRoll.updateOne(
-                    { _id: doc._id },
+                const inventoryLinkResult = await ProductionBlanketRoll.updateOne(
+                    { _id: doc._id, inventoryPosted: false },
                     {
                         $set: {
                             inventoryPosted: true,
@@ -419,15 +478,12 @@ export async function ingestBlanketBatch({ companyId, payload }) {
                     }
                 );
 
-                summary.postedToInventory++;
-                campaignSummary.goodFiberKg += weightKg;
-            } catch (err) {
-                // Duplicate safe handling (MongoDB Error 11000)
-                if (err?.code === 11000) {
-                    console.log(`Duplicate recordId ${recordId} safely skipped.`);
-                    summary.duplicates++;
-                    continue;
+                // Only the process that changes false → true owns the counters.
+                if (inventoryLinkResult.modifiedCount > 0) {
+                    summary.postedToInventory++;
+                    campaignSummary.goodFiberKg += weightKg;
                 }
+            } catch (err) {
                 summary.failed++;
                 summary.errors.push(`recordId ${recordId} scale ${scaleNo}: ${err.message}`);
             }

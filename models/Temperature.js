@@ -24,4 +24,5 @@ TemperatureSchema.index(
   { productType: 1, value: 1, unit: 1 },
   { unique: true, name: 'uniq_temperature_spec' }
 );
+TemperatureSchema.index({ value: 1 });
 export default mongoose.model('Temperature', TemperatureSchema);

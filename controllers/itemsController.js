@@ -343,15 +343,52 @@ export const getAllItemsOptions = async (req, res) => {
   try {
     const filter = applyItemFilters(req);
     const items = await Item.find(filter)
-      .select('_id name sku grade UOM categoryKey productType status')
-      .sort({ name: 1, grade: 1 })
-      .lean();
+      .select('_id name sku grade UOM categoryKey productType status size temperature density')
+      .lean()
+      .populate('temperature', 'value unit')
+      .populate('density', 'value unit')
+      .populate('packing', 'name brandType productColor')
+      .populate('dimension', 'width length thickness unit');;
 
     return res.json(items);
   } catch (error) {
     return handleError(res, error);
   }
 };
+
+export const getAllItemsOptions_old = async (req, res) => {
+  // console.log('req.query in getAllItems', req.query);
+  try {
+    const { status, categoryKey } = req.query || {};
+    const filter = {};
+
+    // Filter by categoryKey if provided
+    if (categoryKey) filter.categoryKey = categoryKey;
+
+    // Status filtering:
+    // - If status=all -> no filter
+    // - If status is provided as comma-separated -> IN query
+    // - Else default to active
+    if (typeof status === 'string') {
+      if (status.toLowerCase() !== 'all') {
+        const list = status.split(',').map(s => s.trim()).filter(Boolean);
+        if (list.length) filter.status = { $in: list };
+      }
+    } else {
+      filter.status = STATUS.ACTIVE;
+    }
+
+    const items = await Item.find(filter).lean().populate('temperature', 'value unit')
+      .populate('density', 'value unit')
+      .populate('packing', 'name brandType productColor')
+      .populate('dimension', 'width length thickness unit');
+    // // console.log('items in getAllItems (count)', items?.length || 0, 'items', items[0]);
+    return res.json(items);
+  } catch (err) {
+    return res.status(500).json({ error: 'Server error' });
+  }
+};
+
 
 export const updateItem = async (req, res) => {
   try {

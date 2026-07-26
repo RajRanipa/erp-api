@@ -100,6 +100,11 @@ ItemSchema.index(
 );
 ItemSchema.index({ companyId: 1, status: 1 });
 ItemSchema.index({ companyId: 1, categoryKey: 1, status: 1, name: 1 });
+ItemSchema.index({ companyId: 1, productType: 1 });
+ItemSchema.index({ companyId: 1, temperature: 1 });
+ItemSchema.index({ companyId: 1, density: 1 });
+ItemSchema.index({ companyId: 1, dimension: 1 });
+ItemSchema.index({ companyId: 1, packing: 1 });
 
 // --- Virtuals ---
 ItemSchema.virtual('inStock').get(function () {

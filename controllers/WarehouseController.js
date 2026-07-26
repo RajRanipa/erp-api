@@ -1,131 +1,193 @@
-// controllers/WarehouseController.js
 import mongoose from 'mongoose';
 import Warehouse from '../models/Warehouse.js';
+import InventoryLedger from '../models/InventoryLedger.js';
+import InventorySnapshot from '../models/InventorySnapshot.js';
+import { AppError, handleError } from '../utils/errorHandler.js';
+import { applyAuditCreate, applyAuditUpdate } from '../utils/auditHelper.js';
 
-// --- helpers ---
-const isValidId = (id) => mongoose.isValidObjectId(id);
-const toInt = (v, d) => {
-  const n = parseInt(v, 10);
-  return Number.isFinite(n) && n > 0 ? n : d;
-};
-const sanitize = (v) => (typeof v === 'string' ? v.trim() : v);
-const pickPayload = (body = {}) => {
+const fail = (message, statusCode = 400, code = 'WAREHOUSE_ERROR') =>
+  new AppError(message, { statusCode, code });
+
+const escapeRegex = value =>
+  String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+function companyIdFromRequest(req) {
+  const companyId = req.user?.companyId;
+  if (!companyId || !mongoose.isValidObjectId(companyId)) {
+    throw fail('A valid company is required', 401, 'COMPANY_REQUIRED');
+  }
+  return companyId;
+}
+
+function validateId(id) {
+  if (!mongoose.isValidObjectId(id)) {
+    throw fail('Warehouse ID is invalid', 400, 'INVALID_ID');
+  }
+}
+
+function pickPayload(body = {}) {
   const payload = {};
-  if (body.code != null) payload.code = sanitize(body.code);
-  if (body.name != null) payload.name = sanitize(body.name);
-  if (body.address != null) payload.address = sanitize(body.address);
-  if (body.pincode != null) payload.pincode = sanitize(body.pincode);
-  if (body.state != null) payload.state = sanitize(body.state);
+  for (const field of ['code', 'name', 'address', 'pincode', 'state']) {
+    if (body[field] !== undefined) payload[field] = String(body[field] || '').trim();
+  }
+  if (payload.code !== undefined) payload.code = payload.code.toUpperCase();
   return payload;
-};
+}
 
-// --- Create ---
 export const createWarehouse = async (req, res) => {
   try {
     const payload = pickPayload(req.body);
     if (!payload.code || !payload.name) {
-      return res.status(400).json({ success: false, message: 'code and name are required' });
+      throw fail('Warehouse code and name are required');
     }
-    const doc = await Warehouse.create(payload);
-    return res.json({ success: true, data: doc });
-  } catch (err) {
-    if (err?.code === 11000) {
-      return res.status(409).json({ success: false, message: 'Duplicate code. Warehouse code must be unique.' });
-    }
-    return res.status(500).json({ success: false, message: err?.message || 'Failed to create warehouse' });
+    const warehouse = await Warehouse.create(applyAuditCreate(req, {
+      ...payload,
+      companyId: companyIdFromRequest(req),
+      status: 'active',
+    }));
+    return res.status(201).json({
+      success: true,
+      message: 'Warehouse created',
+      data: warehouse,
+    });
+  } catch (error) {
+    return handleError(res, error);
   }
 };
 
-// --- Read: list (with basic search/pagination/sort) ---
 export const listWarehouses = async (req, res) => {
   try {
-    const { q, page, limit, sort = '-createdAt' } = req.query;
-    const pageNum = toInt(page, 1);
-    const limitNum = Math.min(toInt(limit, 20), 100);
-
-    const filter = {};
-    if (q && String(q).trim()) {
-      const rx = new RegExp(String(q).trim(), 'i');
-      filter.$or = [{ code: rx }, { name: rx }, { state: rx }, { address: rx }];
+    const page = Math.max(Number.parseInt(req.query?.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(Number.parseInt(req.query?.limit, 10) || 20, 1), 100);
+    const filter = { companyId: companyIdFromRequest(req) };
+    const status = String(req.query?.status || 'active').trim().toLowerCase();
+    if (status !== 'all') {
+      if (!['active', 'archived'].includes(status)) throw fail('status is invalid');
+      filter.status = status;
+    }
+    if (req.query?.q && String(req.query.q).trim()) {
+      const regex = new RegExp(escapeRegex(String(req.query.q).trim()), 'i');
+      filter.$or = [
+        { code: regex },
+        { name: regex },
+        { state: regex },
+        { address: regex },
+      ];
     }
 
+    const sort = ['name', '-name', 'code', '-code', 'createdAt', '-createdAt']
+      .includes(req.query?.sort)
+      ? req.query.sort
+      : 'name';
     const [items, total] = await Promise.all([
       Warehouse.find(filter)
         .sort(sort)
-        .skip((pageNum - 1) * limitNum)
-        .limit(limitNum)
+        .skip((page - 1) * limit)
+        .limit(limit)
         .lean(),
-      Warehouse.countDocuments(filter)
+      Warehouse.countDocuments(filter),
     ]);
-
     return res.json({
       success: true,
       data: items,
       meta: {
-        page: pageNum,
-        limit: limitNum,
+        page,
+        limit,
         total,
-        pages: Math.ceil(total / limitNum) || 1,
+        pages: Math.ceil(total / limit) || 1,
       },
     });
-  } catch (err) {
-    return res.status(500).json({ success: false, message: err?.message || 'Failed to fetch warehouses' });
+  } catch (error) {
+    return handleError(res, error);
   }
 };
 
-// --- Read: single ---
 export const getWarehouse = async (req, res) => {
   try {
-    const { id } = req.params;
-    if (!isValidId(id)) return res.status(400).json({ success: false, message: 'Invalid id' });
-    const doc = await Warehouse.findById(id);
-    if (!doc) return res.status(404).json({ success: false, message: 'Warehouse not found' });
-    return res.json({ success: true, data: doc });
-  } catch (err) {
-    return res.status(500).json({ success: false, message: err?.message || 'Failed to fetch warehouse' });
+    validateId(req.params.id);
+    const warehouse = await Warehouse.findOne({
+      _id: req.params.id,
+      companyId: companyIdFromRequest(req),
+    });
+    if (!warehouse) throw fail('Warehouse not found', 404, 'WAREHOUSE_NOT_FOUND');
+    return res.json({ success: true, data: warehouse });
+  } catch (error) {
+    return handleError(res, error);
   }
 };
 
-// --- Update ---
 export const updateWarehouse = async (req, res) => {
   try {
-    const { id } = req.params;
-    if (!isValidId(id)) return res.status(400).json({ success: false, message: 'Invalid id' });
-
+    validateId(req.params.id);
     const payload = pickPayload(req.body);
-    if (Object.keys(payload).length === 0) {
-      return res.status(400).json({ success: false, message: 'No valid fields to update' });
+    if (!Object.keys(payload).length) throw fail('No valid fields to update');
+    if (payload.code === '' || payload.name === '') {
+      throw fail('Warehouse code and name cannot be empty');
     }
 
-    const updated = await Warehouse.findByIdAndUpdate(
-      id,
-      { $set: payload },
-      { new: true, runValidators: true }
+    const warehouse = await Warehouse.findOneAndUpdate(
+      {
+        _id: req.params.id,
+        companyId: companyIdFromRequest(req),
+        status: { $ne: 'archived' },
+      },
+      { $set: applyAuditUpdate(req, payload) },
+      { new: true, runValidators: true },
     );
-    if (!updated) return res.status(404).json({ success: false, message: 'Warehouse not found' });
-    return res.json({ success: true, data: updated });
-  } catch (err) {
-    if (err?.code === 11000) {
-      return res.status(409).json({ success: false, message: 'Duplicate code. Warehouse code must be unique.' });
+    if (!warehouse) {
+      throw fail('Active Warehouse not found', 404, 'WAREHOUSE_NOT_FOUND');
     }
-    return res.status(500).json({ success: false, message: err?.message || 'Failed to update warehouse' });
+    return res.json({
+      success: true,
+      message: 'Warehouse updated',
+      data: warehouse,
+    });
+  } catch (error) {
+    return handleError(res, error);
   }
 };
 
-// --- Delete (hard delete). If you prefer soft delete, we can add a flag ---
+/**
+ * Warehouses are archived, never hard-deleted, because ledger rows must keep
+ * their historical location reference.
+ */
 export const deleteWarehouse = async (req, res) => {
   try {
-    const { id } = req.params;
-    if (!isValidId(id)) return res.status(400).json({ success: false, message: 'Invalid id' });
-    const deleted = await Warehouse.findByIdAndDelete(id);
-    if (!deleted) return res.status(404).json({ success: false, message: 'Warehouse not found' });
-    return res.json({ success: true, data: deleted });
-  } catch (err) {
-    return res.status(500).json({ success: false, message: err?.message || 'Failed to delete warehouse' });
+    validateId(req.params.id);
+    const companyId = companyIdFromRequest(req);
+    const warehouse = await Warehouse.findOne({ _id: req.params.id, companyId });
+    if (!warehouse) throw fail('Warehouse not found', 404, 'WAREHOUSE_NOT_FOUND');
+
+    const [ledgerCount, stockCount] = await Promise.all([
+      InventoryLedger.countDocuments({ companyId, warehouseId: warehouse._id }),
+      InventorySnapshot.countDocuments({
+        companyId,
+        warehouseId: warehouse._id,
+        $or: [{ onHand: { $ne: 0 } }, { reserved: { $ne: 0 } }],
+      }),
+    ]);
+    if (stockCount > 0) {
+      throw fail(
+        'Warehouse cannot be archived while it contains stock or reservations',
+        409,
+        'WAREHOUSE_HAS_STOCK',
+      );
+    }
+
+    warehouse.status = 'archived';
+    warehouse.updatedBy = req.user?.userId || req.user?.id || req.user?._id;
+    await warehouse.save();
+    return res.json({
+      success: true,
+      message: 'Warehouse archived',
+      data: warehouse,
+      ledgerCount,
+    });
+  } catch (error) {
+    return handleError(res, error);
   }
 };
 
-// Optional: default export group
 export default {
   createWarehouse,
   listWarehouses,

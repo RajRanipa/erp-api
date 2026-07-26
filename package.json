@@ -9,9 +9,12 @@
     "dev": "nodemon --watch ./ --ext js,json,env --ignore node_modules server.js",
     "debug": "node --inspect server.js",
     "debug:break": "node --inspect-brk server.js",
-    "migrate:inventory-items": "node scripts/migrateInventoryItemMetadata.js",
+    "audit:inventory": "node scripts/migrateInventoryItemMetadata.js",
+    "migrate:inventory-items": "node scripts/migrateInventoryItemMetadata.js --apply",
     "audit:item-module-data": "node scripts/migrateItemModule.js",
-    "migrate:item-module": "node scripts/migrateItemModule.js --apply"
+    "migrate:item-module": "node scripts/migrateItemModule.js --apply",
+    "seed:permissions": "node scripts/seedPermissions.js",
+    "seed:inventory-permissions": "node scripts/seedInventoryPermissions.js"
   },
   "keywords": [],
   "author": "Raj",

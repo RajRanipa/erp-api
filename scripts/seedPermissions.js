@@ -8,7 +8,7 @@ const MONGO_URI = process.env.MONGO_URI || process.env.MONGODB_URI || 'mongodb:/
 
 try {
   await mongoose.connect(MONGO_URI, { autoIndex: true });
-  console.log('✅ Connected to MongoDB:', MONGO_URI);
+  console.log('✅ Connected to MongoDB');
 } catch (err) {
   console.error('❌ Failed to connect to MongoDB:', err.message);
   process.exit(1);
@@ -28,7 +28,8 @@ const all = [
   'parameters:densities:read','parameters:densities:create','parameters:densities:update','parameters:densities:delete',
   'parameters:temperatures:read','parameters:temperatures:create','parameters:temperatures:update','parameters:temperatures:delete',
   'parameters:dimensions:read','parameters:dimensions:create','parameters:dimensions:update','parameters:dimensions:delete',
-  'inventory:read','inventory:receipt','inventory:issue','inventory:adjust','inventory:repack',
+  'inventory:read','inventory:receipt','inventory:issue','inventory:adjust',
+  'inventory:transfer','inventory:reserve','inventory:repack',
   'users:invite:read','users:read','users:invite:create','users:invite:resend','users:invite:revoke','users:remove',
   'warehouses:read','warehouses:update','warehouses:create','warehouses:delete',
   'reports:view','transactions:approve'
@@ -55,7 +56,7 @@ await Permission.updateMany({ key: { $in: [
   'items:read','items:create','items:update','items:status:update',
   'parameters:read','parameters:categories:read','parameters:producttypes:read',
   'parameters:densities:read','parameters:temperatures:read','parameters:dimensions:read',
-  'inventory:read','inventory:receipt','inventory:repack',
+  'inventory:read','inventory:receipt','inventory:transfer','inventory:reserve','inventory:repack',
   'users:invite:read','users:read','users:invite:create','users:invite:resend','users:invite:revoke','users:remove',
   'warehouses:read','warehouses:update','warehouses:create','warehouses:delete'
 ]}}, { $addToSet: { roles: 'manager' } });
@@ -65,7 +66,8 @@ await Permission.updateMany({ key: { $in: [
   'items:read','items:create','items:update',
   'parameters:read','parameters:categories:read','parameters:producttypes:read',
   'parameters:densities:read','parameters:temperatures:read','parameters:dimensions:read',
-  'inventory:read','inventory:receipt','inventory:issue','inventory:adjust','inventory:repack',
+  'inventory:read','inventory:receipt','inventory:issue','inventory:adjust',
+  'inventory:transfer','inventory:reserve','inventory:repack',
   'users:invite:read','users:invite:resend',
   'warehouses:read','warehouses:update','warehouses:create','warehouses:delete'
 ]}}, { $addToSet: { roles: 'store_operator' } });
@@ -75,7 +77,7 @@ await Permission.updateMany({ key: { $in: [
   'items:read','items:create','items:update',
   'parameters:read','parameters:categories:read','parameters:producttypes:read',
   'parameters:densities:read','parameters:temperatures:read','parameters:dimensions:read',
-  'inventory:read','inventory:receipt','inventory:repack','inventory:adjust',
+  'inventory:read','inventory:receipt','inventory:repack','inventory:adjust','inventory:transfer',
   'warehouses:read','warehouses:update','warehouses:create','warehouses:delete'
 ]}}, { $addToSet: { roles: 'production_manager' } });
 

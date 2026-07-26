@@ -3,6 +3,7 @@ import Batch from '../models/Batches.js';
 import Campaign from '../models/Campaign.js';
 import Item from '../models/Item.js';
 import Warehouse from '../models/Warehouse.js';
+import InventorySnapshot from '../models/InventorySnapshot.js';
 import {
   issue as issueInventory,
   receive as receiveInventory,
@@ -38,7 +39,7 @@ const httpError = (message, status = 400) => {
 };
 
 const sendHttpError = (res, error) => {
-  let status = Number(error?.status) || 500;
+  let status = Number(error?.status || error?.statusCode) || 500;
   let message = String(error?.message || 'Request failed');
 
   if (error?.code === 11000) {
@@ -200,19 +201,60 @@ const postMaterialIssues = async ({
   session,
 }) => {
   for (const line of lines) {
-    await issueInventory({
+    const buckets = await InventorySnapshot.find({
       companyId,
       itemId: line.itemId,
       warehouseId,
-      uom: line.issuedUom,
-      qty: line.issuedQuantity,
-      by: userId,
-      note: `Raw material issued for manufacturing batch ${batchCode}`,
-      refType: 'MANUFACTURING_BATCH',
-      refId: String(batchId),
-      session,
-    });
+      uom: normalizeUnit(line.issuedUom),
+      available: { $gt: 0 },
+    })
+      .select('_id available bin batchNo uom createdAt')
+      .sort({ createdAt: 1, _id: 1 })
+      .session(session)
+      .lean();
+
+    let remaining = line.issuedQuantity;
+    const allocations = [];
+    for (const bucket of buckets) {
+      if (remaining <= 1e-9) break;
+      const quantity = Math.min(remaining, Number(bucket.available || 0));
+      if (quantity <= 1e-9) continue;
+
+      const movement = await issueInventory({
+        companyId,
+        itemId: line.itemId,
+        warehouseId,
+        uom: line.issuedUom,
+        qty: quantity,
+        by: userId,
+        note: `Raw material issued for manufacturing batch ${batchCode}`,
+        refType: 'MANUFACTURING_BATCH',
+        refId: String(batchId),
+        bin: bucket.bin,
+        batchNo: bucket.batchNo,
+        session,
+      });
+      allocations.push({
+        quantity,
+        uom: movement.ledger.uom,
+        bin: bucket.bin || null,
+        batchNo: bucket.batchNo || null,
+        snapshotId: movement.snapshot?._id || bucket._id,
+        ledgerId: movement.ledger?._id || null,
+      });
+      remaining -= quantity;
+    }
+
+    if (remaining > 1e-9) {
+      throw httpError(
+        `Insufficient available stock for ${line.itemName}: `
+        + `${line.issuedQuantity - remaining} of ${line.issuedQuantity} ${line.issuedUom} available`,
+        409,
+      );
+    }
+    line.inventoryAllocations = allocations;
   }
+  return lines;
 };
 
 const reverseMaterialIssues = async ({
@@ -226,19 +268,32 @@ const reverseMaterialIssues = async ({
   reason,
 }) => {
   for (const line of lines) {
-    await receiveInventory({
-      companyId,
-      itemId: line.itemId,
-      warehouseId,
-      uom: line.issuedUom,
-      qty: line.issuedQuantity,
-      by: userId,
-      note: reason || `Raw material returned from manufacturing batch ${batchCode}`,
-      refType: 'MANUFACTURING_BATCH_REVERSAL',
-      refId: String(batchId),
-      allowInactiveItem: true,
-      session,
-    });
+    const allocations = line.inventoryAllocations?.length
+      ? line.inventoryAllocations
+      : [{
+          quantity: line.issuedQuantity,
+          uom: line.issuedUom,
+          bin: null,
+          batchNo: null,
+        }];
+    for (const allocation of allocations) {
+      await receiveInventory({
+        companyId,
+        itemId: line.itemId,
+        warehouseId,
+        uom: allocation.uom || line.issuedUom,
+        qty: allocation.quantity,
+        by: userId,
+        note: reason || `Raw material returned from manufacturing batch ${batchCode}`,
+        refType: 'MANUFACTURING_BATCH_REVERSAL',
+        refId: String(batchId),
+        bin: allocation.bin || null,
+        batchNo: allocation.batchNo || null,
+        allowInactiveItem: true,
+        allowInactiveWarehouse: true,
+        session,
+      });
+    }
   }
 };
 
@@ -289,7 +344,11 @@ export const createBatch = async (req, res) => {
     const input = normalizeCreateInput(req.body);
     const [campaign, warehouse] = await Promise.all([
       Campaign.findById(input.campaign).select('_id').lean(),
-      Warehouse.findById(input.warehouseId).select('_id').lean(),
+      Warehouse.findOne({
+        _id: input.warehouseId,
+        companyId,
+        status: 'active',
+      }).select('_id').lean(),
     ]);
     if (!campaign) throw httpError('Campaign not found', 404);
     if (!warehouse) throw httpError('Warehouse not found', 404);
@@ -316,7 +375,7 @@ export const createBatch = async (req, res) => {
       );
       createdId = created._id;
 
-      await postMaterialIssues({
+      const allocatedLines = await postMaterialIssues({
         lines: issuedLines,
         companyId,
         warehouseId: input.warehouseId,
@@ -325,6 +384,8 @@ export const createBatch = async (req, res) => {
         batchCode: input.batche_id,
         session,
       });
+      created.rawMaterials = allocatedLines.map(({ itemName, ...line }) => line);
+      await created.save({ session });
       await updateCampaignTotal(input.campaign, session);
     });
 
@@ -476,9 +537,7 @@ export const addBatchMaterial = async (req, res) => {
         companyId,
         session
       );
-      batch.rawMaterials.push(issuedLine);
-      await batch.save({ session });
-      await postMaterialIssues({
+      const [allocatedLine] = await postMaterialIssues({
         lines: [issuedLine],
         companyId,
         warehouseId: batch.warehouseId,
@@ -487,6 +546,8 @@ export const addBatchMaterial = async (req, res) => {
         batchCode: batch.batche_id,
         session,
       });
+      batch.rawMaterials.push(allocatedLine);
+      await batch.save({ session });
       await updateCampaignTotal(batch.campaign, session);
     });
 
