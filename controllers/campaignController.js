@@ -130,6 +130,16 @@ export const createCampaign = async (req, res) => {
   }
 };
 
+export const activeCampaigns = async (req, res) => {
+  try {
+    const rows = await Campaign.find({status : 'RUNNING'}).sort({ startDate: -1, createdAt: -1 }).lean();
+    return res.status(200).json(rows);
+  } catch (err) {
+    console.error('listCampaigns error:', err);
+    return res.status(500).json({ success: false, message: 'Failed to fetch campaigns', error: err.message });
+  }
+};
+
 export const listCampaigns = async (req, res) => {
   try {
     const rows = await Campaign.find({}).sort({ startDate: -1, createdAt: -1 }).lean();

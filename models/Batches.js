@@ -1,25 +1,32 @@
 import mongoose from 'mongoose';
+
 const batchesSchema = new mongoose.Schema(
   {
-    // Keep existing field name to avoid breaking existing data
     batche_id: { type: String, required: true, trim: true, unique: true },
-
-    // Use a consistent lowercase field name for dates
     date: { type: Date, required: true },
-
-    // From your payload: numbersBatches: 20
     numbersBatches: { type: Number, required: true, min: 1 },
-
-    // From your payload: rawMaterials: [{ name: ObjectId, weight: Number }]
-    // Map `name` (ObjectId string) to `rawMaterial` ref, and store weight
+    companyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Company',
+      required: true,
+      index: true,
+    },
+    warehouseId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Warehouse',
+      required: true,
+    },
     rawMaterials: [
       {
-        // store only the ObjectId reference for the raw material
-        rawMaterial_id: { type: mongoose.Schema.Types.ObjectId, ref: 'RawMaterial', required: true },
-        // line-item quantity and unit
-        // rawMaterialName: { type: String, required: true, trim: true },
-        weight: { type: Number, required: true, min: 1 },
+        itemId: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'Item',
+          required: true,
+        },
+        weight: { type: Number, required: true, min: 0.000001 },
         unit: { type: String, default: 'kg' },
+        issuedQuantity: { type: Number, required: true, min: 0.000001 },
+        issuedUom: { type: String, required: true },
       }
     ],
     campaign: { type: mongoose.Schema.Types.ObjectId, ref: 'Campaign', required: true },
@@ -30,5 +37,7 @@ const batchesSchema = new mongoose.Schema(
 
 // Useful indices
 batchesSchema.index({ createdBy: 1, date: -1 });
+batchesSchema.index({ companyId: 1, campaign: 1, date: -1 });
+batchesSchema.index({ companyId: 1, warehouseId: 1, date: -1 });
 
 export default mongoose.model('Batch', batchesSchema);

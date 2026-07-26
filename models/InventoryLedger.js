@@ -26,10 +26,17 @@ const InventoryLedgerSchema = new Schema(
       index: true,
     },
 
+    categoryKey: {
+      type: String,
+      enum: ['FG', 'RAW', 'PACKING', 'NC'],
+      required: true,
+      index: true,
+    },
+
     productType: {
       type: Schema.Types.ObjectId, 
       ref: 'ProductType',
-      required: true,
+      default: null,
       index: true,
     },
     
@@ -113,6 +120,7 @@ InventoryLedgerSchema.index({
 
 InventoryLedgerSchema.index({ companyId: 1, at: -1 });
 InventoryLedgerSchema.index({ companyId: 1, txnType: 1, at: -1 });
+InventoryLedgerSchema.index({ companyId: 1, categoryKey: 1, at: -1 });
 
 /**
  * Safety: Prevent accidental updates after insert.

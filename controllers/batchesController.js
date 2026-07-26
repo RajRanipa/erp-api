@@ -1,133 +1,14 @@
 import mongoose from 'mongoose';
 import Batch from '../models/Batches.js';
-import RawMaterial from '../models/Rawmaterial.js';
 import Campaign from '../models/Campaign.js';
-import { handleError } from '../utils/errorHandler.js';
+import Item from '../models/Item.js';
+import Warehouse from '../models/Warehouse.js';
+import {
+  issue as issueInventory,
+  receive as receiveInventory,
+} from '../services/inventoryService.js';
 
-// Standardized HTTP error response helper
-const sendHttpError = (res, err) => {
-  const status = Number(err?.status) || 400;
-  const payload = {
-    success: false,
-    message: String(err?.message || 'Request failed'),
-  };
-  // Include field errors if present (keeps existing shape you used elsewhere)
-  if (err?.errors && typeof err.errors === 'object') {
-    payload.errors = err.errors;
-  }
-  return res.status(status).json(payload);
-};
-
-/**
- * Normalize incoming request body to match Batch schema
- * - maps rawMaterials[].name -> rawMaterials[].rawMaterial (ObjectId string)
- * - coerces weights to numbers and removes invalid entries
- * - ensures date exists
- */
-const normalizeBatchInput = (body = {}) => {
-  const out = {};
-  if (body.batche_id) out.batche_id = String(body.batche_id).trim();
-  out.date = body.date ? new Date(body.date) : new Date();
-  if (body.numbersBatches !== undefined) {
-    const nb = Number(body.numbersBatches);
-    out.numbersBatches = Number.isFinite(nb) && nb > 0 ? nb : 1;
-  }
-  if (Array.isArray(body.rawMaterials)) {
-    out.rawMaterials = body.rawMaterials
-      .map((rm) => {
-        const id = rm?.rawMaterial_id  // accept either shape
-        // const name = rm?.rawMaterialName // accept either shape
-        const weightNum = Number(rm?.weight);
-        if (!id || !Number.isFinite(weightNum) || weightNum < 0) return null;
-        return {
-          rawMaterial_id: id,
-          // rawMaterialName: name,
-          weight: weightNum,
-          unit: rm?.unit || 'kg',
-        };
-      })
-      .filter(Boolean);
-  }
-  if (body.createdBy) out.createdBy = body.createdBy;
-    // campaign support
-  if (body.campaign !== undefined) {
-    if (!mongoose.isValidObjectId(body.campaign)) {
-      const err = new Error('Invalid campaign id');
-      err.status = 400;
-      throw err;
-    }
-    out.campaign = body.campaign;
-  }
-  return out;
-};
-
-/** Ensure no duplicate rawMaterial ids in the array */
-const assertNoDuplicateMaterials = (rawMaterials = []) => {
-  const seen = new Set();
-  for (const rm of rawMaterials) {
-    const key = String(rm.rawMaterial_id);
-    if (seen.has(key)) {
-      const err = new Error('Duplicate rawMaterial found in rawMaterials array');
-      err.status = 400;
-      throw err;
-    }
-    seen.add(key);
-  }
-};
-
-/** Ensure total weight > 0 */
-const assertPositiveTotalWeight = (rawMaterials = []) => {
-  const total = rawMaterials.reduce((s, r) => s + (Number(r.weight) || 0), 0);
-  if (total <= 0) {
-    const err = new Error('Total weight of rawMaterials must be greater than 0');
-    err.status = 400;
-    throw err;
-  }
-};
-
-// --- UOM helpers ---
-// --- Campaign totals helpers ---
-const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
-
-
-// Compute totals for a campaign by scanning its batches
-const computeCampaignTotals = async (campaignId, session) => {
-  if (!campaignId) return { totalRawIssued: 0 };
-  const batches = await Batch.find({ campaign: campaignId })
-    .select('numbersBatches rawMaterials')
-    .lean()
-    .session(session || null);
-
-  let totalRawIssuedG = 0; // grams
-
-  for (const b of batches) {
-    const multiplier = Number.isFinite(b?.numbersBatches) && b.numbersBatches > 0 ? b.numbersBatches : 1;
-    if (Array.isArray(b?.rawMaterials)) {
-      for (const rm of b.rawMaterials) {
-        const grams = toGrams(rm?.weight, rm?.unit || 'kg');
-        if (Number.isFinite(grams) && grams > 0) {
-          totalRawIssuedG += grams * multiplier;
-        }
-      }
-    }
-  }
-
-  return {
-    totalRawIssued: round2(totalRawIssuedG / 1000),
-  };
-};
-
-const updateCampaignTotals = async (campaignId, session) => {
-  if (!campaignId) return;
-  const totals = await computeCampaignTotals(campaignId, session);
-  await Campaign.findByIdAndUpdate(
-    campaignId,
-    { $set: { totalRawIssued: totals.totalRawIssued } },
-    { new: false }
-  )
-    .session(session || null);
-};
-const UOM_FACTORS_G = {
+const MASS_TO_GRAMS = {
   mg: 0.001,
   g: 1,
   kg: 1000,
@@ -139,399 +20,526 @@ const UOM_FACTORS_G = {
   t: 1000000,
 };
 
-const toGrams = (value, unit = 'g') => {
-  const v = Number(value);
-  const factor = UOM_FACTORS_G[String(unit || '').toLowerCase()];
-  if (!Number.isFinite(v) || !factor) return NaN;
-  return v * factor;
+const BATCH_POPULATE = [
+  {
+    path: 'rawMaterials.itemId',
+    select: 'name sku grade UOM categoryKey status',
+  },
+  {
+    path: 'warehouseId',
+    select: 'code name',
+  },
+];
+
+const httpError = (message, status = 400) => {
+  const error = new Error(message);
+  error.status = status;
+  return error;
 };
 
-/**
- * Ensure that for each rawMaterial, available stock (by its own UOM) >= required quantity in request.
- * Assumes RawMaterial docs have fields: `_id`, `stock` (Number), `uom` (String), and optional `name`.
- */
-const assertSufficientInventory = async (rawMaterials = [], multiplier = 1) => {
-  if (!Array.isArray(rawMaterials) || rawMaterials.length === 0) return;
+const sendHttpError = (res, error) => {
+  let status = Number(error?.status) || 500;
+  let message = String(error?.message || 'Request failed');
 
-  // Sum required per material in grams
-  const requiredG = new Map(); // id -> grams
-  for (const rm of rawMaterials) {
-    const id = rm?.rawMaterial || rm?.rawMaterial_id;
-    const grams = toGrams(rm?.weight, rm?.unit || 'kg');
-    if (!id || !Number.isFinite(grams) || grams <= 0) continue;
-    const need = grams * (Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1);
-    requiredG.set(String(id), (requiredG.get(String(id)) || 0) + need);
+  if (error?.code === 11000) {
+    status = 409;
+    message = 'A batch with this Batch ID already exists';
   }
-  if (requiredG.size === 0) return;
-  // Fetch stocks
-  const ids = Array.from(requiredG.keys());
-  const docs = await RawMaterial.find({ _id: { $in: ids } }, 'productName currentStock UOM').lean();
-  const byId = new Map(docs.map(d => [String(d._id), d]));
-  // Compare
-  for (const [id, needG] of requiredG.entries()) {
-    const doc = byId.get(id);
-    if (!doc) {
-      const err = new Error(`Raw material not found: ${id}`);
-      err.status = 400;
-      throw err;
-    }
-    const haveG = toGrams(doc.currentStock ?? 0, doc.UOM || 'kg');
-    if (!Number.isFinite(haveG)) {
-      const err = new Error(`Invalid stock/UOM for raw material: ${doc.productName || id}`);
-      err.status = 400;
-      throw err;
-    }
-    if (haveG < needG) {
-      // Build a friendly message showing both in material's native UOM
-      const unitFactor = UOM_FACTORS_G[String(doc.UOM || 'kg').toLowerCase()] || 1;
-      const needInDocUom = needG / unitFactor;
-      const haveInDocUom = doc.currentStock ?? 0;
-      const uomLabel = String(doc.UOM || 'kg');
-      const err = new Error(`${doc.productName || id}: required ${needInDocUom} ${uomLabel}, available ${haveInDocUom} ${uomLabel}`);
-      err.status = 400;
-      throw err;
-    }
+
+  return res.status(status).json({
+    success: false,
+    message,
+    ...(error?.errors && typeof error.errors === 'object'
+      ? { errors: error.errors }
+      : {}),
+  });
+};
+
+const normalizeUnit = (unit) => String(unit || '').trim().toLowerCase();
+
+const convertQuantity = (quantity, fromUnit, toUnit) => {
+  const value = Number(quantity);
+  if (!Number.isFinite(value) || value <= 0) {
+    throw httpError('Material quantity must be greater than 0');
+  }
+
+  const from = normalizeUnit(fromUnit);
+  const to = normalizeUnit(toUnit);
+  if (!from || !to) throw httpError('Material UOM is required');
+  if (from === to) return value;
+
+  const fromFactor = MASS_TO_GRAMS[from];
+  const toFactor = MASS_TO_GRAMS[to];
+  if (!fromFactor || !toFactor) {
+    throw httpError(`Cannot convert material quantity from ${fromUnit} to ${toUnit}`);
+  }
+
+  return (value * fromFactor) / toFactor;
+};
+
+const toKg = (quantity, unit) => {
+  const factor = MASS_TO_GRAMS[normalizeUnit(unit)];
+  if (!factor) return 0;
+  return (Number(quantity) * factor) / 1000;
+};
+
+const validateObjectId = (value, field) => {
+  if (!mongoose.isValidObjectId(value)) {
+    throw httpError(`${field} is invalid`);
   }
 };
 
-// Build a map of required grams per raw material id, with multiplier
-const buildRequiredGramMap = (rawMaterials = [], multiplier = 1) => {
-  const req = new Map();
-  const m = (Number.isFinite(multiplier) && multiplier > 0) ? multiplier : 1;
-  for (const rm of rawMaterials) {
-    const id = rm?.rawMaterial || rm?.rawMaterial_id;
-    const grams = toGrams(rm?.weight, rm?.unit || 'kg');
-    if (!id || !Number.isFinite(grams) || grams <= 0) continue;
-    req.set(String(id), (req.get(String(id)) || 0) + grams * m);
+const normalizeMaterialInput = (line) => {
+  const itemId = line?.itemId;
+  const weight = Number(line?.weight);
+  const unit = String(line?.unit || 'kg').trim();
+
+  if (!itemId) throw httpError('Every material line requires itemId');
+  validateObjectId(itemId, 'Material itemId');
+  if (!Number.isFinite(weight) || weight <= 0) {
+    throw httpError('Every material line requires a positive weight');
   }
-  return req;
+  if (!unit) throw httpError('Every material line requires a unit');
+
+  return { itemId, weight, unit };
 };
 
-// Deduct inventory atomically using a session; guards against going negative
-const deductInventory = async (rawMaterials = [], multiplier = 1, session) => {
-  const requiredG = buildRequiredGramMap(rawMaterials, multiplier);
-  if (requiredG.size === 0) return;
-  const ids = Array.from(requiredG.keys());
-  const docs = await RawMaterial.find(
-    { _id: { $in: ids } },
-    'productName currentStock UOM'
-  ).session(session || null).lean();
-  const byId = new Map(docs.map(d => [String(d._id), d]));
+const normalizeCreateInput = (body = {}) => {
+  const batcheId = String(body.batche_id || '').trim();
+  const numbersBatches = Number(body.numbersBatches);
+  const date = body.date ? new Date(body.date) : new Date();
+  const campaign = body.campaign;
+  const warehouseId = body.warehouseId;
 
-  const ops = [];
-  for (const [id, needG] of requiredG.entries()) {
-    const doc = byId.get(id);
-    if (!doc) {
-      const err = new Error(`Raw material not found during deduction: ${id}`);
-      err.status = 400;
-      throw err;
+  if (!batcheId) throw httpError('batche_id is required');
+  if (!Number.isInteger(numbersBatches) || numbersBatches <= 0) {
+    throw httpError('numbersBatches must be a positive whole number');
+  }
+  if (Number.isNaN(date.getTime())) throw httpError('date is invalid');
+  validateObjectId(campaign, 'campaign');
+  validateObjectId(warehouseId, 'warehouseId');
+
+  if (!Array.isArray(body.rawMaterials) || body.rawMaterials.length === 0) {
+    throw httpError('At least one raw material is required');
+  }
+
+  const rawMaterials = body.rawMaterials.map(normalizeMaterialInput);
+  const seen = new Set();
+  for (const line of rawMaterials) {
+    const key = String(line.itemId);
+    if (seen.has(key)) throw httpError('A raw material can only be added once');
+    seen.add(key);
+  }
+
+  return {
+    batche_id: batcheId,
+    date,
+    numbersBatches,
+    campaign,
+    warehouseId,
+    rawMaterials,
+  };
+};
+
+const loadMaterialItems = async (lines, companyId, session) => {
+  const ids = lines.map((line) => line.itemId);
+  const query = Item.find({ _id: { $in: ids } })
+    .select('_id companyId name categoryKey UOM status')
+    .lean();
+  if (session) query.session(session);
+  const items = await query;
+  const byId = new Map(items.map((item) => [String(item._id), item]));
+
+  return lines.map((line) => {
+    const item = byId.get(String(line.itemId));
+    if (!item) throw httpError(`Raw-material item not found: ${line.itemId}`, 404);
+    if (item.categoryKey !== 'RAW') {
+      throw httpError(`${item.name} is not a RAW item`);
     }
-    const unitFactor = UOM_FACTORS_G[String(doc.UOM || 'kg').toLowerCase()] || 1;
-    const needInDocUom = needG / unitFactor;
+    if (item.status === 'archived') {
+      throw httpError(`${item.name} is archived and cannot be consumed`);
+    }
+    if (item.companyId && String(item.companyId) !== String(companyId)) {
+      throw httpError(`${item.name} does not belong to this company`, 403);
+    }
+    if (!item.UOM) throw httpError(`${item.name} does not have a UOM`);
 
-    // Guard against concurrent negatives: only update if stock >= need
-    ops.push({
-      updateOne: {
-        filter: { _id: id, currentStock: { $gte: needInDocUom } },
-        update: { $inc: { currentStock: -needInDocUom } },
-      }
+    return { line, item };
+  });
+};
+
+const prepareIssuedLines = async (
+  lines,
+  numbersBatches,
+  companyId,
+  session
+) => {
+  const resolved = await loadMaterialItems(lines, companyId, session);
+
+  return resolved.map(({ line, item }) => ({
+    itemId: item._id,
+    weight: line.weight,
+    unit: line.unit,
+    issuedQuantity: convertQuantity(
+      line.weight * numbersBatches,
+      line.unit,
+      item.UOM
+    ),
+    issuedUom: item.UOM,
+    itemName: item.name,
+  }));
+};
+
+const postMaterialIssues = async ({
+  lines,
+  companyId,
+  warehouseId,
+  userId,
+  batchId,
+  batchCode,
+  session,
+}) => {
+  for (const line of lines) {
+    await issueInventory({
+      companyId,
+      itemId: line.itemId,
+      warehouseId,
+      uom: line.issuedUom,
+      qty: line.issuedQuantity,
+      by: userId,
+      note: `Raw material issued for manufacturing batch ${batchCode}`,
+      refType: 'MANUFACTURING_BATCH',
+      refId: String(batchId),
+      session,
     });
   }
+};
 
-  if (ops.length) {
-    const res = await RawMaterial.bulkWrite(ops, { session: session || null });
-    // Ensure all matched
-    const matched = res.matchedCount || Object.values(res.result || {}).reduce((a, b) => a + (b?.matchedCount || 0), 0);
-    if (matched !== ops.length) {
-      const err = new Error('Insufficient stock due to concurrent changes');
-      err.status = 409;
-      throw err;
-    }
+const reverseMaterialIssues = async ({
+  lines,
+  companyId,
+  warehouseId,
+  userId,
+  batchId,
+  batchCode,
+  session,
+  reason,
+}) => {
+  for (const line of lines) {
+    await receiveInventory({
+      companyId,
+      itemId: line.itemId,
+      warehouseId,
+      uom: line.issuedUom,
+      qty: line.issuedQuantity,
+      by: userId,
+      note: reason || `Raw material returned from manufacturing batch ${batchCode}`,
+      refType: 'MANUFACTURING_BATCH_REVERSAL',
+      refId: String(batchId),
+      session,
+    });
   }
 };
 
-// CREATE
-export const createBatch = async (req, res, next) => {
-  try {
-    const data = normalizeBatchInput(req.body);
-    // // console.log('createBatch data', req.body); // here campaign is there and value is id of campaign
-    if (!data.batche_id) {
-      const err = new Error('batche_id is required');
-      err.status = 400;
-      throw err;
-    }
-    if (data.numbersBatches === undefined) {
-      const err = new Error('numbersBatches is required');
-      err.status = 400;
-      throw err;
-    }
+const computeCampaignTotals = async (campaignId, session) => {
+  const query = Batch.find({ campaign: campaignId })
+    .select('numbersBatches rawMaterials.weight rawMaterials.unit')
+    .lean();
+  if (session) query.session(session);
+  const batches = await query;
 
-    assertNoDuplicateMaterials(data.rawMaterials);
-    assertPositiveTotalWeight(data.rawMaterials);
-    await assertSufficientInventory(data.rawMaterials, data.numbersBatches);
-    // // console.log("batch 1 data ",data); // but here campaign is not there it's removed why is this i need to update this because i have campaign in batch schema as below
-    let populated;
-    // return;
-    try {
-      // Try transactional path first (requires replica set or mongos)
-      const session = await mongoose.startSession();
-      await session.withTransaction(async () => {
-        // Create the batch inside txn
-        const [created] = await Batch.create([data], { session });
-        // Deduct stock; if this fails, txn aborts and created batch rolls back
-        await deductInventory(data.rawMaterials, data.numbersBatches, session);
-        // Populate for response
-        populated = await Batch.findById(created._id)
-          .populate({ path: 'rawMaterials.rawMaterial_id', select: 'productName UOM' })
-          .session(session);
-        if (created?.campaign) {
-          await updateCampaignTotals(created.campaign, session);
-        }
-      });
-      session.endSession();
-      return res.status(201).json({ success: true, data: populated });
-    } catch (txErr) {
-      const msg = String(txErr?.message || '');
-      // console.log('msg batches controller file ?', msg);
-      const noTxnEnv = msg.includes('Transaction numbers are only allowed on a replica set member or mongos');
-      if (!noTxnEnv) throw txErr; // different error → bubble up
+  const totalRawIssued = batches.reduce((batchTotal, batch) => {
+    const multiplier = Number(batch.numbersBatches) || 0;
+    const lineTotal = (batch.rawMaterials || []).reduce(
+      (sum, line) => sum + toKg(line.weight, line.unit) * multiplier,
+      0
+    );
+    return batchTotal + lineTotal;
+  }, 0);
 
-      // console.log("batch data ",data);
-      // Fallback path for standalone MongoDB (no transactions):
-      // 1) Create the batch
-      const created = await Batch.create(data);
-      try {
-        // 2) Attempt stock deduction with atomic guards
-        await deductInventory(data.rawMaterials, data.numbersBatches, null);
-      } catch (deductErr) {
-        // 3) Compensate: delete the created batch if deduction failed
-        await Batch.findByIdAndDelete(created._id).catch(() => { });
-        throw deductErr;
-      }
-      // 4) Return populated batch
-      const populatedFallback = await Batch.findById(created._id)
-        .populate({ path: 'rawMaterials.rawMaterial_id', select: 'productName UOM' });
-      if (created?.campaign) {
-        await updateCampaignTotals(created.campaign, null);
-      }
-      return res.status(201).json({ success: true, data: populatedFallback });
-    }
-  } catch (err) {
-    if (err?.code === 11000) {
-      err.status = 409; // duplicate key (batche_id)
-      err.message = 'Batch with this batche_id already exists';
-    }
-    return sendHttpError(res, err);
+  return Math.round(totalRawIssued * 1000) / 1000;
+};
+
+const updateCampaignTotal = async (campaignId, session) => {
+  if (!campaignId) return;
+  const totalRawIssued = await computeCampaignTotals(campaignId, session);
+  const query = Campaign.updateOne(
+    { _id: campaignId },
+    { $set: { totalRawIssued } }
+  );
+  if (session) query.session(session);
+  await query;
+};
+
+const ensureBatchScope = (batch, companyId) => {
+  if (!batch) throw httpError('Batch not found', 404);
+  if (String(batch.companyId) !== String(companyId)) {
+    throw httpError('Batch not found', 404);
   }
 };
 
-// LIST with pagination & filters
-export const listBatches = async (req, res, next) => {
+export const createBatch = async (req, res) => {
+  let session;
   try {
-    const {campaign} = req.query;
-    const filter = {};
-    if (campaign !== undefined) {
-      if (!mongoose.isValidObjectId(campaign)) {
-        const err = new Error('Invalid campaign id');
-        err.status = 400;
-        throw err;
-      }
-      filter.campaign = campaign;
-    }
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId || req.user?.id;
+    if (!companyId) throw httpError('Missing companyId on user', 401);
 
-    const [items, total] = await Promise.all([
-      Batch.find(filter)
-        .populate({ path: 'rawMaterials.rawMaterial_id', select: 'productName UOM' }),
-      Batch.countDocuments(filter),
+    const input = normalizeCreateInput(req.body);
+    const [campaign, warehouse] = await Promise.all([
+      Campaign.findById(input.campaign).select('_id').lean(),
+      Warehouse.findById(input.warehouseId).select('_id').lean(),
     ]);
+    if (!campaign) throw httpError('Campaign not found', 404);
+    if (!warehouse) throw httpError('Warehouse not found', 404);
 
-    // console.log(items[0]);
-    res.json(items);
-  } catch (err) {
-    return sendHttpError(res, err);
-  }
-};
+    session = await mongoose.startSession();
+    let createdId;
 
-// READ by id
-export const getBatchById = async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    if (!mongoose.isValidObjectId(id)) {
-      const err = new Error('Invalid batch id');
-      err.status = 400;
-      throw err;
-    }
-    const doc = await Batch.findById(id).populate({
-      path: 'rawMaterials.rawMaterial_id',
-      select: 'productName UOM',
+    await session.withTransaction(async () => {
+      const issuedLines = await prepareIssuedLines(
+        input.rawMaterials,
+        input.numbersBatches,
+        companyId,
+        session
+      );
+
+      const [created] = await Batch.create(
+        [{
+          ...input,
+          companyId,
+          createdBy: userId,
+          rawMaterials: issuedLines.map(({ itemName, ...line }) => line),
+        }],
+        { session }
+      );
+      createdId = created._id;
+
+      await postMaterialIssues({
+        lines: issuedLines,
+        companyId,
+        warehouseId: input.warehouseId,
+        userId,
+        batchId: created._id,
+        batchCode: input.batche_id,
+        session,
+      });
+      await updateCampaignTotal(input.campaign, session);
     });
-    if (!doc) {
-      const err = new Error('Batch not found');
-      err.status = 404;
-      throw err;
-    }
-    res.json(doc);
-  } catch (err) {
-    return sendHttpError(res, err);
+
+    const created = await Batch.findById(createdId).populate(BATCH_POPULATE);
+    return res.status(201).json({
+      success: true,
+      message: 'Batch created and raw materials issued',
+      data: created,
+    });
+  } catch (error) {
+    return sendHttpError(res, error);
+  } finally {
+    if (session) await session.endSession();
   }
 };
 
-// UPDATE (full or partial)
-export const updateBatch = async (req, res, next) => {
+export const listBatches = async (req, res) => {
   try {
-    const { id } = req.params;
-    if (!mongoose.isValidObjectId(id)) {
-      const err = new Error('Invalid batch id');
-      err.status = 400;
-      throw err;
-    }
-    const existing = await Batch.findById(id).select('campaign numbersBatches');
-    if (!existing) {
-      const err = new Error('Batch not found');
-      err.status = 404;
-      throw err;
-    }
-    const prevCampaignId = existing.campaign ? String(existing.campaign) : null;
+    const companyId = req.user?.companyId;
+    if (!companyId) throw httpError('Missing companyId on user', 401);
 
-    const updates = normalizeBatchInput(req.body);
-
-    if (updates.rawMaterials) {
-      assertNoDuplicateMaterials(updates.rawMaterials);
-      assertPositiveTotalWeight(updates.rawMaterials);
-      // Use the updated numbersBatches if provided, otherwise read the current one from DB
-      let multiplier = updates.numbersBatches;
-      if (!Number.isFinite(multiplier) || multiplier <= 0) {
-        const current = await Batch.findById(id).select('numbersBatches').lean();
-        multiplier = current?.numbersBatches || 1;
-      }
-      await assertSufficientInventory(updates.rawMaterials, multiplier);
+    const filter = { companyId };
+    if (req.query.campaign !== undefined) {
+      validateObjectId(req.query.campaign, 'campaign');
+      filter.campaign = req.query.campaign;
     }
 
-    const doc = await Batch.findByIdAndUpdate(
-      id,
-      { $set: updates },
-      { new: true, runValidators: true }
-    ).populate({ path: 'rawMaterials.rawMaterial_id', select: 'productName UOM' });
-
-    if (!doc) {
-      const err = new Error('Batch not found');
-      err.status = 404;
-      throw err;
-    }
-
-    // Recompute totals for affected campaigns (previous and new if changed)
-    const newCampaignId = doc?.campaign ? String(doc.campaign) : null;
-    const toUpdate = new Set([prevCampaignId, newCampaignId].filter(Boolean));
-    for (const cid of toUpdate) {
-      await updateCampaignTotals(cid, null);
-    }
-
-    res.json({ success: true, data: doc });
-  } catch (err) {
-    if (err?.code === 11000) {
-      err.status = 409; // duplicate key
-      err.message = 'Another batch already uses this batche_id';
-    }
-    return sendHttpError(res, err);
+    const batches = await Batch.find(filter)
+      .populate(BATCH_POPULATE)
+      .sort({ date: -1, createdAt: -1 });
+    return res.json(batches);
+  } catch (error) {
+    return sendHttpError(res, error);
   }
 };
 
-// DELETE
-export const deleteBatch = async (req, res, next) => {
+export const getBatchById = async (req, res) => {
   try {
-    const { id } = req.params;
-    if (!mongoose.isValidObjectId(id)) {
-      const err = new Error('Invalid batch id');
-      err.status = 400;
-      throw err;
-    }
-    const doc = await Batch.findByIdAndDelete(id);
-    if (!doc) {
-      const err = new Error('Batch not found');
-      err.status = 404;
-      throw err;
-    }
-    if (doc?.campaign) {
-      await updateCampaignTotals(doc.campaign, null);
-    }
-    res.json({ success: true, message: 'Batch deleted' });
-  } catch (err) {
-    return sendHttpError(res, err);
+    validateObjectId(req.params.id, 'batch id');
+    const batch = await Batch.findById(req.params.id).populate(BATCH_POPULATE);
+    ensureBatchScope(batch, req.user?.companyId);
+    return res.json(batch);
+  } catch (error) {
+    return sendHttpError(res, error);
   }
 };
 
-// Append a raw material to a batch
-export const addRawMaterial = async (req, res, next) => {
+export const updateBatch = async (req, res) => {
   try {
-    const { id } = req.params; // batch id
-    const { rawMaterial, name, weight, unit } = req.body;
-    if (!mongoose.isValidObjectId(id)) {
-      const err = new Error('Invalid batch id');
-      err.status = 400;
-      throw err;
-    }
-    const rmId = rawMaterial || name;
-    const w = Number(weight);
-    if (!rmId || !Number.isFinite(w) || w <= 0) {
-      const err = new Error('rawMaterial (or name) and positive weight are required');
-      err.status = 400;
-      throw err;
+    validateObjectId(req.params.id, 'batch id');
+    const batch = await Batch.findById(req.params.id);
+    ensureBatchScope(batch, req.user?.companyId);
+
+    const inventoryFields = ['rawMaterials', 'numbersBatches', 'warehouseId'];
+    if (inventoryFields.some((field) => req.body?.[field] !== undefined)) {
+      throw httpError(
+        'Issued material quantities cannot be edited directly. Reverse the batch or use the material add/remove actions.',
+        409
+      );
     }
 
-    const batch = await Batch.findById(id);
-    if (!batch) {
-      const err = new Error('Batch not found');
-      err.status = 404;
-      throw err;
+    if (req.body?.batche_id !== undefined) {
+      const value = String(req.body.batche_id).trim();
+      if (!value) throw httpError('batche_id cannot be empty');
+      batch.batche_id = value;
+    }
+    if (req.body?.date !== undefined) {
+      const date = new Date(req.body.date);
+      if (Number.isNaN(date.getTime())) throw httpError('date is invalid');
+      batch.date = date;
     }
 
-    // Prevent duplicates
-    if (batch.rawMaterials.some((r) => String(r.rawMaterial_id) === String(rmId))) {
-      const err = new Error('rawMaterial already exists in this batch');
-      err.status = 400;
-      throw err;
-    }
-
-    batch.rawMaterials.push({ rawMaterial_id: rmId, weight: w, unit: unit || 'kg' });
-    await batch.save();
-
-    const populated = await batch.populate({ path: 'rawMaterials.rawMaterial_id', select: 'productName UOM' });
-    res.status(201).json({ success: true, data: populated });
-  } catch (err) {
-    return sendHttpError(res, err);
-  }
-};
-
-// Remove a raw material from a batch
-export const removeRawMaterial = async (req, res, next) => {
-  try {
-    const { id, rmId } = req.params; // batch id, raw material id in subdoc
-    if (!mongoose.isValidObjectId(id)) {
-      const err = new Error('Invalid batch id');
-      err.status = 400;
-      throw err;
-    }
-
-    const batch = await Batch.findById(id);
-    if (!batch) {
-      const err = new Error('Batch not found');
-      err.status = 404;
-      throw err;
-    }
-
-    const before = batch.rawMaterials.length;
-    batch.rawMaterials = batch.rawMaterials.filter((r) => String(r.rawMaterial_id) !== String(rmId));
-    if (batch.rawMaterials.length === before) {
-      const err = new Error('rawMaterial not present in this batch');
-      err.status = 404;
-      throw err;
+    const previousCampaign = String(batch.campaign);
+    if (req.body?.campaign !== undefined) {
+      validateObjectId(req.body.campaign, 'campaign');
+      const campaign = await Campaign.findById(req.body.campaign).select('_id').lean();
+      if (!campaign) throw httpError('Campaign not found', 404);
+      batch.campaign = req.body.campaign;
     }
 
     await batch.save();
-    const populated = await batch.populate({ path: 'rawMaterials.rawMaterial_id', select: 'productName UOM' });
-    res.json({ success: true, data: populated });
-  } catch (err) {
-    return sendHttpError(res, err);
+    await updateCampaignTotal(previousCampaign);
+    if (String(batch.campaign) !== previousCampaign) {
+      await updateCampaignTotal(batch.campaign);
+    }
+
+    await batch.populate(BATCH_POPULATE);
+    return res.json({ success: true, data: batch });
+  } catch (error) {
+    return sendHttpError(res, error);
+  }
+};
+
+export const deleteBatch = async (req, res) => {
+  let session;
+  try {
+    validateObjectId(req.params.id, 'batch id');
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId || req.user?.id;
+    const batch = await Batch.findById(req.params.id);
+    ensureBatchScope(batch, companyId);
+
+    session = await mongoose.startSession();
+    await session.withTransaction(async () => {
+      await reverseMaterialIssues({
+        lines: batch.rawMaterials,
+        companyId,
+        warehouseId: batch.warehouseId,
+        userId,
+        batchId: batch._id,
+        batchCode: batch.batche_id,
+        session,
+        reason: `Raw material returned because manufacturing batch ${batch.batche_id} was deleted`,
+      });
+      await Batch.deleteOne({ _id: batch._id }).session(session);
+      await updateCampaignTotal(batch.campaign, session);
+    });
+
+    return res.json({
+      success: true,
+      message: 'Batch deleted and issued materials returned to inventory',
+    });
+  } catch (error) {
+    return sendHttpError(res, error);
+  } finally {
+    if (session) await session.endSession();
+  }
+};
+
+export const addBatchMaterial = async (req, res) => {
+  let session;
+  try {
+    validateObjectId(req.params.id, 'batch id');
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId || req.user?.id;
+    const batch = await Batch.findById(req.params.id);
+    ensureBatchScope(batch, companyId);
+
+    const input = normalizeMaterialInput(req.body);
+    if (batch.rawMaterials.some((line) => String(line.itemId) === String(input.itemId))) {
+      throw httpError('This raw material is already in the batch');
+    }
+
+    session = await mongoose.startSession();
+    await session.withTransaction(async () => {
+      const [issuedLine] = await prepareIssuedLines(
+        [input],
+        batch.numbersBatches,
+        companyId,
+        session
+      );
+      batch.rawMaterials.push(issuedLine);
+      await batch.save({ session });
+      await postMaterialIssues({
+        lines: [issuedLine],
+        companyId,
+        warehouseId: batch.warehouseId,
+        userId,
+        batchId: batch._id,
+        batchCode: batch.batche_id,
+        session,
+      });
+      await updateCampaignTotal(batch.campaign, session);
+    });
+
+    await batch.populate(BATCH_POPULATE);
+    return res.status(201).json({ success: true, data: batch });
+  } catch (error) {
+    return sendHttpError(res, error);
+  } finally {
+    if (session) await session.endSession();
+  }
+};
+
+export const removeBatchMaterial = async (req, res) => {
+  let session;
+  try {
+    validateObjectId(req.params.id, 'batch id');
+    const companyId = req.user?.companyId;
+    const userId = req.user?.userId || req.user?.id;
+    const batch = await Batch.findById(req.params.id);
+    ensureBatchScope(batch, companyId);
+
+    const line = batch.rawMaterials.find(
+      (entry) =>
+        String(entry._id) === String(req.params.materialId) ||
+        String(entry.itemId) === String(req.params.materialId)
+    );
+    if (!line) throw httpError('Raw material is not present in this batch', 404);
+    if (batch.rawMaterials.length === 1) {
+      throw httpError('A batch must contain at least one raw material', 409);
+    }
+
+    session = await mongoose.startSession();
+    await session.withTransaction(async () => {
+      await reverseMaterialIssues({
+        lines: [line],
+        companyId,
+        warehouseId: batch.warehouseId,
+        userId,
+        batchId: batch._id,
+        batchCode: batch.batche_id,
+        session,
+        reason: `Raw material removed from manufacturing batch ${batch.batche_id}`,
+      });
+      batch.rawMaterials.pull(line._id);
+      await batch.save({ session });
+      await updateCampaignTotal(batch.campaign, session);
+    });
+
+    await batch.populate(BATCH_POPULATE);
+    return res.json({ success: true, data: batch });
+  } catch (error) {
+    return sendHttpError(res, error);
+  } finally {
+    if (session) await session.endSession();
   }
 };
 
@@ -541,6 +549,6 @@ export default {
   getBatchById,
   updateBatch,
   deleteBatch,
-  addRawMaterial,
-  removeRawMaterial,
+  addBatchMaterial,
+  removeBatchMaterial,
 };

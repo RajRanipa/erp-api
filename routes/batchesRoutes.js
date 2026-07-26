@@ -1,6 +1,13 @@
-// routes/rawmaterialRoutes.js
 import express from 'express';
-import { createBatch, listBatches, getBatchById, updateBatch, deleteBatch, addRawMaterial, removeRawMaterial } from '../controllers/batchesController.js'; // Assuming the controller is here
+import {
+  createBatch,
+  listBatches,
+  getBatchById,
+  updateBatch,
+  deleteBatch,
+  addBatchMaterial,
+  removeBatchMaterial,
+} from '../controllers/batchesController.js';
 import auth, { roleAuth } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
@@ -13,7 +20,7 @@ router.patch('/:id', roleAuth('batches:update'), updateBatch);       // UPDATE  
 router.delete('/:id', roleAuth('batches:delete'), deleteBatch);      // DELETE  -> DELETE /api/batches/:id
 
 // Raw materials inside a batch
-router.post('/:id/raw-materials', roleAuth('batches:update'), addRawMaterial);             // POST   /api/batches/:id/raw-materials
-router.delete('/:id/raw-materials/:rmId', roleAuth('batches:delete'), removeRawMaterial);  // DELETE /api/batches/:id/raw-materials/:rmId
+router.post('/:id/raw-materials', roleAuth('batches:update'), addBatchMaterial);
+router.delete('/:id/raw-materials/:materialId', roleAuth('batches:delete'), removeBatchMaterial);
 
 export default router;

@@ -1,5 +1,6 @@
 // services/productionReportService.js
 import ProductionBlanketRoll from '../models/ProductionBlanketRoll.js';
+import Batch from '../models/Batches.js';
 import { DateTime } from 'luxon';
 import sendMail from '../utils/sendMail.js';
 import generatePdfFromHtml from '../utils/generatePdfFromHtml.js';
@@ -13,7 +14,17 @@ import mongoose from "mongoose";
 
 const REPORT_TIMEZONE = 'Asia/Kolkata';
 
-const PRODUCTION_TIME_FIELD = 'at';
+const MASS_TO_KG = {
+    mg: 0.000001,
+    g: 0.001,
+    kg: 1,
+    lb: 0.45359237,
+    lbs: 0.45359237,
+    pound: 0.45359237,
+    tonne: 1000,
+    ton: 1000,
+    t: 1000,
+};
 
 function parseReportDate(date = null) {
     const reportDate = date
@@ -96,14 +107,21 @@ export const fetchproduction = async (start, end, companyId) => {
 
     console.log("fetchproduction called with start:", start, "and end:", end);
 
+    const productionMatch = {
+        at: { $gte: start, $lt: end },
+        matchedItem: { $ne: null },
+    };
+    if (companyId) {
+        if (!mongoose.Types.ObjectId.isValid(companyId)) {
+            throw new Error('Valid companyId is required');
+        }
+        productionMatch.companyId = new mongoose.Types.ObjectId(companyId);
+    }
+
     const data = await ProductionBlanketRoll.aggregate([
         // 1. FILTER
         {
-            $match: {
-                // companyId: new mongoose.Types.ObjectId(companyId),
-                at: { $gte: start, $lt: end },
-                matchedItem: { $ne: null }, // only valid items
-            },
+            $match: productionMatch,
         },
 
         // 2. GROUP BY matchedItem and statusOk
@@ -217,6 +235,129 @@ export const fetchproduction = async (start, end, companyId) => {
     // console.log("fetchproduction data ::::::: ", data);
     return data;
 }
+
+const quantityToKg = (quantity, unit) => {
+    const value = Number(quantity);
+    const factor = MASS_TO_KG[String(unit || '').trim().toLowerCase()];
+
+    if (!Number.isFinite(value) || !factor) {
+        return 0;
+    }
+
+    return value * factor;
+};
+
+/**
+ * Returns manufacturing batches recorded inside the same time window used by
+ * the production report. `createdAt` answers when the batch was actually
+ * recorded/made; `date` remains the operator-selected manufacturing date.
+ */
+export const fetchBatchReport = async (start, end, companyId = null) => {
+    if (!(start instanceof Date) || Number.isNaN(start.getTime())) {
+        throw new Error('Valid batch report start date is required');
+    }
+
+    if (!(end instanceof Date) || Number.isNaN(end.getTime())) {
+        throw new Error('Valid batch report end date is required');
+    }
+
+    const match = {
+        createdAt: { $gte: start, $lt: end },
+    };
+
+    if (companyId) {
+        if (!mongoose.Types.ObjectId.isValid(companyId)) {
+            throw new Error('Valid companyId is required');
+        }
+        match.companyId = new mongoose.Types.ObjectId(companyId);
+    }
+
+    const batches = await Batch.find(match)
+        .select(
+            'batche_id date numbersBatches companyId campaign warehouseId '
+            + 'rawMaterials createdAt',
+        )
+        .populate({
+            path: 'campaign',
+            select: 'name status',
+        })
+        .populate({
+            path: 'warehouseId',
+            select: 'name code',
+        })
+        .populate({
+            path: 'rawMaterials.itemId',
+            select: (
+                'name sku grade UOM categoryKey description '
+                + 'raw_specificField1 raw_specificField2'
+            ),
+        })
+        .sort({ createdAt: 1, batche_id: 1 })
+        .lean();
+
+    const rows = batches.map(batch => {
+        const batchCount = Number(batch.numbersBatches) || 0;
+        const materials = (batch.rawMaterials || []).map(line => {
+            const quantityPerBatch = Number(line.weight) || 0;
+            const perBatchUom = line.unit || line.itemId?.UOM || '-';
+            const totalQuantity = (
+                Number(line.issuedQuantity)
+                || quantityPerBatch * batchCount
+            );
+            const totalUom = line.issuedUom || line.itemId?.UOM || perBatchUom;
+
+            return {
+                itemId: line.itemId?._id || line.itemId || null,
+                name: line.itemId?.name || 'Unknown item',
+                sku: line.itemId?.sku || '',
+                grade: line.itemId?.grade || '',
+                description: line.itemId?.description || '',
+                specification1: line.itemId?.raw_specificField1 || '',
+                specification2: line.itemId?.raw_specificField2 || '',
+                quantityPerBatch,
+                perBatchUom,
+                totalQuantity,
+                totalUom,
+            };
+        });
+
+        const totalRawKg = (batch.rawMaterials || []).reduce(
+            (sum, line) => sum + quantityToKg(
+                (Number(line.weight) || 0) * batchCount,
+                line.unit,
+            ),
+            0,
+        );
+
+        return {
+            id: batch._id,
+            batchCode: batch.batche_id,
+            manufacturingDate: batch.date,
+            recordedAt: batch.createdAt,
+            numberOfBatches: batchCount,
+            campaign: batch.campaign?.name || '-',
+            campaignStatus: batch.campaign?.status || '',
+            warehouse: batch.warehouseId?.name || '-',
+            warehouseCode: batch.warehouseId?.code || '',
+            totalRawKg,
+            materials,
+        };
+    });
+
+    return {
+        totalBatchRecords: rows.length,
+        totalBatches: rows.reduce(
+            (sum, batch) => sum + batch.numberOfBatches,
+            0,
+        ),
+        totalRawKg: rows.reduce(
+            (sum, batch) => sum + batch.totalRawKg,
+            0,
+        ),
+        rows,
+    };
+};
+
 export const fetchproductionALL = async (start, end, companyId) => {
     if (!(start instanceof Date) || Number.isNaN(start.getTime())) {
         throw new Error("Valid start date is required");
@@ -459,6 +600,7 @@ function buildProductionReportSummary(
     report,
     timeOfDay,
     reportRange,
+    batchReport,
 ) {
     const totals = report.reduce(
         (summary, item) => {
@@ -494,7 +636,7 @@ function buildProductionReportSummary(
             maximumFractionDigits: 2,
         });
 
-    return [
+    const lines = [
         `🏭 JNR ERP - ${timeOfDay} Shift Production Report`,
         '',
         `📅 Report date: ${formatReportDate(
@@ -522,13 +664,71 @@ function buildProductionReportSummary(
             totals.rejectedWeight,
         )} kg`,
         '',
-        '📄 Detailed production report attached.',
+        '🧪 MANUFACTURING BATCHES',
+        `Batch entries: ${Number(
+            batchReport?.totalBatchRecords || 0,
+        ).toLocaleString('en-IN')}`,
+        `Batches made: ${Number(
+            batchReport?.totalBatches || 0,
+        ).toLocaleString('en-IN')}`,
+        `Raw material issued: ${formatWeight(
+            batchReport?.totalRawKg,
+        )} kg`,
+    ];
+
+    const maximumSummaryLength = 3500;
+    let detailsTruncated = false;
+
+    for (const batch of batchReport?.rows || []) {
+        const batchLines = [
+            '',
+            `• ${batch.batchCode} — ${batch.numberOfBatches} batches`,
+            `  Campaign: ${batch.campaign} | Warehouse: ${batch.warehouse}`,
+        ];
+
+        for (const material of batch.materials || []) {
+            const specifications = [
+                material.grade ? `grade ${material.grade}` : '',
+                material.specification1,
+                material.specification2,
+            ].filter(Boolean).join(', ');
+            const specificationText = specifications
+                ? ` (${specifications})`
+                : '';
+
+            batchLines.push(
+                `  - ${material.name}${specificationText}: `
+                + `${formatWeight(material.quantityPerBatch)} `
+                + `${material.perBatchUom}/batch; total `
+                + `${formatWeight(material.totalQuantity)} `
+                + `${material.totalUom}`,
+            );
+        }
+
+        const candidate = [...lines, ...batchLines].join('\n');
+        if (candidate.length > maximumSummaryLength) {
+            detailsTruncated = true;
+            break;
+        }
+
+        lines.push(...batchLines);
+    }
+
+    if (detailsTruncated) {
+        lines.push('', 'More batch specifications are included in the PDF.');
+    }
+
+    lines.push(
+        '',
+        '📄 Detailed production and batch report attached.',
         '',
         'Automatically generated by JNR ERP',
-    ].join('\n');
+    );
+
+    return lines.join('\n');
 }
 
-export const getProductionDay = async (date = null) => {
+export const getProductionDay = async (date = null, companyId = null) => {
     try {
         const {
             start,
@@ -544,9 +744,16 @@ export const getProductionDay = async (date = null) => {
             endUTC: end.toISOString(),
         });
 
-        const data = await fetchproduction(start, end);
+        const [data, batchReport] = await Promise.all([
+            fetchproduction(start, end, companyId),
+            fetchBatchReport(start, end, companyId),
+        ]);
 
-        return { range: { startIST, endIST }, data };
+        return {
+            range: { startIST, endIST },
+            data,
+            batchReport,
+        };
     } catch (error) {
         throw new Error('Production day report error', {
             cause: error,
@@ -554,8 +761,165 @@ export const getProductionDay = async (date = null) => {
     }
 }
 
+function formatReportNumber(value) {
+    return Number(value || 0).toLocaleString('en-IN', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    });
+}
+
+function buildBatchReportHtml(batchReport) {
+    const batches = batchReport?.rows || [];
+
+    if (batches.length === 0) {
+        return `
+            <div style="margin-top:28px;">
+                <h2 style="margin-bottom:10px;">Manufacturing Batch Report</h2>
+                <div
+                    style="
+                        padding:16px;
+                        border:1px solid #ddd;
+                        background:#f8f9fa;
+                        color:#555;
+                    "
+                >
+                    No manufacturing batches were recorded during this shift.
+                </div>
+            </div>
+        `;
+    }
+
+    const rows = batches.map((batch, index) => {
+        const materials = (batch.materials || []).map(material => {
+            const specifications = [
+                material.sku ? `SKU: ${material.sku}` : '',
+                material.grade ? `Grade: ${material.grade}` : '',
+                material.specification1,
+                material.specification2,
+                material.description,
+            ].filter(Boolean);
+
+            return `
+                <div style="margin-bottom:8px;">
+                    <strong>${escapeHtml(material.name)}</strong>
+                    ${specifications.length
+                        ? `<div style="font-size:11px;color:#555;">
+                            ${escapeHtml(specifications.join(' | '))}
+                        </div>`
+                        : ''}
+                    <div style="font-size:11px;">
+                        ${formatReportNumber(material.quantityPerBatch)}
+                        ${escapeHtml(material.perBatchUom)} per batch
+                        &nbsp;·&nbsp;
+                        Total ${formatReportNumber(material.totalQuantity)}
+                        ${escapeHtml(material.totalUom)}
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        return `
+            <tr>
+                <td style="padding:9px;border:1px solid #ddd;">${index + 1}</td>
+                <td style="padding:9px;border:1px solid #ddd;">
+                    <strong>${escapeHtml(batch.batchCode)}</strong>
+                    <div style="font-size:11px;color:#666;">
+                        Recorded ${escapeHtml(formatReportDateTime(batch.recordedAt))}
+                    </div>
+                </td>
+                <td style="padding:9px;border:1px solid #ddd;">
+                    ${escapeHtml(formatReportDate(batch.manufacturingDate))}
+                </td>
+                <td style="padding:9px;border:1px solid #ddd;">
+                    ${escapeHtml(batch.campaign)}
+                </td>
+                <td style="padding:9px;border:1px solid #ddd;">
+                    ${escapeHtml(batch.warehouse)}
+                    ${batch.warehouseCode
+                        ? `<div style="font-size:11px;color:#666;">
+                            ${escapeHtml(batch.warehouseCode)}
+                        </div>`
+                        : ''}
+                </td>
+                <td
+                    style="
+                        padding:9px;
+                        border:1px solid #ddd;
+                        text-align:right;
+                        font-weight:bold;
+                    "
+                >
+                    ${Number(batch.numberOfBatches || 0).toLocaleString('en-IN')}
+                </td>
+                <td style="padding:9px;border:1px solid #ddd;">
+                    ${materials || '-'}
+                </td>
+                <td style="padding:9px;border:1px solid #ddd;text-align:right;">
+                    ${formatReportNumber(batch.totalRawKg)} kg
+                </td>
+            </tr>
+        `;
+    }).join('');
+
+    return `
+        <div style="margin-top:28px;page-break-before:auto;">
+            <h2 style="margin-bottom:10px;">Manufacturing Batch Report</h2>
+
+            <table
+                style="
+                    width:100%;
+                    border-collapse:collapse;
+                    margin:12px 0 18px;
+                "
+            >
+                <tr>
+                    <td style="padding:12px;border:1px solid #ddd;background:#f5f5f5;">
+                        <strong>Batch Entries</strong><br>
+                        ${Number(batchReport.totalBatchRecords || 0).toLocaleString('en-IN')}
+                    </td>
+                    <td style="padding:12px;border:1px solid #ddd;background:#e3f2fd;">
+                        <strong>Total Batches Made</strong><br>
+                        ${Number(batchReport.totalBatches || 0).toLocaleString('en-IN')}
+                    </td>
+                    <td style="padding:12px;border:1px solid #ddd;background:#fff8e1;">
+                        <strong>Total Raw Material Issued</strong><br>
+                        ${formatReportNumber(batchReport.totalRawKg)} kg
+                    </td>
+                </tr>
+            </table>
+
+            <table
+                style="
+                    width:100%;
+                    border-collapse:collapse;
+                    font-size:12px;
+                "
+            >
+                <thead>
+                    <tr style="background:#37474f;color:white;">
+                        <th style="padding:9px;border:1px solid #ddd;">#</th>
+                        <th style="padding:9px;border:1px solid #ddd;">Batch ID</th>
+                        <th style="padding:9px;border:1px solid #ddd;">Batch Date</th>
+                        <th style="padding:9px;border:1px solid #ddd;">Campaign</th>
+                        <th style="padding:9px;border:1px solid #ddd;">Warehouse</th>
+                        <th style="padding:9px;border:1px solid #ddd;">Made</th>
+                        <th style="padding:9px;border:1px solid #ddd;">Material Specification</th>
+                        <th style="padding:9px;border:1px solid #ddd;">Raw Total</th>
+                    </tr>
+                </thead>
+                <tbody>${rows}</tbody>
+            </table>
+        </div>
+    `;
+}
+
 // 
-function buildProductionReportHtml(report, timeOfDay, reportRange) {
+function buildProductionReportHtml(
+    report,
+    timeOfDay,
+    reportRange,
+    batchReport,
+) {
     const totals = report.reduce(
         (summary, item) => {
             const rolls = Number(item.totalRolls) || 0;
@@ -671,6 +1035,7 @@ function buildProductionReportHtml(report, timeOfDay, reportRange) {
             `;
         })
         .join('');
+    const batchReportHtml = buildBatchReportHtml(batchReport);
 
     return `
         <div
@@ -850,11 +1215,13 @@ function buildProductionReportHtml(report, timeOfDay, reportRange) {
                     </tbody>
                 </table>
             </div>
+
+            ${batchReportHtml}
         </div>
     `;
 }
 
-export const getProductionNight = async (date = null) => {
+export const getProductionNight = async (date = null, companyId = null) => {
     try {
 
         const {
@@ -871,9 +1238,16 @@ export const getProductionNight = async (date = null) => {
         //     endUTC: end.toISOString(),
         // });
 
-        const data = await fetchproduction(start, end);
+        const [data, batchReport] = await Promise.all([
+            fetchproduction(start, end, companyId),
+            fetchBatchReport(start, end, companyId),
+        ]);
 
-        return { range: { startIST, endIST }, data };
+        return {
+            range: { startIST, endIST },
+            data,
+            batchReport,
+        };
     } catch (error) {
         throw new Error('Production night report error', {
             cause: error,
@@ -937,16 +1311,31 @@ export async function fetchAndSendReport(timeOfDay) {
 
         const report = productionReport?.data ?? [];
         const reportRange = productionReport?.range ?? null;
+        const batchReport = productionReport?.batchReport ?? {
+            totalBatchRecords: 0,
+            totalBatches: 0,
+            totalRawKg: 0,
+            rows: [],
+        };
 
 
         // --- STEP B: Loop through the data and send emails ---
         console.log('==================================================');
 
-        if (!Array.isArray(report) || report.length === 0) {
+        const hasProduction = Array.isArray(report) && report.length > 0;
+        const hasBatches = batchReport.totalBatchRecords > 0;
+
+        if (!hasProduction && !hasBatches) {
             console.log(
-                `⚠️ No ${timeOfDay} production data found. Email skipped.`,
+                `⚠️ No ${timeOfDay} production or batch data found. Report skipped.`,
             );
-            return;
+            return {
+                success: true,
+                skipped: true,
+                emailSent: false,
+                whatsappSent: 0,
+                message: `No ${timeOfDay} production or batch data found`,
+            };
         }
 
         if (!reportRange?.startIST || !reportRange?.endIST) {
@@ -955,7 +1344,10 @@ export async function fetchAndSendReport(timeOfDay) {
             );
         }
 
-        const recipientEmail = "orientfibertechllp@gmail.com";
+        const recipientEmail = (
+            process.env.PRODUCTION_REPORT_EMAIL
+            || 'orientfibertechllp@gmail.com'
+        );
         // const recipientEmail = "rajranipa47@gmail.com";
 
         if (!recipientEmail) {
@@ -968,6 +1360,7 @@ export async function fetchAndSendReport(timeOfDay) {
             report,
             timeOfDay,
             reportRange,
+            batchReport,
         );
 
         const pdfBuffer = await generatePdfFromHtml(
@@ -978,6 +1371,7 @@ export async function fetchAndSendReport(timeOfDay) {
             report,
             timeOfDay,
             reportRange,
+            batchReport,
         );
 
         const reportDate = DateTime.fromISO(
@@ -1003,7 +1397,7 @@ export async function fetchAndSendReport(timeOfDay) {
         await sendMail({
             to: recipientEmail,
             subject: (
-                `JNR ERP: ${timeOfDay} Shift Production Report - `
+                `JNR ERP: ${timeOfDay} Shift Production & Batch Report - `
                 + `${formatReportDate(reportRange.startIST)} to `
                 + `${formatReportDate(reportRange.endIST)}`
             ),
@@ -1012,10 +1406,12 @@ export async function fetchAndSendReport(timeOfDay) {
 
         let whatsappSent = 0;
 
-        let recipients = process.env.WHATSAPP_RECIPIENT_NUMBER
+        let recipients = [];
 
-        if(recipients) {
-            recipients = normalizeRecipients(recipients);
+        if (process.env.WHATSAPP_RECIPIENT_NUMBER) {
+            recipients = normalizeRecipients(
+                process.env.WHATSAPP_RECIPIENT_NUMBER,
+            );
         }
         console.log('recipients :-- ', recipients);
 
@@ -1046,8 +1442,10 @@ export async function fetchAndSendReport(timeOfDay) {
             emailSent: true,
             whatsappSent,
             message: whatsappSent
-                ? `${timeOfDay} report sent by email and WhatsApp to ${recipients.length} out of ${whatsappSent} people`
-                : `${timeOfDay} report sent by email; WhatsApp failed`,
+                ? `${timeOfDay} report sent by email and WhatsApp to ${whatsappSent} of ${recipients.length} recipients`
+                : recipients.length
+                    ? `${timeOfDay} report sent by email; WhatsApp delivery failed`
+                    : `${timeOfDay} report sent by email; no WhatsApp recipients configured`,
         };
     } catch (error) {
         console.error(

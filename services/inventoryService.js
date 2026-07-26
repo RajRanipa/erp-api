@@ -16,25 +16,54 @@ const asNumber = (v) => {
   return n;
 };
 
-async function getProductType(itemId) {
-  const item = await Item.findById(itemId).select('productType').lean();
-  // console.log('item getProductType -- > ', item, itemId);
+/**
+ * Resolve the inventory identity stored beside an Item reference.
+ *
+ * `itemId` is the canonical stock identity for every category. `productType`
+ * is denormalized for FG reporting/filtering, but RAW and PACKING items are
+ * valid inventory items without one.
+ */
+async function getInventoryItem(itemId, companyId = null, session = null) {
+  const query = Item.findById(itemId)
+    .select('_id companyId name categoryKey productType UOM status')
+    .lean();
+  if (session) query.session(session);
+
+  const item = await query;
   if (!item) throw new Error('Item not found');
-  return item.productType;
+
+  if (item.companyId && companyId && String(item.companyId) !== String(companyId)) {
+    throw new Error('Item does not belong to this company');
+  }
+
+  if (!['FG', 'RAW', 'PACKING', 'NC'].includes(item.categoryKey)) {
+    throw new Error('Item has an invalid or missing categoryKey');
+  }
+
+  if (item.categoryKey === 'FG' && !item.productType) {
+    throw new Error('Finished-goods items require a productType for inventory');
+  }
+
+  return item;
 }
 
-async function getItemLite(itemId) {
-  const item = await Item.findById(itemId).select('_id productType UOM').lean();
-  if (!item) throw new Error('Item not found');
-  return item;
+function getInventoryMeta(item) {
+  return {
+    categoryKey: item.categoryKey,
+    productType: item.productType || null,
+  };
 }
 
 /**
  * Ensure we never take stock below zero (configurable).
  * Returns current available for the bucket.
  */
-async function getCurrentBalances({ companyId, itemId, warehouseId, uom, bin = null, batchNo = null }, session) {
-  const productType = await getProductType(itemId);
+async function getCurrentBalances(
+  { companyId, itemId, warehouseId, uom, bin = null, batchNo = null, item = null },
+  session
+) {
+  const resolvedItem = item || await getInventoryItem(itemId, companyId, session);
+  const { productType } = getInventoryMeta(resolvedItem);
   const snap = await InventorySnapshot.findOne(
     { companyId, itemId, productType, warehouseId, uom, bin, batchNo },
     null,
@@ -71,9 +100,7 @@ export async function postMovement({
   session: extSession, // optional external session
 }) {
   const session = extSession || (await mongoose.startSession());
-  let createdSession = false;
   if (!extSession) {
-    createdSession = true;
     session.startTransaction();
   }
   // console.log("postMovement","session: extSession",session);
@@ -84,12 +111,16 @@ export async function postMovement({
     if (!['RECEIPT', 'ISSUE', 'TRANSFER', 'ADJUST', 'REPACK'].includes(txnType)) {
       throw new Error('Invalid txnType');
     }
-    const productType = await getProductType(itemId);
-    // console.log("productType", productType);
+
+    const item = await getInventoryItem(itemId, companyId, session);
+    const { categoryKey, productType } = getInventoryMeta(item);
     // console.log("enforceNonNegative", enforceNonNegative);
     // If enforcing non-negative, pre-check (for decreases)
     if (enforceNonNegative && signedQty < 0) {
-      const { onHand } = await getCurrentBalances({ companyId, itemId, warehouseId, uom, bin, batchNo }, session);
+      const { onHand } = await getCurrentBalances(
+        { companyId, itemId, warehouseId, uom, bin, batchNo, item },
+        session
+      );
       // console.log("onHand", onHand);
       // console.log("signedQty", signedQty);
       if (onHand + signedQty < 0) {
@@ -99,14 +130,14 @@ export async function postMovement({
     // console.log('postMovement signedQty by', by);
     // 1) Write ledger row
     const [ledger] = await InventoryLedger.create([{
-      companyId, itemId, productType, warehouseId, bin, batchNo,
+      companyId, itemId, categoryKey, productType, warehouseId, bin, batchNo,
       uom, quantity: signedQty, txnType, refType, refId, note, by, at: new Date(),
     }], { session });
 
     // console.log("ledger", ledger);
     // 2) Update snapshot (onHand)
     const snapshot = await InventorySnapshot.incOnHand(
-      { companyId, itemId, productType, warehouseId, uom, bin, batchNo },
+      { companyId, itemId, categoryKey, productType, warehouseId, uom, bin, batchNo },
       signedQty,
       session
     );
@@ -217,14 +248,18 @@ export async function reserveStock({
   }
 
   try {
-    const productType = await getProductType(itemId);
+    const item = await getInventoryItem(itemId, companyId, session);
+    const { categoryKey, productType } = getInventoryMeta(item);
     const q = Math.abs(asNumber(qty));
     // Enforce availability (onHand - reserved) >= qty
-    const { available } = await getCurrentBalances({ companyId, itemId, warehouseId, uom, bin, batchNo }, session);
+    const { available } = await getCurrentBalances(
+      { companyId, itemId, warehouseId, uom, bin, batchNo, item },
+      session
+    );
     if (available < q) throw new Error('Insufficient available stock to reserve');
 
     const snap = await InventorySnapshot.incReserved(
-      { companyId, itemId, productType, warehouseId, uom, bin, batchNo },
+      { companyId, itemId, categoryKey, productType, warehouseId, uom, bin, batchNo },
       +q,
       session
     );
@@ -255,10 +290,11 @@ export async function releaseReservation({
   }
 
   try {
-    const productType = await getProductType(itemId);
+    const item = await getInventoryItem(itemId, companyId, session);
+    const { categoryKey, productType } = getInventoryMeta(item);
     const q = Math.abs(asNumber(qty));
     const snap = await InventorySnapshot.incReserved(
-      { companyId, itemId, productType, warehouseId, uom, bin, batchNo },
+      { companyId, itemId, categoryKey, productType, warehouseId, uom, bin, batchNo },
       -q,
       session
     );
@@ -307,7 +343,14 @@ export async function repack({
     if (fromItemId === toItemId) throw new Error('fromItemId and toItemId must be different');
 
     // Validate items
-    const [fromItem, toItem] = await Promise.all([getItemLite(fromItemId), getItemLite(toItemId)]);
+    const [fromItem, toItem] = await Promise.all([
+      getInventoryItem(fromItemId, companyId, session),
+      getInventoryItem(toItemId, companyId, session),
+    ]);
+
+    if (fromItem.categoryKey !== 'FG' || toItem.categoryKey !== 'FG') {
+      throw new Error('Repack requires two finished-goods items');
+    }
 
     // Enforce same productType for repack (packing variants of the same product type)
     if (String(fromItem.productType) !== String(toItem.productType)) {
@@ -315,8 +358,8 @@ export async function repack({
     }
 
     // If a uom was provided, ensure consistency
-    if (uom && fromItem.uom && toItem.uom) {
-      if (fromItem.uom !== toItem.uom || fromItem.uom !== uom) {
+    if (uom && fromItem.UOM && toItem.UOM) {
+      if (fromItem.UOM !== toItem.UOM || fromItem.UOM !== uom) {
         throw new Error('UOM mismatch between items for repack');
       }
     }
@@ -376,7 +419,7 @@ export async function getSnapshot(filter = {}, itemFilter = {}) {
     .populate('warehouseId', 'name')
     .populate({
       path: 'itemId',
-      select: 'name categoryKey productType density temperature packing dimension grade',
+      select: 'name sku status categoryKey productType UOM density temperature packing dimension grade',
       populate: [
         { path: 'density', select: 'value unit' },
         { path: 'temperature', select: 'value unit' },
@@ -430,7 +473,7 @@ export async function getLedger(filter = {}, opts = { limit: 100, sort: { at: -1
     .populate('by', 'fullName')
     .populate({
       path: 'itemId',
-      select: 'name density temperature packing dimension',
+      select: 'name sku status categoryKey productType UOM density temperature packing dimension grade',
       populate: [
         { path: 'density', select: 'value unit' },
         { path: 'temperature', select: 'value unit' },

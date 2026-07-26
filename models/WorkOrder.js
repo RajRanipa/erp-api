@@ -4,6 +4,29 @@ import mongoose from 'mongoose';
 const { Schema } = mongoose;
 
 const WorkOrderSchema = new Schema({
+    companyId: {
+        type: Schema.Types.ObjectId,
+        ref: 'Company',
+        required: true,
+        index: true
+    },
+    campaign: {
+        type: Schema.Types.ObjectId,
+        ref: 'Campaign'
+    },
+    sourceWarehouseId: {
+        type: Schema.Types.ObjectId,
+        ref: 'Warehouse',
+        required: true
+    },
+    outputWarehouseId: {
+        type: Schema.Types.ObjectId,
+        ref: 'Warehouse'
+    },
+    outputInventoryPosted: {
+        type: Boolean,
+        default: false
+    },
     workOrderNumber: {
         type: String,
         required: true,
@@ -13,7 +36,7 @@ const WorkOrderSchema = new Schema({
     // Reference to the specific product variant being produced
     product: {
         type: Schema.Types.ObjectId,
-        ref: 'Product',
+        ref: 'Item',
         required: true
     },
     quantityToProduce: {
@@ -60,25 +83,19 @@ const WorkOrderSchema = new Schema({
     }],
     // Materials consumed from inventory for this specific work order
     materialsConsumed: [{
-        rawMaterial: {
+        item: {
             type: Schema.Types.ObjectId,
-            ref: 'RawMaterial',
+            ref: 'Item',
             required: true
         },
         quantity: {
             type: Number,
             required: true
-        }
+        },
+        uom: { type: String, required: true }
     }],
-    // Date when the work order was created and last updated
-    createdAt: {
-        type: Date,
-        default: Date.now
-    },
-    updatedAt: {
-        type: Date,
-        default: Date.now
-    }
-});
+}, { timestamps: true });
+
+WorkOrderSchema.index({ companyId: 1, currentStatus: 1, createdAt: -1 });
 
 export default mongoose.model('WorkOrder', WorkOrderSchema);

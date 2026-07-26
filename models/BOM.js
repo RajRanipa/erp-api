@@ -13,7 +13,7 @@ const { Schema } = mongoose;
  */
 
 const BomItemSchema = new Schema({
-  item: { type: Schema.Types.ObjectId, ref: 'Product', required: true }, // raw or semi-finished component
+  item: { type: Schema.Types.ObjectId, ref: 'Item', required: true }, // raw, packing, or semi-finished component
   qtyPer: { type: Number, required: true, min: 0 },                      // quantity per 1 finished unit
   uom: { type: String, required: true },                                 // must be compatible/convertible with item.UOM
   scrapPct: { type: Number, default: 0, min: 0, max: 100 },              // optional component scrap %
@@ -21,7 +21,7 @@ const BomItemSchema = new Schema({
 }, { _id: false });
 
 const BomSchema = new Schema({
-  product: { type: Schema.Types.ObjectId, ref: 'Product', required: true, unique: true }, // product this BOM builds
+  product: { type: Schema.Types.ObjectId, ref: 'Item', required: true, unique: true }, // item this BOM builds
 
   revision: { type: String, default: 'v1' },            // future-proofing
   effectiveFrom: { type: Date },                        // optional effectivity window

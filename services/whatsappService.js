@@ -246,7 +246,7 @@ export async function sendProductionReport({
             to,
             mediaId,
             filename,
-            caption: `JNR ERP ${shift} Shift Production Report`,
+            caption: `JNR ERP ${shift} Shift Production & Batch Report`,
         });
     } catch (err) {
         console.error('WhatsApp production report failed', err);

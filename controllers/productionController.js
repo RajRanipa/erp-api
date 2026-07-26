@@ -1,500 +1,463 @@
-// controllers/productionController.js
-import RawMaterial from '../models/Rawmaterial.js';
-import ProductionBlanketRoll from '../models/ProductionBlanketRoll.js';
+import mongoose from 'mongoose';
 import BOM from '../models/BOM.js';
-import WorkOrder from '../models/WorkOrder.js'; // Import the new WorkOrder model
+import InventoryLedger from '../models/InventoryLedger.js';
 import Item from '../models/Item.js';
-import { fetchAndSendReport, fetchproduction, fetchproductionALL, getProductionDay, getProductionNight, getTodayDayShiftRange } from '../services/productionReportService.js';
+import ProductionBlanketRoll from '../models/ProductionBlanketRoll.js';
+import WorkOrder from '../models/WorkOrder.js';
+import {
+  getSnapshot,
+  issue as issueInventory,
+  receive as receiveInventory,
+  repack as repackInventory,
+} from '../services/inventoryService.js';
+import {
+  fetchAndSendReport,
+  fetchproduction,
+  fetchproductionALL,
+  getProductionDay,
+  getProductionNight,
+  getTodayDayShiftRange,
+} from '../services/productionReportService.js';
+
+const MASS_TO_GRAMS = {
+  mg: 0.001,
+  g: 1,
+  kg: 1000,
+  lb: 453.59237,
+  lbs: 453.59237,
+  tonne: 1000000,
+  ton: 1000000,
+  t: 1000000,
+};
+
+const fail = (message, status = 400) => {
+  const error = new Error(message);
+  error.status = status;
+  return error;
+};
+
+const sendError = (res, error, fallback) =>
+  res.status(Number(error?.status) || 500).json({
+    success: false,
+    message: error?.message || fallback,
+  });
+
+const convertQuantity = (quantity, fromUnit, toUnit) => {
+  const value = Number(quantity);
+  const from = String(fromUnit || '').trim().toLowerCase();
+  const to = String(toUnit || '').trim().toLowerCase();
+  if (!Number.isFinite(value) || value <= 0) throw fail('Quantity must be greater than 0');
+  if (!from || !to) throw fail('UOM is required');
+  if (from === to) return value;
+  if (!MASS_TO_GRAMS[from] || !MASS_TO_GRAMS[to]) {
+    throw fail(`Cannot convert quantity from ${fromUnit} to ${toUnit}`);
+  }
+  return (value * MASS_TO_GRAMS[from]) / MASS_TO_GRAMS[to];
+};
 
 export const getAllProduction = async (req, res) => {
-    try {
-        const { companyId } = req.user; // or from params
-        const { startDate, endDate } = req.query;
-
-        if (!startDate || !endDate) {
-            return res.status(400).json({ message: "startDate and endDate required" });
-        }
-
-        console.log("startDate, :- ");
-        console.log(startDate);
-        const newDate = new Date(startDate);
-        // const end = new Date(endDate);
-
-        const {
-            start,
-            end,
-            startIST,
-            endIST,
-        } = getTodayDayShiftRange(startDate);
-
-        const data = await fetchproduction(start, end)
-        const specificData = await fetchproductionALL(start, end, companyId);
-
-        return res.json({
-            success: true,
-            count: data.length,
-            data,
-            specificData,
-        });
-
-    } catch (error) {
-        console.error("Production Summary Error:", error);
-        return res.status(500).json({ message: "Internal server error" });
+  try {
+    const { companyId } = req.user || {};
+    const { startDate, endDate } = req.query;
+    if (!startDate || !endDate) {
+      return res.status(400).json({ message: 'startDate and endDate required' });
     }
+
+    const { start, end } = getTodayDayShiftRange(startDate);
+    const [data, specificData] = await Promise.all([
+      fetchproduction(start, end, companyId),
+      fetchproductionALL(start, end, companyId),
+    ]);
+
+    return res.json({
+      success: true,
+      count: data.length,
+      data,
+      specificData,
+    });
+  } catch (error) {
+    return sendError(res, error, 'Failed to fetch production');
+  }
 };
 
 export const getProductionReportDay = async (req, res) => {
-    try {
-        const { companyId } = req?.user; // or from params
-        const { date } = req.query;
-        // let date = null;
-        const response = await getProductionDay(date);
-
-        return res.json({
-            success: true,
-            count: response.data.length,
-            data: response.data,
-        });
-
-    } catch (error) {
-        console.error("Production Summary Error:", error);
-        return res.status(500).json({ message: "Internal server error" });
-    }
+  try {
+    const response = await getProductionDay(req.query.date, req.user?.companyId);
+    return res.json({
+      success: true,
+      count: response.data.length,
+      data: response.data,
+      batchReport: response.batchReport,
+    });
+  } catch (error) {
+    return sendError(res, error, 'Failed to fetch day production report');
+  }
 };
+
 export const getProductionReportNight = async (req, res) => {
-    try {
-        const { companyId } = req?.user; // or from params
-        const { date } = req.query;
-        // let date = null;
-        const response = await getProductionNight(date);
-
-        return res.json({
-            success: true,
-            count: response.data.length,
-            data: response.data,
-        });
-
-    } catch (error) {
-        console.error("Production Summary Error:", error);
-        return res.status(500).json({ message: "Internal server error" });
-    }
+  try {
+    const response = await getProductionNight(req.query.date, req.user?.companyId);
+    return res.json({
+      success: true,
+      count: response.data.length,
+      data: response.data,
+      batchReport: response.batchReport,
+    });
+  } catch (error) {
+    return sendError(res, error, 'Failed to fetch night production report');
+  }
 };
 
 export async function sentProductionReport(req, res) {
-    try {
-        const shift = String(req.body?.shift || '')
-            .trim()
-            .toUpperCase();
-
-        if (!shift) {
-            return res.status(400).json({
-                success: false,
-                message: 'shift is required',
-            });
-        }
-
-        if (!['DAY', 'NIGHT'].includes(shift)) {
-            return res.status(400).json({
-                success: false,
-                message: 'shift must be DAY or NIGHT',
-            });
-        }
-
-        const result = await fetchAndSendReport(shift);
-
-        return res.status(200).json({
-            success: true,
-            message:
-                result?.message ||
-                `${shift} production report sent successfully`,
-        });
-
-    } catch (error) {
-        console.error(
-            'Error sending production report:',
-            error,
-        );
-
-        return res.status(500).json({
-            success: false,
-            message:
-                'Server error while sending production report.',
-            error: error.message,
-        });
+  try {
+    const shift = String(req.body?.shift || '').trim().toUpperCase();
+    if (!['DAY', 'NIGHT'].includes(shift)) {
+      return res.status(400).json({
+        success: false,
+        message: 'shift must be DAY or NIGHT',
+      });
     }
+
+    const result = await fetchAndSendReport(shift);
+    return res.json({
+      success: true,
+      message: result?.message || `${shift} production report sent successfully`,
+    });
+  } catch (error) {
+    return sendError(res, error, 'Failed to send production report');
+  }
 }
 
 export const createWorkOrder = async (req, res) => {
-    try {
-        const { productId, quantityToProduce, unit, workOrderNumber } = req.body;
+  let session;
+  try {
+    const {
+      productId,
+      quantityToProduce,
+      unit,
+      workOrderNumber,
+      warehouseId,
+      campaign,
+    } = req.body || {};
+    const { companyId, userId } = req.user || {};
 
-        // Basic validation for required fields
-        if (!productId || !quantityToProduce || !unit || !workOrderNumber) {
-            return res.status(400).json({ message: 'Missing required fields: productId, quantityToProduce, unit, workOrderNumber.' });
-        }
-
-        // 1. Find the correct BOM for the product
-        const bom = await BOM.findOne({ product: productId });
-        if (!bom) {
-            return res.status(404).json({ message: 'Bill of Materials (BOM) not found for the specified product.' });
-        }
-
-        // 2. Check raw material availability
-        const materialsNeeded = [];
-        for (const ingredient of bom.ingredients) {
-            const inventoryItem = await Inventory.findOne({
-                item: ingredient.rawMaterial,
-                itemType: 'RawMaterial' // Ensure this matches the itemType in Inventory
-            });
-
-            // If raw material not found in inventory or insufficient quantity
-            if (!inventoryItem || inventoryItem.quantity < ingredient.quantity) {
-                const rawMaterial = await RawMaterial.findById(ingredient.rawMaterial);
-                const rawMaterialName = rawMaterial ? rawMaterial.name : 'Unknown Raw Material';
-                return res.status(400).json({
-                    message: `Insufficient stock for raw material: ${rawMaterialName}. Needed: ${ingredient.quantity} ${ingredient.unit}, Have: ${inventoryItem ? inventoryItem.quantity : 0} ${ingredient.unit}.`
-                });
-            }
-            materialsNeeded.push({
-                rawMaterial: ingredient.rawMaterial,
-                quantity: ingredient.quantity
-            });
-        }
-
-        // 3. Deduct raw materials from inventory (perform this only if all checks pass)
-        // Using a Promise.all for concurrent updates for efficiency
-        await Promise.all(materialsNeeded.map(item =>
-            Inventory.updateOne(
-                { item: item.rawMaterial, itemType: 'RawMaterial' },
-                { $inc: { quantity: -item.quantity } }
-            )
-        ));
-
-        // Define all production steps as per your process
-        const initialProductionSteps = [
-            { stepName: 'Mixing', status: 'In Progress' }, // Start with Mixing
-            { stepName: 'Melting', status: 'Pending' },
-            { stepName: 'Spinning', status: 'Pending' },
-            { stepName: 'Needling/Pressing', status: 'Pending' },
-            { stepName: 'Heat Process', status: 'Pending' },
-            { stepName: 'Cutting', status: 'Pending' },
-            { stepName: 'Packing', status: 'Pending' }
-        ];
-
-        // 4. Create the new Work Order document
-        const workOrder = new WorkOrder({
-            workOrderNumber,
-            product: productId,
-            quantityToProduce,
-            unit,
-            currentStatus: 'In Progress - Mixing', // Initial status
-            productionSteps: initialProductionSteps,
-            materialsConsumed: materialsNeeded,
-        });
-
-        await workOrder.save();
-        res.status(201).json({ message: 'Work order created successfully and raw materials deducted.', workOrder });
-
-    } catch (error) {
-        // Handle potential duplicate workOrderNumber or other database errors
-        if (error.code === 11000) { // MongoDB duplicate key error
-            return res.status(409).json({ message: 'Work Order Number already exists. Please use a unique number.' });
-        }
-        console.error('Error creating work order:', error);
-        res.status(500).json({ message: 'Server error during work order creation.', error: error.message });
+    if (!companyId) throw fail('Missing companyId on user', 401);
+    if (!productId || !quantityToProduce || !unit || !workOrderNumber || !warehouseId) {
+      throw fail(
+        'productId, quantityToProduce, unit, workOrderNumber and warehouseId are required'
+      );
     }
+
+    const quantity = Number(quantityToProduce);
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      throw fail('quantityToProduce must be greater than 0');
+    }
+
+    const [product, bom] = await Promise.all([
+      Item.findById(productId).select('_id companyId name categoryKey UOM').lean(),
+      BOM.findOne({ product: productId }).lean(),
+    ]);
+    if (!product) throw fail('Finished-goods item not found', 404);
+    if (product.categoryKey !== 'FG') throw fail('Work-order output must be an FG item');
+    if (product.companyId && String(product.companyId) !== String(companyId)) {
+      throw fail('Item does not belong to this company', 403);
+    }
+    if (!bom) throw fail('Bill of Materials not found for this item', 404);
+    if (!Array.isArray(bom.items) || bom.items.length === 0) {
+      throw fail('Bill of Materials has no component items');
+    }
+
+    const componentIds = bom.items.map((line) => line.item);
+    const componentItems = await Item.find({ _id: { $in: componentIds } })
+      .select('_id companyId name categoryKey UOM')
+      .lean();
+    const componentById = new Map(
+      componentItems.map((item) => [String(item._id), item])
+    );
+
+    const materials = bom.items.map((line) => {
+      const item = componentById.get(String(line.item));
+      if (!item) throw fail(`BOM component item not found: ${line.item}`, 404);
+      if (!['RAW', 'PACKING'].includes(item.categoryKey)) {
+        throw fail(`${item.name} must be a RAW or PACKING component`);
+      }
+      if (item.companyId && String(item.companyId) !== String(companyId)) {
+        throw fail(`${item.name} does not belong to this company`, 403);
+      }
+
+      const requiredInBomUom =
+        Number(line.qtyPer) * quantity * (1 + Number(line.scrapPct || 0) / 100);
+      return {
+        item: item._id,
+        quantity: convertQuantity(requiredInBomUom, line.uom, item.UOM),
+        uom: item.UOM,
+        itemName: item.name,
+      };
+    });
+
+    session = await mongoose.startSession();
+    let workOrderId;
+    await session.withTransaction(async () => {
+      const productionSteps = [
+        { stepName: 'Mixing', status: 'In Progress', startedAt: new Date() },
+        { stepName: 'Melting', status: 'Pending' },
+        { stepName: 'Spinning', status: 'Pending' },
+        { stepName: 'Needling/Pressing', status: 'Pending' },
+        { stepName: 'Heat Process', status: 'Pending' },
+        { stepName: 'Cutting', status: 'Pending' },
+        { stepName: 'Packing', status: 'Pending' },
+      ];
+
+      const [workOrder] = await WorkOrder.create(
+        [{
+          companyId,
+          campaign: campaign || undefined,
+          sourceWarehouseId: warehouseId,
+          workOrderNumber: String(workOrderNumber).trim(),
+          product: productId,
+          quantityToProduce: quantity,
+          unit,
+          currentStatus: 'In Progress - Mixing',
+          productionSteps,
+          materialsConsumed: materials.map(({ itemName, ...line }) => line),
+        }],
+        { session }
+      );
+      workOrderId = workOrder._id;
+
+      for (const material of materials) {
+        await issueInventory({
+          companyId,
+          itemId: material.item,
+          warehouseId,
+          uom: material.uom,
+          qty: material.quantity,
+          by: userId,
+          note: `Material issued for work order ${workOrderNumber}`,
+          refType: 'WORK_ORDER',
+          refId: String(workOrder._id),
+          session,
+        });
+      }
+    });
+
+    const workOrder = await WorkOrder.findById(workOrderId)
+      .populate('product', 'name sku UOM categoryKey')
+      .populate('materialsConsumed.item', 'name sku UOM categoryKey');
+    return res.status(201).json({
+      success: true,
+      message: 'Work order created and component inventory issued',
+      data: workOrder,
+    });
+  } catch (error) {
+    if (error?.code === 11000) error.status = 409;
+    return sendError(res, error, 'Failed to create work order');
+  } finally {
+    if (session) await session.endSession();
+  }
 };
 
-
-// --- Controller to Fetch All Work Orders ---
 export const getAllWorkOrders = async (req, res) => {
-    try {
-        // Find all work orders and populate the 'product' field
-        // This will replace the product ObjectId with the actual product document,
-        // allowing you to see product details directly.
-        const workOrders = await WorkOrder.find().populate('product');
-        res.status(200).json(workOrders);
-    } catch (error) {
-        console.error('Error fetching work orders:', error);
-        res.status(500).json({ message: 'Server error while fetching work orders.', error: error.message });
-    }
+  try {
+    const workOrders = await WorkOrder.find({ companyId: req.user?.companyId })
+      .populate('product', 'name sku UOM categoryKey')
+      .populate('materialsConsumed.item', 'name sku UOM categoryKey')
+      .populate('sourceWarehouseId outputWarehouseId', 'code name')
+      .sort({ createdAt: -1 });
+    return res.json(workOrders);
+  } catch (error) {
+    return sendError(res, error, 'Failed to fetch work orders');
+  }
 };
 
-// --- Controller to Update a Work Order's Status ---
 export const updateWorkOrder = async (req, res) => {
-    try {
-        const { id } = req.params; // Get the work order ID from the URL parameters
-        const { newStatus, stepName, completedQuantity, isBulkProduct } = req.body; // New status and optional step details
+  let session;
+  try {
+    const { newStatus, stepName, completedQuantity, outputWarehouseId } =
+      req.body || {};
+    const workOrder = await WorkOrder.findOne({
+      _id: req.params.id,
+      companyId: req.user?.companyId,
+    });
+    if (!workOrder) throw fail('Work order not found', 404);
+    if (!newStatus) throw fail('newStatus is required');
 
-        const workOrder = await WorkOrder.findById(id);
-
-        if (!workOrder) {
-            return res.status(404).json({ message: 'Work order not found.' });
-        }
-
-        // --- Logic to update specific production steps ---
-        if (stepName) {
-            const stepIndex = workOrder.productionSteps.findIndex(step => step.stepName === stepName);
-            if (stepIndex > -1) {
-                workOrder.productionSteps[stepIndex].status = newStatus;
-                workOrder.productionSteps[stepIndex].completedAt = new Date(); // Mark completion time
-            } else {
-                return res.status(400).json({ message: `Production step '${stepName}' not found in this work order.` });
-            }
-        }
-
-        // --- Logic for handling 'Complete' status and updating Inventory ---
-        if (newStatus === 'Complete') {
-            // Find the product details to get its type (blanket, bulk, etc.)
-            const productDetails = await Item.findById(workOrder.product);
-            if (!productDetails) {
-                return res.status(404).json({ message: 'Associated product not found for this work order.' });
-            }
-
-            // Determine the final packing status for the finished product
-            const packingType = await PackingType.findById(productDetails.packingType);
-            const finalPackingStatus = packingType ? packingType.name : 'In Stock'; // Default if packingType is not found
-
-            // If it's a bulk product and packing is done, or if it's a blanket and all steps are complete
-            if (productDetails.productType === 'bulk' || newStatus === 'Complete') {
-                // Add finished product to Inventory
-                let inventoryItem = await Inventory.findOne({
-                    item: workOrder.product,
-                    itemType: 'Product',
-                    status: finalPackingStatus // Use the determined packing status
-                });
-
-                if (inventoryItem) {
-                    inventoryItem.quantity += completedQuantity || workOrder.quantityToProduce;
-                    await inventoryItem.save();
-                } else {
-                    // Create new inventory entry if it doesn't exist
-                    inventoryItem = new Inventory({
-                        item: workOrder.product,
-                        itemType: 'Product',
-                        quantity: completedQuantity || workOrder.quantityToProduce,
-                        unit: workOrder.unit,
-                        status: finalPackingStatus,
-                        location: 'Finished Goods Warehouse' // Or a more specific location
-                    });
-                    await inventoryItem.save();
-                }
-            }
-
-            // Mark the overall work order as complete
-            workOrder.currentStatus = 'Complete';
-        } else {
-            // Update the overall current status if it's not 'Complete'
-            workOrder.currentStatus = newStatus;
-        }
-
-        await workOrder.save();
-        res.status(200).json({ message: 'Work order updated successfully.', workOrder });
-
-    } catch (error) {
-        console.error('Error updating work order:', error);
-        res.status(500).json({ message: 'Server error while updating work order.', error: error.message });
+    if (stepName) {
+      const step = workOrder.productionSteps.find(
+        (entry) => entry.stepName === stepName
+      );
+      if (!step) throw fail(`Production step '${stepName}' not found`);
+      step.status = newStatus;
+      if (newStatus === 'In Progress' && !step.startedAt) step.startedAt = new Date();
+      if (newStatus === 'Complete') step.completedAt = new Date();
     }
+
+    if (newStatus !== 'Complete') {
+      workOrder.currentStatus = newStatus;
+      await workOrder.save();
+      return res.json({
+        success: true,
+        message: 'Work order updated',
+        data: workOrder,
+      });
+    }
+
+    if (workOrder.outputInventoryPosted) {
+      throw fail('Finished output has already been posted for this work order', 409);
+    }
+    if (!outputWarehouseId) throw fail('outputWarehouseId is required on completion');
+
+    const product = await Item.findById(workOrder.product)
+      .select('_id UOM')
+      .lean();
+    if (!product) throw fail('Work-order output item not found', 404);
+    const outputQty = Number(completedQuantity || workOrder.quantityToProduce);
+    if (!Number.isFinite(outputQty) || outputQty <= 0) {
+      throw fail('completedQuantity must be greater than 0');
+    }
+
+    session = await mongoose.startSession();
+    await session.withTransaction(async () => {
+      await receiveInventory({
+        companyId: req.user.companyId,
+        itemId: workOrder.product,
+        warehouseId: outputWarehouseId,
+        uom: product.UOM,
+        qty: convertQuantity(outputQty, workOrder.unit, product.UOM),
+        by: req.user?.userId,
+        note: `Finished output from work order ${workOrder.workOrderNumber}`,
+        refType: 'WORK_ORDER_OUTPUT',
+        refId: String(workOrder._id),
+        session,
+      });
+
+      workOrder.currentStatus = 'Complete';
+      workOrder.outputWarehouseId = outputWarehouseId;
+      workOrder.outputInventoryPosted = true;
+      await workOrder.save({ session });
+    });
+
+    return res.json({
+      success: true,
+      message: 'Work order completed and finished inventory received',
+      data: workOrder,
+    });
+  } catch (error) {
+    return sendError(res, error, 'Failed to update work order');
+  } finally {
+    if (session) await session.endSession();
+  }
 };
 
-// --- Controller to Handle Re-packing ---
 export const rePackProduct = async (req, res) => {
-    try {
-        const { productId, quantity, originalPackingStatus, newPackingStatusName, repackingCost, customerOrder, repackedBy } = req.body;
-
-        // Basic validation for required fields
-        if (!productId || !quantity || !originalPackingStatus || !newPackingStatusName) {
-            return res.status(400).json({ message: 'Missing required fields for re-packing.' });
-        }
-
-        // 1. Find the product to ensure it exists and get its unit
-        const product = await Item.findById(productId);
-        if (!product) {
-            return res.status(404).json({ message: 'Product not found.' });
-        }
-
-        // 2. Find the new packing type to get its ObjectId
-        const newPackingType = await PackingType.findOne({ name: newPackingStatusName });
-        if (!newPackingType) {
-            return res.status(404).json({ message: `New packing type '${newPackingStatusName}' not found.` });
-        }
-        const newPackingTypeId = newPackingType._id;
-
-
-        // 3. Check if enough product is available in the original packing status
-        const originalInventory = await Inventory.findOne({
-            item: productId,
-            itemType: 'Product',
-            status: originalPackingStatus
-        });
-
-        if (!originalInventory || originalInventory.quantity < quantity) {
-            return res.status(400).json({
-                message: `Insufficient stock in '${originalPackingStatus}'. Available: ${originalInventory ? originalInventory.quantity : 0} ${product.UOM}, Needed: ${quantity} ${product.UOM}.`
-            });
-        }
-
-        // 4. Deduct quantity from original packing status
-        originalInventory.quantity -= quantity;
-        await originalInventory.save();
-
-        // 5. Add quantity to new packing status
-        let newInventory = await Inventory.findOne({
-            item: productId,
-            itemType: 'Product',
-            status: newPackingStatusName // Use the name for status field
-        });
-
-        if (newInventory) {
-            newInventory.quantity += quantity;
-            await newInventory.save();
-        } else {
-            // Create new inventory entry if it doesn't exist for this packing status
-            newInventory = new Inventory({
-                item: productId,
-                itemType: 'Product',
-                quantity: quantity,
-                unit: product.UOM, // Use the unit from the product
-                status: newPackingStatusName,
-                location: 'Finished Goods Warehouse' // Default location
-            });
-            await newInventory.save();
-        }
-
-        // 6. Create a RePackingLog entry
-        const rePackingLog = new RePackingLog({
-            product: productId,
-            quantity: quantity,
-            unit: product.UOM,
-            originalPackingStatus: originalPackingStatus,
-            newPackingStatus: newPackingStatusName, // Store the name for the log
-            repackingCost: repackingCost || 0,
-            customerOrder: customerOrder,
-            repackedBy: repackedBy,
-            repackedAt: new Date()
-        });
-
-        await rePackingLog.save();
-
-        res.status(200).json({ message: 'Product re-packed successfully.', rePackingLog });
-
-    } catch (error) {
-        console.error('Error re-packing product:', error);
-        res.status(500).json({ message: 'Server error during re-packing operation.', error: error.message });
+  try {
+    const {
+      fromItemId,
+      toItemId,
+      warehouseId,
+      quantity,
+      qty,
+      uom,
+      note = '',
+      batchNo = null,
+    } = req.body || {};
+    if (!fromItemId || !toItemId || !warehouseId || !uom) {
+      throw fail('fromItemId, toItemId, warehouseId and uom are required');
     }
+
+    const result = await repackInventory({
+      companyId: req.user?.companyId,
+      fromItemId,
+      toItemId,
+      warehouseId,
+      qty: quantity ?? qty,
+      uom,
+      by: req.user?.userId,
+      note,
+      refType: 'REPACK',
+      batchNo,
+    });
+    return res.json({
+      success: true,
+      message: 'Product repacked successfully',
+      data: result,
+    });
+  } catch (error) {
+    return sendError(res, error, 'Failed to repack product');
+  }
 };
 
-// --- Controller to Fetch All Re-packing Logs ---
 export const getAllRePackingLogs = async (req, res) => {
-    try {
-        // Find all re-packing logs and populate the 'product' field
-        // This will replace the product ObjectId with the actual product document
-        const rePackingLogs = await RePackingLog.find().populate('product');
-        res.status(200).json(rePackingLogs);
-    } catch (error) {
-        console.error('Error fetching re-packing logs:', error);
-        res.status(500).json({ message: 'Server error while fetching re-packing logs.', error: error.message });
-    }
+  try {
+    const rows = await InventoryLedger.find({
+      companyId: req.user?.companyId,
+      txnType: 'REPACK',
+    })
+      .populate('itemId', 'name sku UOM categoryKey')
+      .populate('warehouseId', 'code name')
+      .populate('by', 'fullName')
+      .sort({ at: -1 })
+      .limit(500)
+      .lean();
+    return res.json(rows);
+  } catch (error) {
+    return sendError(res, error, 'Failed to fetch repacking history');
+  }
 };
 
-// --- Controller to Fetch All Inventory Items ---
 export const getAllInventory = async (req, res) => {
-    try {
-        // Find all inventory items and populate the 'item' field based on 'itemType'
-        // This will replace the item ObjectId with the actual Product or RawMaterial document
-        const inventoryItems = await Inventory.find()
-            .populate('item'); // Mongoose will automatically use refPath 'itemType'
-
-        res.status(200).json(inventoryItems);
-    } catch (error) {
-        console.error('Error fetching inventory items:', error);
-        res.status(500).json({ message: 'Server error while fetching inventory items.', error: error.message });
-    }
+  try {
+    const rows = await getSnapshot({ companyId: req.user?.companyId });
+    return res.json(rows);
+  } catch (error) {
+    return sendError(res, error, 'Failed to fetch inventory');
+  }
 };
 
 export const getAllProduction1 = async (req, res) => {
-    try {
-        const { startDate, endDate } = req.query;
-
-        // 1. Initialize empty match filter
-        let queryFilter = {};
-
-        // 2. Construct the date query if either date is provided
-        if (startDate || endDate) {
-            queryFilter.createdAt = {};
-
-            if (startDate) {
-                queryFilter.createdAt.$gte = new Date(startDate);
-            }
-
-            if (endDate) {
-                const end = new Date(endDate);
-                end.setHours(23, 59, 59, 999);
-                queryFilter.createdAt.$lte = end;
-            }
-        }
-
-        // 3. Build the Aggregation Pipeline
-        const pipeline = [];
-
-        // Stage A: Filter records by date (Equivalent to your previous find query filter)
-        if (Object.keys(queryFilter).length > 0) {
-            pipeline.push({ $match: queryFilter });
-        }
-
-        // Stage B: Group by matchedItem, calculate count and sum of weightKg
-        pipeline.push({
-            $group: {
-                _id: "$matchedItem",               // Group by the matchedItem ObjectId
-                totalRecords: { $sum: 1 },         // Add 1 for every record found
-                totalWeight: { $sum: "$weightKg" } // Sum the weightKg field
-            }
-        });
-
-        // Stage C: (Optional but recommended) Populate the matchedItem details
-        // Note: 'items' should be the actual lowercase, pluralized name of your Item collection in the DB.
-        pipeline.push({
-            $lookup: {
-                from: "items",             // Collection name for the Item model
-                localField: "_id",         // The _id from our $group stage (which is the matchedItem ObjectId)
-                foreignField: "_id",       // The _id in the items collection
-                as: "itemDetails"          // Put the result in this new array field
-            }
-        });
-
-        // Stage D: Flatten the itemDetails array into an object
-        pipeline.push({
-            $unwind: {
-                path: "$itemDetails",
-                preserveNullAndEmptyArrays: true // Keep groups even if itemDetails isn't found
-            }
-        });
-
-        // Stage E: Format the final output to look clean and professional
-        pipeline.push({
-            $project: {
-                _id: 0,                         // Hide the default _id field
-                matchedItemId: "$_id",          // Rename _id to matchedItemId
-                itemName: "$itemDetails.name",  // Assuming your Item model has a 'name' field
-                temperature: "$itemDetails.temperature",  // Assuming your Item model has a 'name' field
-                density: "$itemDetails.density",  // Assuming your Item model has a 'name' field
-                dimension: "$itemDetails.dimension",  // Assuming your Item model has a 'name' field
-                packing: "$itemDetails.packing",  // Assuming your Item model has a 'name' field
-                totalRecords: 1,                // Keep the totalRecords count
-                totalWeight: 1                  // Keep the totalWeight sum
-            }
-        });
-
-        // 4. Execute the pipeline
-        const aggregatedProduction = await ProductionBlanketRoll.aggregate(pipeline).populate('dimension', 'width length thickness unit');
-
-        res.status(200).json(aggregatedProduction);
-    } catch (error) {
-        console.error('Error fetching aggregated production data:', error);
-        res.status(500).json({
-            message: 'Server error while fetching production data.',
-            error: error.message
-        });
+  try {
+    const { startDate, endDate } = req.query;
+    const match = { companyId: new mongoose.Types.ObjectId(req.user.companyId) };
+    if (startDate || endDate) {
+      match.createdAt = {};
+      if (startDate) match.createdAt.$gte = new Date(startDate);
+      if (endDate) {
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        match.createdAt.$lte = end;
+      }
     }
-};
 
+    const rows = await ProductionBlanketRoll.aggregate([
+      { $match: match },
+      {
+        $group: {
+          _id: '$matchedItem',
+          totalRecords: { $sum: 1 },
+          totalWeight: { $sum: '$weightKg' },
+        },
+      },
+      {
+        $lookup: {
+          from: 'items',
+          localField: '_id',
+          foreignField: '_id',
+          as: 'item',
+        },
+      },
+      { $unwind: { path: '$item', preserveNullAndEmptyArrays: true } },
+      {
+        $project: {
+          _id: 0,
+          matchedItemId: '$_id',
+          itemName: '$item.name',
+          totalRecords: 1,
+          totalWeight: 1,
+        },
+      },
+    ]);
+    return res.json(rows);
+  } catch (error) {
+    return sendError(res, error, 'Failed to fetch production summary');
+  }
+};

@@ -9,8 +9,6 @@ export const rolePermissions = {
     'categories:full',
     'parameters:full',
     'campaigns:full',
-    'rawmaterials:full',
-    'rawmterials:full',
     'batches:full',
     'parties:full',
     'dashboard:full',

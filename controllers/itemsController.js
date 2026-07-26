@@ -181,6 +181,7 @@ export const getAllItems = async (req, res) => {
       inStockOnly,
     } = req.query || {};
     const filter = {};
+    if (req.user?.companyId) filter.companyId = req.user.companyId;
 
     if (categoryKey) filter.categoryKey = categoryKey;
     if (productType) filter.productType = productType;
@@ -241,6 +242,7 @@ export const getAllItemsOptions = async (req, res) => {
   try {
     const { status, categoryKey } = req.query || {};
     const filter = {};
+    if (req.user?.companyId) filter.companyId = req.user.companyId;
 
     // Filter by categoryKey if provided
     if (categoryKey) filter.categoryKey = categoryKey;
@@ -415,7 +417,9 @@ export const getRawItems = async (req, res) => {
   try {
     // console.log('getRawItems');
     // Simple fixed query: only items with categoryKey PACKING
-    const packings = await Item.find({ categoryKey: 'RAW' })
+    const filter = { categoryKey: 'RAW' };
+    if (req.user?.companyId) filter.companyId = req.user.companyId;
+    const packings = await Item.find(filter)
       .populate('createdBy', 'fullName')
       .populate('updatedBy', 'fullName')
       .lean();

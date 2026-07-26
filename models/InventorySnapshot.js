@@ -29,11 +29,18 @@ const InventorySnapshotSchema = new Schema(
       required: true,
       index: true,
     },
-    
+
+    categoryKey: {
+      type: String,
+      enum: ['FG', 'RAW', 'PACKING', 'NC'],
+      required: true,
+      index: true,
+    },
+
     productType: {
       type: Schema.Types.ObjectId, 
       ref: 'ProductType',
-      required: true,
+      default: null,
     },
 
     warehouseId: {
@@ -115,7 +122,7 @@ InventorySnapshotSchema.pre('save', function recomputeAvailable(next) {
  * Use these statics from services/controllers to update balances safely.
  */
 InventorySnapshotSchema.statics.incOnHand = async function (
-  { companyId, itemId, productType, warehouseId, uom, bin = null, batchNo = null },
+  { companyId, itemId, categoryKey, productType = null, warehouseId, uom, bin = null, batchNo = null },
   qty,
   session
 ) {
@@ -123,9 +130,10 @@ InventorySnapshotSchema.statics.incOnHand = async function (
   const filter = { companyId, itemId, productType, warehouseId, bin, batchNo, uom };
   const update = {
     $inc: { onHand: qty },
+    $set: { categoryKey, productType },
     $setOnInsert: {
       // identity fields only; do NOT set `onHand` here to avoid conflict with $inc
-      companyId, itemId, productType, warehouseId, bin, batchNo, uom,
+      companyId, itemId, warehouseId, bin, batchNo, uom,
       reserved: 0,
     },
   };
@@ -139,7 +147,7 @@ InventorySnapshotSchema.statics.incOnHand = async function (
 };
 
 InventorySnapshotSchema.statics.incReserved = async function (
-  { companyId, itemId, productType, warehouseId, uom, bin = null, batchNo = null },
+  { companyId, itemId, categoryKey, productType = null, warehouseId, uom, bin = null, batchNo = null },
   qty,
   session
 ) {
@@ -147,9 +155,10 @@ InventorySnapshotSchema.statics.incReserved = async function (
   const filter = { companyId, itemId, productType, warehouseId, bin, batchNo, uom };
   const update = {
     $inc: { reserved: qty },
+    $set: { categoryKey, productType },
     $setOnInsert: {
       // identity fields only; do NOT set `reserved` here to avoid conflict with $inc
-      companyId, itemId, productType, warehouseId, bin, batchNo, uom,
+      companyId, itemId, warehouseId, bin, batchNo, uom,
       onHand: 0,
     },
   };

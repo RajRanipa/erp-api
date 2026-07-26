@@ -23,7 +23,7 @@ export const MO_STATUSES = [
 
 // Material line exploded from BOM at MO creation (frozen requirements)
 const MoMaterialSchema = new Schema({
-  item: { type: Schema.Types.ObjectId, ref: 'Product', required: true },
+  item: { type: Schema.Types.ObjectId, ref: 'Item', required: true },
   requiredQty: { type: Number, required: true, min: 0 },
   issuedQty: { type: Number, default: 0, min: 0 },
   uom: { type: String, required: true },
@@ -42,7 +42,7 @@ const ManufacturingOrderSchema = new Schema({
   campaign: { type: Schema.Types.ObjectId, ref: 'Campaign' },
 
   // What we are producing (either a Blanket product or Bulk fiber product)
-  product: { type: Schema.Types.ObjectId, ref: 'Product', required: true },
+  product: { type: Schema.Types.ObjectId, ref: 'Item', required: true },
 
   // Planned quantity and UoM for the MO (pcs for both rolls and bulk bags)
   qty: { type: Number, required: true, min: 0 },

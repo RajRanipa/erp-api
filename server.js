@@ -72,7 +72,6 @@ app.get('/', (req, res) => {
 
 // Use routes
 app.use('/auth',authRoutes); // This makes the route http://localhost:5000/api/send-contact-email
-// app.use('/api/raw', rawmaterialRoutes);
 app.use('/api/product-type', producttypeRoutes);
 app.use('/api', parameterRoutes);
 app.use('/api/category', categoryRoutes);
@@ -130,10 +129,10 @@ app.post('/webhook', (req, res) => {
 
     // Verify this is a WhatsApp API event
     if (body.object === 'whatsapp_business_account') {
-        console.log('✅ Received a WhatsApp API event', body.entry);
+        // console.log('✅ Received a WhatsApp API event', body.entry);
         body.entry.forEach(entry => {
             const changes = entry.changes[0];
-            console.log("Webhook changes", entry.changes);
+            // console.log("Webhook changes", entry.changes);
             const value = changes.value;
 
             // Check if the payload contains a customer message

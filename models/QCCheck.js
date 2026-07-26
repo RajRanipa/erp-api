@@ -26,7 +26,7 @@ export const QC_RESULTS = [
 const QCCheckSchema = new Schema({
   // Context
   mo: { type: Schema.Types.ObjectId, ref: 'ManufacturingOrder', required: true },
-  product: { type: Schema.Types.ObjectId, ref: 'Product' },
+  product: { type: Schema.Types.ObjectId, ref: 'Item' },
   campaign: { type: Schema.Types.ObjectId, ref: 'Campaign' },
 
   // What was checked
@@ -51,12 +51,12 @@ const QCCheckSchema = new Schema({
   checkAt: { type: Date },
 }, { timestamps: true });
 
-// Auto-snapshot attributes from MO -> Product if not provided
+// Auto-snapshot attributes from MO -> Item if not provided
 QCCheckSchema.pre('save', async function(next) {
   try {
     if (this.product && (!this.dimension || !this.densityRef || !this.temperature)) {
-      const Product = mongoose.model('Product');
-      const p = await Product.findById(this.product).select('dimension density temperature').lean();
+      const Item = mongoose.model('Item');
+      const p = await Item.findById(this.product).select('dimension density temperature').lean();
       if (p) {
         if (!this.dimension && p.dimension) this.dimension = p.dimension;
         if (!this.densityRef && p.density) this.densityRef = p.density;

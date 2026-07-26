@@ -7,13 +7,16 @@ import {
   getCampaignById,
   updateCampaign,
   deleteCampaign,
-  validateCampaign
+  validateCampaign,
+  activeCampaigns
 } from '../controllers/campaignController.js';
 import auth, { roleAuth } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 router.use(auth);
 // GET /api/campaigns
+router.get('/active', roleAuth('campaigns:read'), activeCampaigns);
+
 router.get('/', roleAuth('campaigns:read'), listCampaigns);
 
 // GET /api/campaigns/:id
