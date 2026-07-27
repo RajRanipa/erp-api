@@ -438,6 +438,15 @@ export function validatePartyId(id) {
   }
 }
 
+export function castPartyCompanyId(companyId) {
+  if (!mongoose.isValidObjectId(companyId)) {
+    throw fail('Invalid company context', 401, 'INVALID_COMPANY_ID');
+  }
+  return companyId instanceof mongoose.Types.ObjectId
+    ? companyId
+    : new mongoose.Types.ObjectId(companyId);
+}
+
 export function partySearchTokens(value) {
   return [...new Set(
     asLower(value)

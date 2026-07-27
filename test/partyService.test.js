@@ -7,6 +7,7 @@ import Party, {
 } from '../models/Party.js';
 import {
   buildPartyFilter,
+  castPartyCompanyId,
   dataQualityForParty,
   normalizePartyPayload,
 } from '../services/partyService.js';
@@ -95,6 +96,17 @@ test('builds indexed prefix search filters', () => {
   assert.deepEqual(filter.$or[0], {
     searchPrefixes: { $all: ['orient', '9876'] },
   });
+});
+
+test('casts JWT company strings for MongoDB aggregation pipelines', () => {
+  const companyId = new mongoose.Types.ObjectId();
+  const cast = castPartyCompanyId(companyId.toString());
+  assert.equal(cast instanceof mongoose.Types.ObjectId, true);
+  assert.equal(cast.equals(companyId), true);
+  assert.throws(
+    () => castPartyCompanyId('not-an-object-id'),
+    /Invalid company context/,
+  );
 });
 
 test('party validation generates a tenant-friendly code and search prefixes', async () => {

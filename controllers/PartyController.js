@@ -13,6 +13,7 @@ import {
   asString,
   assertAccountOwner,
   buildPartyFilter,
+  castPartyCompanyId,
   dataQualityForParty,
   findDuplicateParties,
   normalizePartyPayload,
@@ -150,8 +151,9 @@ export async function listParties(req, res) {
 export async function getPartySummary(req, res) {
   try {
     const companyId = companyIdFrom(req);
+    const aggregateCompanyId = castPartyCompanyId(companyId);
     const [summary] = await Party.aggregate([
-      { $match: { companyId } },
+      { $match: { companyId: aggregateCompanyId } },
       {
         $facet: {
           total: [{ $count: 'value' }],
