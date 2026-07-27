@@ -9,6 +9,7 @@
     "dev": "nodemon --watch ./ --ext js,json,env --ignore node_modules server.js",
     "debug": "node --inspect server.js",
     "debug:break": "node --inspect-brk server.js",
+    "test": "node --test",
     "audit:inventory": "node scripts/migrateInventoryItemMetadata.js",
     "migrate:inventory-items": "node scripts/migrateInventoryItemMetadata.js --apply",
     "audit:item-module-data": "node scripts/migrateItemModule.js",

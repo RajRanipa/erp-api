@@ -307,10 +307,20 @@ async function resolveBucket({
   allowInactiveItem = false,
   allowInactiveWarehouse = false,
 }) {
-  const [item] = await Promise.all([
-    getInventoryItem(itemId, companyId, session, allowInactiveItem),
-    ensureWarehouse(warehouseId, companyId, session, allowInactiveWarehouse),
-  ]);
+  // MongoDB does not support parallel operations on the same transaction
+  // session. Keep every session-bound operation strictly sequential.
+  const item = await getInventoryItem(
+    itemId,
+    companyId,
+    session,
+    allowInactiveItem,
+  );
+  await ensureWarehouse(
+    warehouseId,
+    companyId,
+    session,
+    allowInactiveWarehouse,
+  );
 
   const uom = normalizeUom(item.UOM);
   const suppliedUom = normalizeUom(requestedUom);
@@ -336,6 +346,16 @@ async function resolveBucket({
       batchNo: normalizeOptional(batchNo),
     },
   };
+}
+
+async function runInventoryTransaction(work) {
+  const session = await mongoose.startSession();
+  try {
+    // withTransaction retries transient transaction and ambiguous commit errors.
+    return await session.withTransaction(() => work(session));
+  } finally {
+    await session.endSession();
+  }
 }
 
 function assertIdempotentMovementMatches(existing, expected) {
@@ -428,13 +448,9 @@ export async function postMovement({
   }
 
   const key = normalizeIdempotencyKey(idempotencyKey || requestId);
-  const ownSession = !externalSession;
-  const session = externalSession || await mongoose.startSession();
-  if (ownSession) session.startTransaction();
-
   let expected;
   let identity;
-  try {
+  const execute = async session => {
     const resolved = await resolveBucket({
       companyId,
       itemId,
@@ -465,7 +481,6 @@ export async function postMovement({
       session,
     });
     if (existingResult) {
-      if (ownSession) await session.commitTransaction();
       return existingResult;
     }
 
@@ -502,14 +517,17 @@ export async function postMovement({
       );
     }
 
-    if (ownSession) await session.commitTransaction();
     return { ledger, snapshot, duplicate: false };
-  } catch (error) {
-    if (ownSession && session.inTransaction()) {
-      await session.abortTransaction();
-    }
+  };
 
-    if (ownSession && key && error?.code === 11000 && expected && identity) {
+  if (externalSession) {
+    return execute(externalSession);
+  }
+
+  try {
+    return await runInventoryTransaction(execute);
+  } catch (error) {
+    if (key && error?.code === 11000 && expected && identity) {
       const existingResult = await findIdempotentResult({
         companyId,
         idempotencyKey: key,
@@ -519,8 +537,6 @@ export async function postMovement({
       if (existingResult) return existingResult;
     }
     throw error;
-  } finally {
-    if (ownSession) await session.endSession();
   }
 }
 
@@ -585,9 +601,7 @@ export async function transfer({
 
   const baseKey = normalizeIdempotencyKey(idempotencyKey || requestId);
   const movementRef = normalizeOptional(refId) || baseKey || String(new mongoose.Types.ObjectId());
-  const session = await mongoose.startSession();
-  session.startTransaction();
-  try {
+  return runInventoryTransaction(async session => {
     const out = await postMovement({
       companyId,
       itemId,
@@ -623,14 +637,8 @@ export async function transfer({
       session,
     });
 
-    await session.commitTransaction();
     return { out, in: inbound };
-  } catch (error) {
-    if (session.inTransaction()) await session.abortTransaction();
-    throw error;
-  } finally {
-    await session.endSession();
-  }
+  });
 }
 
 async function postReservationEvent({
@@ -657,9 +665,6 @@ async function postReservationEvent({
   const signedQty = eventType === 'RELEASE' ? -absoluteQty : absoluteQty;
   const key = normalizeIdempotencyKey(idempotencyKey || requestId);
 
-  const ownSession = !externalSession;
-  const session = externalSession || await mongoose.startSession();
-  if (ownSession) session.startTransaction();
   let identity;
   const expected = {
     itemId,
@@ -669,7 +674,7 @@ async function postReservationEvent({
     eventType,
     quantity: signedQty,
   };
-  try {
+  const execute = async session => {
     ({ identity } = await resolveBucket({
       companyId,
       itemId,
@@ -700,7 +705,6 @@ async function postReservationEvent({
           bin: identity.bin,
           batchNo: identity.batchNo,
         }).session(session);
-        if (ownSession) await session.commitTransaction();
         return { event: existing, snapshot, duplicate: true };
       }
     }
@@ -727,11 +731,17 @@ async function postReservationEvent({
           : 'INSUFFICIENT_STOCK',
       );
     }
-    if (ownSession) await session.commitTransaction();
     return { event, snapshot, duplicate: false };
+  };
+
+  if (externalSession) {
+    return execute(externalSession);
+  }
+
+  try {
+    return await runInventoryTransaction(execute);
   } catch (error) {
-    if (ownSession && session.inTransaction()) await session.abortTransaction();
-    if (ownSession && key && error?.code === 11000 && identity) {
+    if (key && error?.code === 11000 && identity) {
       const existing = await InventoryReservationEvent.findOne({
         companyId,
         idempotencyKey: key,
@@ -753,8 +763,6 @@ async function postReservationEvent({
       }
     }
     throw error;
-  } finally {
-    if (ownSession) await session.endSession();
   }
 }
 
@@ -789,14 +797,11 @@ export async function repack({
     throw fail('From and To Items must be different', 409, 'SAME_REPACK_ITEM');
   }
 
-  const session = await mongoose.startSession();
-  session.startTransaction();
-  try {
-    const [fromItem, toItem] = await Promise.all([
-      getInventoryItem(fromItemId, companyId, session),
-      getInventoryItem(toItemId, companyId, session),
-      ensureWarehouse(warehouseId, companyId, session),
-    ]);
+  return runInventoryTransaction(async session => {
+    const fromItem = await getInventoryItem(fromItemId, companyId, session);
+    const toItem = await getInventoryItem(toItemId, companyId, session);
+    await ensureWarehouse(warehouseId, companyId, session);
+
     if (fromItem.categoryKey !== 'FG' || toItem.categoryKey !== 'FG') {
       throw fail('Repacking requires two finished-goods Items', 409, 'INVALID_REPACK_ITEMS');
     }
@@ -856,14 +861,8 @@ export async function repack({
       session,
     });
 
-    await session.commitTransaction();
     return { out, in: inbound };
-  } catch (error) {
-    if (session.inTransaction()) await session.abortTransaction();
-    throw error;
-  } finally {
-    await session.endSession();
-  }
+  });
 }
 
 async function itemIdsForFilter(companyId, itemFilter = {}) {
