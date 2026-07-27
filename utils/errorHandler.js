@@ -1,5 +1,5 @@
 // utils/errorHandler.js
-import util from 'util';
+import { sendError } from './apiResponse.js';
 
 // Custom AppError class
 export class AppError extends Error {
@@ -14,8 +14,7 @@ export class AppError extends Error {
     }
 }
 
-// Centralized error handler function
-export function handleError(res, err) {
+export function normalizeError(err) {
     if (!err) {
         err = new AppError('Unknown error occurred', { statusCode: 500 });
     }
@@ -65,6 +64,19 @@ export function handleError(res, err) {
     else if (err.name === 'TokenExpiredError') {
         appErr = new AppError('Token expired', { statusCode: 401, code: 'EXPIRED_TOKEN' });
     }
+    else if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+        appErr = new AppError('The request body contains invalid JSON.', {
+            statusCode: 400,
+            code: 'INVALID_JSON',
+        });
+    }
+    else if (err?.name === 'MulterError') {
+        appErr = new AppError(err.message || 'File upload failed.', {
+            statusCode: 400,
+            code: 'UPLOAD_ERROR',
+            details: { field: err.field || null },
+        });
+    }
     // Already a custom AppError
     else if (err instanceof AppError) {
         appErr = err;
@@ -80,19 +92,54 @@ export function handleError(res, err) {
     else {
         appErr = new AppError(err.message || 'Internal Server Error', {
             statusCode: 500,
-            code: 'INTERNAL_ERROR'
+            code: 'INTERNAL_ERROR',
+            isOperational: false,
         });
     }
 
-    // Log full error for debugging
-    console.error('Error caught by handleError:', util.inspect(err, { depth: 4 }));
+    return appErr;
+}
 
-    // Send response
-    return res.status(appErr.statusCode || 500).json({
-        status: false,
-        status_code: appErr.statusCode || 500,
-        message: appErr.message,
+const logError = (req, originalError, appError) => {
+    const entry = {
+        requestId: req?.requestId || null,
+        method: req?.method || null,
+        path: req?.originalUrl || null,
+        statusCode: appError.statusCode,
+        code: appError.code,
+        message: appError.message,
+    };
+
+    if (process.env.NODE_ENV !== 'production' && originalError?.stack) {
+        entry.stack = originalError.stack;
+    }
+
+    const logger = appError.statusCode >= 500 ? console.error : console.warn;
+    logger('[api:error]', entry);
+};
+
+// Backward-compatible helper for controllers that still use try/catch.
+export function handleError(res, err, req = null) {
+    const appErr = normalizeError(err);
+    logError(req || res?.req, err, appErr);
+    return sendError(res, {
+        statusCode: appErr.statusCode || 500,
+        message: appErr.isOperational || process.env.NODE_ENV !== 'production'
+            ? appErr.message
+            : 'Internal server error.',
         code: appErr.code,
-        details: appErr.details || null
+        details: appErr.details || null,
     });
+}
+
+export function notFoundHandler(req, _res, next) {
+    next(new AppError(`Route ${req.method} ${req.originalUrl} was not found.`, {
+        statusCode: 404,
+        code: 'ROUTE_NOT_FOUND',
+    }));
+}
+
+export function expressErrorHandler(err, req, res, next) {
+    if (res.headersSent) return next(err);
+    return handleError(res, err, req);
 }

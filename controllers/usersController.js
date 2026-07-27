@@ -14,6 +14,7 @@ import {
   resolveAccessContext,
 } from '../services/accessControlService.js';
 import { recordUserAudit } from '../utils/userAudit.js';
+import { handleError } from '../utils/errorHandler.js';
 
 const hash = (value) => crypto.createHash('sha256').update(value).digest('hex');
 const genToken = () => crypto.randomBytes(32).toString('hex');
@@ -159,8 +160,7 @@ export async function createInvite(req, res) {
       data: safeInvite(invite),
     });
   } catch (error) {
-    console.error('createInvite error:', error);
-    return res.status(500).json({ status: false, message: 'Failed to send invitation.' });
+    return handleError(res, error, req);
   }
 }
 
@@ -186,8 +186,7 @@ export async function resendInvite(req, res) {
     await recordUserAudit(req, 'invite.resent', { metadata: { inviteId: invite._id } });
     return res.json({ status: true, message: 'Invitation resent.', data: safeInvite(invite) });
   } catch (error) {
-    console.error('resendInvite error:', error);
-    return res.status(500).json({ status: false, message: 'Failed to resend invitation.' });
+    return handleError(res, error, req);
   }
 }
 
@@ -305,8 +304,7 @@ export async function acceptInvite(req, res) {
     if (error?.code === 11000) {
       return res.status(409).json({ status: false, message: 'This membership already exists.' });
     }
-    console.error('acceptInvite error:', error);
-    return res.status(500).json({ status: false, message: 'Failed to accept invitation.' });
+    return handleError(res, error, req);
   }
 }
 
@@ -354,7 +352,7 @@ export async function listInvites(req, res) {
       meta: { total, page, limit, pages: Math.ceil(total / limit) },
     });
   } catch (error) {
-    return res.status(500).json({ status: false, message: 'Failed to list invitations.' });
+    return handleError(res, error, req);
   }
 }
 
@@ -436,8 +434,7 @@ export async function listUsers(req, res) {
       meta: { total, page, limit, pages: Math.ceil(total / limit) },
     });
   } catch (error) {
-    console.error('listUsers error:', error);
-    return res.status(500).json({ status: false, message: 'Failed to list members.' });
+    return handleError(res, error, req);
   }
 }
 
@@ -486,7 +483,7 @@ export async function updateUserRole(req, res) {
       data: { id: targetUserId, roleId: nextRole._id, role: nextRole.key, roleName: nextRole.name },
     });
   } catch (error) {
-    return res.status(500).json({ status: false, message: 'Failed to update member role.' });
+    return handleError(res, error, req);
   }
 }
 
@@ -517,7 +514,7 @@ export async function removeUser(req, res) {
     await recordUserAudit(req, 'membership.suspended', { targetUserId });
     return res.json({ status: true, message: 'Member suspended.', data: { id: targetUserId } });
   } catch (error) {
-    return res.status(500).json({ status: false, message: 'Failed to suspend member.' });
+    return handleError(res, error, req);
   }
 }
 
@@ -575,7 +572,7 @@ export async function updateMyProfile(req, res) {
     await recordUserAudit(req, 'profile.updated', { targetUserId: req.user.userId });
     return res.json({ status: true, message: 'Profile updated.', user });
   } catch (error) {
-    return res.status(500).json({ status: false, message: 'Failed to update profile.' });
+    return handleError(res, error, req);
   }
 }
 
@@ -608,7 +605,7 @@ export async function updateMyPreferences(req, res) {
     ).select('preferences');
     return res.json({ status: true, message: 'Preferences updated.', preferences: user.preferences });
   } catch (error) {
-    return res.status(500).json({ status: false, message: 'Failed to update preferences.' });
+    return handleError(res, error, req);
   }
 }
 

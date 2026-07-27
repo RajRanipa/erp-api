@@ -22,12 +22,11 @@ import inventoryRoutes from './routes/inventoryRoutes.js';
 import gatewayRoutes from './routes/gatewayRoutes.js';
 import gatewayAuthRoutes from './routes/gatewayAuthRoutes.js';
 import { inviteRoutes, inviteAuthRoutes, settingRoutes} from './routes/usersRoutes.js';
-import { startBounceWatcher } from './services/bounceWatcher.js';
 import { fileURLToPath } from 'url';
 import permissionsRoute from './routes/permissionsRoute.js';
 import { startReportScheduler } from './services/scheduler.js';
-// import { initGlobalErrorHandlers, expressErrorHandler } from './utils/errorHandler.js';
-// initGlobalErrorHandlers({ logger: console, exitOnFatal: false });
+import { apiContext } from './middleware/apiMiddleware.js';
+import { expressErrorHandler, notFoundHandler } from './utils/errorHandler.js';
 
 // after all routes:
 // Load env variables
@@ -38,6 +37,8 @@ connectDB();
 
 // Initialize Express app
 const app = express();
+app.disable('x-powered-by');
+if (process.env.NODE_ENV === 'production') app.set('trust proxy', 1);
 
 // Robust path resolution for uploads directory
 const __filename = fileURLToPath(import.meta.url);
@@ -49,26 +50,26 @@ const uploadsDir = path.join(uploadsBase, 'uploads');
 // console.log('[Static] Serving /uploads from:', uploadsDir);
 app.use('/uploads', express.static(uploadsDir));
 
-// Middlewaremm
-// app.use(cors());
-app.use(express.json());
-
-// Use CORS middleware to allow requests from the frontend
-// console.log(chalk.green("CLIENT_URL ***** : ", process.env.CLIENT_URL));
 app.use(cors({
   origin: process.env.CLIENT_URL,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-  credentials: true, // because you send cookies
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Request-ID'],
+  exposedHeaders: ['X-Request-ID', 'Server-Timing'],
+  credentials: true,
 }));
+app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '2mb' }));
 app.use(cookieParser());
+app.use(apiContext);
 
-// Basic test route in server.js
 app.get('/', (req, res) => {
-  res.send('Backend server is running');
+  res.json({
+    message: 'Backend server is running.',
+    data: {
+      service: 'orient-erp-api',
+      environment: process.env.NODE_ENV || 'development',
+    },
+  });
 });
-
-// app.use(expressErrorHandler({ logger: console }));
 
 // Use routes
 app.use('/auth',authRoutes); // This makes the route http://localhost:5000/api/send-contact-email
@@ -152,6 +153,8 @@ app.post('/webhook', (req, res) => {
     }
 });
 
+app.use(notFoundHandler);
+app.use(expressErrorHandler);
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {

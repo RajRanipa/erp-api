@@ -18,6 +18,7 @@ import {
   getProductionNight,
   getTodayDayShiftRange,
 } from '../services/productionReportService.js';
+import { AppError, handleError } from '../utils/errorHandler.js';
 
 const MASS_TO_GRAMS = {
   mg: 0.001,
@@ -31,16 +32,11 @@ const MASS_TO_GRAMS = {
 };
 
 const fail = (message, status = 400) => {
-  const error = new Error(message);
-  error.status = status;
-  return error;
-};
-
-const sendError = (res, error, fallback) =>
-  res.status(Number(error?.status) || 500).json({
-    success: false,
-    message: error?.message || fallback,
+  return new AppError(message, {
+    statusCode: status,
+    code: status === 404 ? 'PRODUCTION_NOT_FOUND' : 'PRODUCTION_REQUEST_INVALID',
   });
+};
 
 const convertQuantity = (quantity, fromUnit, toUnit) => {
   const value = Number(quantity);
@@ -76,7 +72,7 @@ export const getAllProduction = async (req, res) => {
       specificData,
     });
   } catch (error) {
-    return sendError(res, error, 'Failed to fetch production');
+    return handleError(res, error, req);
   }
 };
 
@@ -90,7 +86,7 @@ export const getProductionReportDay = async (req, res) => {
       batchReport: response.batchReport,
     });
   } catch (error) {
-    return sendError(res, error, 'Failed to fetch day production report');
+    return handleError(res, error, req);
   }
 };
 
@@ -104,7 +100,7 @@ export const getProductionReportNight = async (req, res) => {
       batchReport: response.batchReport,
     });
   } catch (error) {
-    return sendError(res, error, 'Failed to fetch night production report');
+    return handleError(res, error, req);
   }
 };
 
@@ -124,7 +120,7 @@ export async function sentProductionReport(req, res) {
       message: result?.message || `${shift} production report sent successfully`,
     });
   } catch (error) {
-    return sendError(res, error, 'Failed to send production report');
+    return handleError(res, error, req);
   }
 }
 
@@ -253,7 +249,7 @@ export const createWorkOrder = async (req, res) => {
     });
   } catch (error) {
     if (error?.code === 11000) error.status = 409;
-    return sendError(res, error, 'Failed to create work order');
+    return handleError(res, error, req);
   } finally {
     if (session) await session.endSession();
   }
@@ -268,7 +264,7 @@ export const getAllWorkOrders = async (req, res) => {
       .sort({ createdAt: -1 });
     return res.json(workOrders);
   } catch (error) {
-    return sendError(res, error, 'Failed to fetch work orders');
+    return handleError(res, error, req);
   }
 };
 
@@ -345,7 +341,7 @@ export const updateWorkOrder = async (req, res) => {
       data: workOrder,
     });
   } catch (error) {
-    return sendError(res, error, 'Failed to update work order');
+    return handleError(res, error, req);
   } finally {
     if (session) await session.endSession();
   }
@@ -385,7 +381,7 @@ export const rePackProduct = async (req, res) => {
       data: result,
     });
   } catch (error) {
-    return sendError(res, error, 'Failed to repack product');
+    return handleError(res, error, req);
   }
 };
 
@@ -403,7 +399,7 @@ export const getAllRePackingLogs = async (req, res) => {
       .lean();
     return res.json(rows);
   } catch (error) {
-    return sendError(res, error, 'Failed to fetch repacking history');
+    return handleError(res, error, req);
   }
 };
 
@@ -412,7 +408,7 @@ export const getAllInventory = async (req, res) => {
     const rows = await getSnapshot({ companyId: req.user?.companyId });
     return res.json(rows);
   } catch (error) {
-    return sendError(res, error, 'Failed to fetch inventory');
+    return handleError(res, error, req);
   }
 };
 
@@ -460,6 +456,6 @@ export const getAllProduction1 = async (req, res) => {
     ]);
     return res.json(rows);
   } catch (error) {
-    return sendError(res, error, 'Failed to fetch production summary');
+    return handleError(res, error, req);
   }
 };

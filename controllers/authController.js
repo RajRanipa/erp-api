@@ -15,6 +15,7 @@ import {
 import { clearAuthCookies, setAuthCookies } from '../utils/authCookies.js';
 import { resolveAccessContext } from '../services/accessControlService.js';
 import { recordUserAudit } from '../utils/userAudit.js';
+import { AppError, handleError } from '../utils/errorHandler.js';
 
 const APP_NAME = process.env.APP_NAME || 'JNR ERP';
 const OTP_TTL_MS = 10 * 60 * 1000;
@@ -124,11 +125,17 @@ async function issueSession(req, res, user, { companyId = null, isSetupCompleted
     userId: user._id,
     companyId: companyId || user.companyId || null,
   });
-  if (!context) throw new Error('Unable to resolve user access.');
+  if (!context) {
+    throw new AppError('Unable to resolve user access.', {
+      statusCode: 403,
+      code: 'ACCESS_CONTEXT_UNAVAILABLE',
+    });
+  }
   if (context.companyId && context.membership?.status !== 'active') {
-    const error = new Error('Your membership in this company is not active.');
-    error.code = 'MEMBERSHIP_INACTIVE';
-    throw error;
+    throw new AppError('Your membership in this company is not active.', {
+      statusCode: 403,
+      code: 'MEMBERSHIP_INACTIVE',
+    });
   }
 
   const tokenSource = {
@@ -176,8 +183,7 @@ export async function signupStart(req, res) {
     if (!exists) await createOtp({ email, purpose: 'signup' });
     return res.json({ status: true, data: { exists }, message: exists ? 'Account already exists.' : 'Verification code sent.' });
   } catch (error) {
-    console.error('signupStart error:', error);
-    return res.status(500).json({ status: false, message: 'Unable to start signup.' });
+    return handleError(res, error, req);
   }
 }
 
@@ -224,7 +230,7 @@ export async function signup(req, res) {
     });
   } catch (error) {
     if (error?.code === 11000) return res.status(409).json({ status: false, message: 'Email already exists.' });
-    return res.status(500).json({ status: false, message: 'Failed to create account.' });
+    return handleError(res, error, req);
   }
 }
 
@@ -248,11 +254,10 @@ export async function login(req, res) {
     const session = await issueSession(req, res, user, { isSetupCompleted });
     return res.json({ status: true, message: 'Login successful.', ...session });
   } catch (error) {
-    console.error('login error:', error);
     if (error?.code === 'MEMBERSHIP_INACTIVE') {
       return res.status(403).json({ status: false, code: error.code, message: error.message });
     }
-    return res.status(500).json({ status: false, message: 'Login failed.' });
+    return handleError(res, error, req);
   }
 }
 
@@ -266,7 +271,7 @@ export async function loginStartOtp(req, res) {
     await createOtp({ email, purpose: 'login', userId: user._id });
     return res.json({ status: true, message: 'Login code sent.' });
   } catch (error) {
-    return res.status(500).json({ status: false, message: 'Unable to send login code.' });
+    return handleError(res, error, req);
   }
 }
 
@@ -289,7 +294,7 @@ export async function loginVerifyOtp(req, res) {
     if (error?.code === 'MEMBERSHIP_INACTIVE') {
       return res.status(403).json({ status: false, code: error.code, message: error.message });
     }
-    return res.status(500).json({ status: false, message: 'OTP login failed.' });
+    return handleError(res, error, req);
   }
 }
 
@@ -439,7 +444,7 @@ export async function changePassword(req, res) {
     await recordUserAudit(req, 'password.changed', { targetUserId: user._id });
     return res.json({ status: true, reauthenticate: true, message: 'Password updated. Please log in again.' });
   } catch (error) {
-    return res.status(500).json({ status: false, message: 'Failed to update password.' });
+    return handleError(res, error, req);
   }
 }
 

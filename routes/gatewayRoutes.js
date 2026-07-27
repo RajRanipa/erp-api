@@ -5,10 +5,9 @@ import { ingestBlanketProduction } from "../controllers/gatewayProductionControl
 const router = express.Router();
 
 router.get('/test', gatewayAuth, (req, res) => {
-    res.json({ message: 'Test route working added' });
+    res.json({ message: 'Gateway connection is healthy.' });
 });
 
-// router.post("/blanket/production", gatewayAuth, ingestBlanketProduction);
-router.post("/blanket/production", ingestBlanketProduction);
+router.post("/blanket/production", gatewayAuth, ingestBlanketProduction);
 
 export default router;

@@ -1,260 +1,287 @@
-// backend-api/controllers/authController.js
-import mongoose from 'mongoose';
-import User from '../models/User.js';
-import Company from '../models/Company.js';
 import jwt from 'jsonwebtoken';
-import { generateAccessToken, generateRefreshToken, ACCESS_TOKEN_EXPIRE_MINUTES, REFRESH_TOKEN_EXPIRE_DAYS } from '../utils/tokenUtils.js';
+import mongoose from 'mongoose';
+import Company from '../models/Company.js';
 import RefreshToken from '../models/RefreshToken.js';
-import { handleError } from '../utils/errorHandler.js';
+import User from '../models/User.js';
+import { resolveAccessContext } from '../services/accessControlService.js';
+import { AppError, handleError } from '../utils/errorHandler.js';
+import { sendSuccess } from '../utils/apiResponse.js';
+import {
+  ACCESS_TOKEN_EXPIRE_MINUTES,
+  REFRESH_TOKEN_EXPIRE_DAYS,
+  generateAccessToken,
+  generateRefreshToken,
+} from '../utils/tokenUtils.js';
 
+const GATEWAY_DEVICE = 'gateway';
+
+const normalizeEmail = (value) => String(value || '').trim().toLowerCase();
+const normalizeDevice = (value) =>
+  String(value || GATEWAY_DEVICE).trim().toLowerCase().slice(0, 80);
+
+const bearerToken = (req) => {
+  const authorization = String(req.headers.authorization || '');
+  return authorization.startsWith('Bearer ') ? authorization.slice(7).trim() : null;
+};
+
+const assertActiveUser = (user) => {
+  if (!user) {
+    throw new AppError('Invalid credentials.', {
+      statusCode: 401,
+      code: 'INVALID_CREDENTIALS',
+    });
+  }
+  if (user.status !== 'active') {
+    throw new AppError('The gateway account is not active.', {
+      statusCode: 403,
+      code: 'ACCOUNT_INACTIVE',
+    });
+  }
+  if (!user.isVerified) {
+    throw new AppError('The gateway account email is not verified.', {
+      statusCode: 403,
+      code: 'EMAIL_UNVERIFIED',
+    });
+  }
+};
+
+async function companySetupStatus(user) {
+  if (!user.companyId) return false;
+  const company = await Company.findById(user.companyId)
+    .select('isSetupCompleted')
+    .lean();
+  return Boolean(company?.isSetupCompleted);
+}
+
+async function issueGatewaySession(req, user, device) {
+  const context = await resolveAccessContext({
+    userId: user._id,
+    companyId: user.companyId || null,
+  });
+  if (!context) {
+    throw new AppError('Unable to resolve gateway access.', {
+      statusCode: 403,
+      code: 'GATEWAY_ACCESS_UNAVAILABLE',
+    });
+  }
+  if (context.companyId && context.membership?.status !== 'active') {
+    throw new AppError('The gateway company membership is not active.', {
+      statusCode: 403,
+      code: 'MEMBERSHIP_INACTIVE',
+    });
+  }
+
+  const isSetupCompleted = await companySetupStatus(user);
+  const tokenSource = {
+    _id: user._id,
+    companyId: context.companyId,
+    membershipId: context.membership?._id || null,
+    membershipVersion: context.membership?.accessVersion || 0,
+    tokenVersion: user.tokenVersion || 0,
+    isSetupCompleted,
+  };
+  const accessToken = await generateAccessToken(tokenSource);
+  const refreshToken = generateRefreshToken(tokenSource);
+  const refreshClaims = jwt.decode(refreshToken);
+  const refreshTokenExpireAt = new Date(
+    Date.now() + REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60 * 1000
+  );
+
+  await RefreshToken.create({
+    userId: user._id,
+    companyId: context.companyId,
+    membershipId: context.membership?._id || null,
+    tokenVersion: user.tokenVersion || 0,
+    sessionId: refreshClaims.sessionId,
+    token: refreshToken,
+    userAgent: req.headers['user-agent'],
+    ip: req.ip,
+    expiresAt: refreshTokenExpireAt,
+    device,
+  });
+
+  return {
+    tokenType: 'Bearer',
+    accessToken,
+    refreshToken,
+    accessTokenExpireAt: Date.now() + ACCESS_TOKEN_EXPIRE_MINUTES * 60 * 1000,
+    refreshTokenExpireAt: refreshTokenExpireAt.getTime(),
+    user: {
+      id: user._id,
+      fullName: user.fullName,
+      email: user.email,
+      role: context.roleKey,
+      companyId: context.companyId || null,
+    },
+  };
+}
+
+async function resolveRefreshSession(req, device) {
+  const suppliedToken = String(req.body?.refreshToken || bearerToken(req) || '').trim();
+  let refreshClaims = null;
+
+  if (suppliedToken) {
+    try {
+      refreshClaims = jwt.verify(suppliedToken, process.env.JWT_REFRESH_SECRET);
+    } catch {
+      refreshClaims = null;
+    }
+  }
+
+  if (refreshClaims?.type === 'refresh' && refreshClaims.userId) {
+    const session = await RefreshToken.findMatchingToken(
+      suppliedToken,
+      refreshClaims.userId
+    );
+    if (
+      session
+      && session.sessionId === refreshClaims.sessionId
+      && session.expiresAt > new Date()
+      && session.device === device
+    ) {
+      return {
+        session,
+        userId: String(refreshClaims.userId),
+        legacy: false,
+      };
+    }
+  }
+
+  // Temporary compatibility for installed gateway clients that still send the
+  // expired access token plus userId. X-Gateway-Key authentication is required.
+  const legacyUserId = String(req.body?.userId || '').trim();
+  if (!mongoose.Types.ObjectId.isValid(legacyUserId)) {
+    throw new AppError('A valid refresh token is required.', {
+      statusCode: 401,
+      code: 'GATEWAY_REFRESH_INVALID',
+    });
+  }
+
+  const session = await RefreshToken.findOne({
+    userId: legacyUserId,
+    device,
+    expiresAt: { $gt: new Date() },
+  }).sort({ createdAt: -1 });
+
+  if (!session) {
+    throw new AppError('The gateway session is invalid or expired.', {
+      statusCode: 401,
+      code: 'GATEWAY_SESSION_EXPIRED',
+    });
+  }
+
+  return { session, userId: legacyUserId, legacy: true };
+}
 
 export async function gateWayLogin(req, res) {
   try {
-    const { email, password } = req.body;
+    const email = normalizeEmail(req.body?.email);
+    const password = String(req.body?.password || '');
+    const device = normalizeDevice(req.body?.device);
 
-    console.log("hit the log in gateway ===================, email", email)
-    // Find user and explicitly select password
+    if (!email || !password) {
+      throw new AppError('Email and password are required.', {
+        statusCode: 400,
+        code: 'VALIDATION_ERROR',
+      });
+    }
+
     const user = await User.findOne({ email }).select('+password');
-    // console.log("user ", user)
-    if (!user) {
-      return res.status(400).json({ status: false, message: 'Invalid credentials' });
-    }
-
-    const isMatch = await user.comparePassword(password);
-    // console.log("isMatch ", isMatch)
-    if (!isMatch) {
-      return res.status(400).json({ status: false, message: 'Invalid credentials' });
-    }
-
-    if (user.status === 'disabled') {
-      return res.status(403).json({
-        message: 'Your account has been disabled. Contact admin.',
+    if (!user || !(await user.comparePassword(password))) {
+      throw new AppError('Invalid credentials.', {
+        statusCode: 401,
+        code: 'INVALID_CREDENTIALS',
       });
     }
+    assertActiveUser(user);
 
-    if (user.status === 'suspended') {
-      return res.status(403).json({
-        message: 'Your account has been suspended. Contact admin.',
-      });
-    }
+    await User.updateOne(
+      { _id: user._id },
+      { $set: { lastSeenAt: new Date() } }
+    );
+    const session = await issueGatewaySession(req, user, device);
 
-    if (!user.isVerified) {
-      return res.status(403).json({
-        message: 'Email not verified. Please verify your email.',
-        requiresVerification: true,
-      });
-    }
-
-    if (user.status !== 'active') {
-      return res.status(403).json({
-        message: 'Your account is not active. Contact admin.',
-      });
-    }
-
-    // Optional: update last seen timestamp
-    user.lastSeenAt = new Date();
-    await user.save({ validateBeforeSave: false });
-
-    // after password check and before token generation
-    // derive company/setup values (do NOT mutate DB unless you mean to persist)
-    const companyId = user.companyId || null;
-
-    // If you track isSetupCompleted on Company, fetch it. If you store on user, fallback:
-    let isSetupCompleted = !!user.isSetupCompleted; // boolean
-
-    // Prefer authoritative source: if you have a Company model, fetch company setup status
-    if (companyId) {
-      const company = await Company.findById(companyId).select('isSetupCompleted').lean();
-      isSetupCompleted = !!(company && company.isSetupCompleted);
-    } else {
-      isSetupCompleted = false; // no company => setup not complete
-    }
-
-    // console.log('login payload values -> ');
-
-    // now generate tokens using a payload object (not the raw user doc)
-    const tokenPayload = {
-      id: String(user._id),
-      companyId,
-      role: user.role,
-      isSetupCompleted
-    };
-    // console.log("tokenPayload ", tokenPayload);
-    // return;
-    const accessToken = await generateAccessToken(tokenPayload);
-    const refreshToken = generateRefreshToken(user);
-    // console.log("refreshToken ", refreshToken)
-
-    const refreshTokenExpireAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60 * 1000);
-
-    const accessTokenExpireAt = Date.now() + ACCESS_TOKEN_EXPIRE_MINUTES * 60 * 1000;
-
-    await RefreshToken.create({
-      userId: user._id,
-      token: refreshToken,
-      userAgent: req.headers['user-agent'],
-      ip: req.ip,
-      expiresAt: refreshTokenExpireAt,
-      device: 'gateway',
-    });
-
-    console.log('Login successful');
-    // console.log('res.cookie from login ', req.cookies);
-    res.status(200).json({
-      status: true,
-      message: 'Login successful',
-      "data": {
-        tokenType: "Bearer",
-        accessToken,
-        accessTokenExpireAt,
-        user: {
-          id: user._id,
-          fullName: user.fullName,
-          email: user.email,
-          role: user.role,
-          companyId: user.companyId || null,
-        },
-      }
+    return sendSuccess(res, {
+      message: 'Gateway login successful.',
+      data: session,
     });
   } catch (error) {
-    console.error('Login Error:', error);
-    return handleError(res, error);
+    return handleError(res, error, req);
   }
-};
+}
 
 export async function gateWayRefreshToken(req, res) {
-  const authHeader = req.headers.authorization || '';
-  const token = authHeader.startsWith('Bearer ')
-    ? authHeader.slice(7)
-    : null;
-
-  // console.log('Attempting to refresh token..', authHeader);
-
-  const { device, userId } = req.body || {};
-  const bodyUserId = userId;
-  console.log('request body , device :- ', device);
-
-  const now = new Date();
-  const timestamp = now.toLocaleString('en-IN', {
-    timeZone: 'Asia/Kolkata',
-    year: 'numeric',
-    month: 'short',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: true,
-  });
-
-  if (!token) {
-    console.error('No token found in Authorization header.');
-    return res.status(401).json({ status: false, message: 'No token found' });
-  }
-
-  if (!device) {
-    return res.status(400).json({ status: false, message: 'device is required' });
-  }
-
   try {
-    let decoded = null;
-    try {
-      decoded = jwt.verify(token, process.env.JWT_ACCESS_SECRET);
-      // console.log('Verified token.', decoded);
-    } catch (verifyErr) {
-      if (verifyErr?.name === 'TokenExpiredError') {
-        // Ignore expiry: gateway will send userId in body
-        console.warn('[gateway] Token expired; falling back to userId from body.', verifyErr?.expiredAt);
-        decoded = null;
-      } else {
-        console.error('Refresh Token Error (verify failed):', verifyErr);
-        return res.status(403).json({ status: false, message: 'Invalid token' });
-      }
+    const device = normalizeDevice(req.body?.device);
+    const current = await resolveRefreshSession(req, device);
+    const user = await User.findById(current.userId);
+    assertActiveUser(user);
+
+    if (Number(current.session.tokenVersion || 0) !== Number(user.tokenVersion || 0)) {
+      throw new AppError('The gateway session has been revoked.', {
+        statusCode: 401,
+        code: 'GATEWAY_SESSION_REVOKED',
+      });
     }
 
-    // Prefer decoded id when token is valid; otherwise fall back to body userId
-    const effectiveUserId = decoded?.id || decoded?.userId || bodyUserId;
+    await RefreshToken.deleteOne({ _id: current.session._id });
+    const session = await issueGatewaySession(req, user, device);
 
-    if (!effectiveUserId) {
-      return res.status(400).json({ status: false, message: 'userId is required' });
-    }
-
-    if (!mongoose.Types.ObjectId.isValid(effectiveUserId)) {
-      return res.status(400).json({ status: false, message: 'Invalid userId' });
-    }
-
-    // console.log('Effective userId:', effectiveUserId);
-
-    // const existingToken = await RefreshToken.findMatchingToken(device, effectiveUserId);
-    const existingToken = await RefreshToken.findOne({ device, userId: effectiveUserId });
-
-    console.log('existingToken userId:', existingToken?.device);
-
-    if (!existingToken) {
-      console.error("No matching refresh token found in database.");
-      return res.status(403).json({ status: false, message: 'Invalid refresh token' });
-    }
-
-    // ❌ Delete old toke
-    // console.log("Deleting old refresh token from database.");
-    await RefreshToken.deleteOne({ _id: existingToken._id });
-
-    // ✅ Generate new tokens
-    const user = await User.findById(effectiveUserId);
-    if (!user) {
-      console.error("User not found for decoded refresh token.");
-      return res.status(404).json({ status: false, message: 'User not found' });
-    }
-
-    // Generate tokens with shorter expiry for testing
-    // console.log("Generating new access and refresh tokens with short expiry for testing. user = ", user);
-    const accessToken = await generateAccessToken(user); // when we send this user there should be isSetupCompleted key 
-    const newRefreshToken = generateRefreshToken(user); // 2 minutes expiry
-
-    const refreshTokenExpireAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60 * 1000);
-    await RefreshToken.create({
-      userId: user._id,
-      token: newRefreshToken, // ⚠ Model should auto-hash this
-      userAgent: req.headers['user-agent'],
-      ip: req.ip,
-      expiresAt: refreshTokenExpireAt,
-      device,
+    return sendSuccess(res, {
+      message: 'Gateway access token refreshed.',
+      data: session,
+      meta: current.legacy
+        ? {
+            deprecation: 'Send data.refreshToken as refreshToken on the next refresh request.',
+          }
+        : null,
     });
-
-    console.log("Token refresh successful, returning response.", timestamp);
-
-    // 📅 Calculate and send the new access token expiry time
-    const accessTokenExpireAt = Date.now() + ACCESS_TOKEN_EXPIRE_MINUTES * 60 * 1000;
-
-    return res.status(200).json({
-      status: true,
-      message: 'Access token refreshed',
-      accessTokenExpireAt: accessTokenExpireAt,
-      "data": {
-        tokenType: 'Bearer',
-        "accessToken": accessToken,
-        "accessTokenExpireAt": accessTokenExpireAt
-      }
-    });
-  } catch (err) {
-    console.error('Refresh Token Error:', err);
-    return res.status(403).json({ status: false, message: 'Invalid or expired refresh token' });
+  } catch (error) {
+    return handleError(res, error, req);
   }
-};
+}
 
 export async function gateWayLogout(req, res) {
-    try {
-        const { device = 'gateway' } = req.body;
+  try {
+    const device = normalizeDevice(req.body?.device);
+    const suppliedToken = String(req.body?.refreshToken || bearerToken(req) || '').trim();
+    let result;
 
-        await RefreshToken.deleteMany({
-            userId: req.user.id,
-            device
+    if (suppliedToken) {
+      let claims = null;
+      try {
+        claims = jwt.verify(suppliedToken, process.env.JWT_REFRESH_SECRET);
+      } catch {
+        claims = null;
+      }
+      if (!claims?.userId) {
+        throw new AppError('A valid refresh token is required.', {
+          statusCode: 401,
+          code: 'GATEWAY_REFRESH_INVALID',
         });
-
-        return res.status(200).json({
-            status: true,
-            message: "Logged out successfully."
+      }
+      const hashedToken = RefreshToken.hashToken(suppliedToken);
+      result = await RefreshToken.deleteOne({
+        token: hashedToken,
+        userId: claims.userId,
+        device,
+      });
+    } else {
+      const userId = String(req.body?.userId || '').trim();
+      if (!mongoose.Types.ObjectId.isValid(userId)) {
+        throw new AppError('userId is required.', {
+          statusCode: 400,
+          code: 'VALIDATION_ERROR',
         });
-    } catch (error) {
-        return handleError(res, error);
+      }
+      result = await RefreshToken.deleteMany({ userId, device });
     }
+
+    return sendSuccess(res, {
+      message: 'Gateway logged out successfully.',
+      data: { sessionsRevoked: result.deletedCount || 0 },
+    });
+  } catch (error) {
+    return handleError(res, error, req);
+  }
 }

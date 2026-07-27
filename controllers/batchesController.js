@@ -8,6 +8,7 @@ import {
   issue as issueInventory,
   receive as receiveInventory,
 } from '../services/inventoryService.js';
+import { AppError, handleError } from '../utils/errorHandler.js';
 
 const MASS_TO_GRAMS = {
   mg: 0.001,
@@ -33,27 +34,22 @@ const BATCH_POPULATE = [
 ];
 
 const httpError = (message, status = 400) => {
-  const error = new Error(message);
-  error.status = status;
-  return error;
+  return new AppError(message, {
+    statusCode: status,
+    code: status === 404 ? 'BATCH_NOT_FOUND' : 'BATCH_REQUEST_INVALID',
+  });
 };
 
-const sendHttpError = (res, error) => {
-  let status = Number(error?.status || error?.statusCode) || 500;
-  let message = String(error?.message || 'Request failed');
-
+const handleBatchError = (req, res, error) => {
   if (error?.code === 11000) {
-    status = 409;
-    message = 'A batch with this Batch ID already exists';
+    return handleError(res, new AppError('A batch with this Batch ID already exists.', {
+      statusCode: 409,
+      code: 'DUPLICATE_BATCH_ID',
+      details: error.keyValue || null,
+    }), req);
   }
 
-  return res.status(status).json({
-    success: false,
-    message,
-    ...(error?.errors && typeof error.errors === 'object'
-      ? { errors: error.errors }
-      : {}),
-  });
+  return handleError(res, error, req);
 };
 
 const normalizeUnit = (unit) => String(unit || '').trim().toLowerCase();
@@ -396,7 +392,7 @@ export const createBatch = async (req, res) => {
       data: created,
     });
   } catch (error) {
-    return sendHttpError(res, error);
+    return handleBatchError(req, res, error);
   } finally {
     if (session) await session.endSession();
   }
@@ -418,7 +414,7 @@ export const listBatches = async (req, res) => {
       .sort({ date: -1, createdAt: -1 });
     return res.json(batches);
   } catch (error) {
-    return sendHttpError(res, error);
+    return handleBatchError(req, res, error);
   }
 };
 
@@ -429,7 +425,7 @@ export const getBatchById = async (req, res) => {
     ensureBatchScope(batch, req.user?.companyId);
     return res.json(batch);
   } catch (error) {
-    return sendHttpError(res, error);
+    return handleBatchError(req, res, error);
   }
 };
 
@@ -475,7 +471,7 @@ export const updateBatch = async (req, res) => {
     await batch.populate(BATCH_POPULATE);
     return res.json({ success: true, data: batch });
   } catch (error) {
-    return sendHttpError(res, error);
+    return handleBatchError(req, res, error);
   }
 };
 
@@ -509,7 +505,7 @@ export const deleteBatch = async (req, res) => {
       message: 'Batch deleted and issued materials returned to inventory',
     });
   } catch (error) {
-    return sendHttpError(res, error);
+    return handleBatchError(req, res, error);
   } finally {
     if (session) await session.endSession();
   }
@@ -554,7 +550,7 @@ export const addBatchMaterial = async (req, res) => {
     await batch.populate(BATCH_POPULATE);
     return res.status(201).json({ success: true, data: batch });
   } catch (error) {
-    return sendHttpError(res, error);
+    return handleBatchError(req, res, error);
   } finally {
     if (session) await session.endSession();
   }
@@ -599,7 +595,7 @@ export const removeBatchMaterial = async (req, res) => {
     await batch.populate(BATCH_POPULATE);
     return res.json({ success: true, data: batch });
   } catch (error) {
-    return sendHttpError(res, error);
+    return handleBatchError(req, res, error);
   } finally {
     if (session) await session.endSession();
   }

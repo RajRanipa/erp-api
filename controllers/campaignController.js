@@ -1,5 +1,3 @@
-// /controller/campaignController.js
-// controllers/campaignController.js
 import Campaign from '../models/Campaign.js';
 import { handleError } from '../utils/errorHandler.js';
 
@@ -125,8 +123,7 @@ export const createCampaign = async (req, res) => {
     const saved = await doc.save();
     return res.status(201).json({ success: true, data: pickCampaign(saved) });
   } catch (err) {
-    console.error('createCampaign error:', err);
-    return res.status(500).json({ success: false, message: 'Failed to create campaign', error: err.message });
+    return handleError(res, err, req);
   }
 };
 
@@ -135,8 +132,7 @@ export const activeCampaigns = async (req, res) => {
     const rows = await Campaign.find({status : 'RUNNING'}).sort({ startDate: -1, createdAt: -1 }).lean();
     return res.status(200).json(rows);
   } catch (err) {
-    console.error('listCampaigns error:', err);
-    return res.status(500).json({ success: false, message: 'Failed to fetch campaigns', error: err.message });
+    return handleError(res, err, req);
   }
 };
 
@@ -146,8 +142,7 @@ export const listCampaigns = async (req, res) => {
     // console.log(rows);
     return res.status(200).json(rows);
   } catch (err) {
-    console.error('listCampaigns error:', err);
-    return res.status(500).json({ success: false, message: 'Failed to fetch campaigns', error: err.message });
+    return handleError(res, err, req);
   }
 };
 
@@ -159,8 +154,7 @@ export const getCampaignById = async (req, res) => {
     if (!row) return res.status(404).json({ success: false, message: 'Campaign not found' });
     return res.status(200).json(row);
   } catch (err) {
-    console.error('getCampaignById error:', err);
-    return res.status(500).json({ success: false, message: 'Failed to fetch campaign', error: err.message });
+    return handleError(res, err, req);
   }
 };
 
@@ -184,8 +178,7 @@ export const updateCampaign = async (req, res) => {
     if (!updated) return res.status(404).json({ success: false, message: 'Campaign not found' });
     return res.status(200).json({ success: true, data: pickCampaign(updated) });
   } catch (err) {
-    console.error('updateCampaign error:', err);
-    return res.status(500).json({ success: false, message: 'Failed to update campaign', error: err.message });
+    return handleError(res, err, req);
   }
 };
 
@@ -196,7 +189,6 @@ export const deleteCampaign = async (req, res) => {
     if (!deleted) return res.status(404).json({ success: false, message: 'Campaign not found' });
     return res.status(200).json({ success: true, message: 'Campaign deleted' });
   } catch (err) {
-    console.error('deleteCampaign error:', err);
-    return res.status(500).json({ success: false, message: 'Failed to delete campaign', error: err.message });
+    return handleError(res, err, req);
   }
 };

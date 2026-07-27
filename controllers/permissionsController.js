@@ -6,11 +6,12 @@ import { ALL_PERMISSION_KEYS, normalizeRoleKey } from '../config/permissionCatal
 import {
   canManageRole,
   findCompanyRole,
+  permissionImplies,
   resolveAccessContext,
   syncPermissionCatalog,
 } from '../services/accessControlService.js';
-import { permissionImplies } from '../services/accessControlService.js';
 import { recordUserAudit } from '../utils/userAudit.js';
+import { handleError } from '../utils/errorHandler.js';
 
 const roleDto = (role, memberCount = 0) => ({
   id: String(role._id),
@@ -58,7 +59,7 @@ export const listPermissions = async (req, res) => {
       .lean();
     return res.json({ status: true, permissions });
   } catch (error) {
-    return res.status(500).json({ status: false, message: 'Failed to list permissions.' });
+    return handleError(res, error, req);
   }
 };
 
@@ -82,7 +83,7 @@ export const listRoles = async (req, res) => {
       roles: roles.map((role) => roleDto(role, countByRole.get(String(role._id)) || 0)),
     });
   } catch (error) {
-    return res.status(500).json({ status: false, message: 'Failed to list roles.' });
+    return handleError(res, error, req);
   }
 };
 
@@ -141,7 +142,7 @@ export const createRole = async (req, res) => {
     if (error?.code === 11000) {
       return res.status(409).json({ status: false, message: 'A role with this key already exists.' });
     }
-    return res.status(500).json({ status: false, message: 'Failed to create role.' });
+    return handleError(res, error, req);
   }
 };
 
@@ -171,7 +172,7 @@ export const updateRole = async (req, res) => {
     await recordUserAudit(req, 'role.updated', { metadata: { roleId: role._id } });
     return res.json({ status: true, data: roleDto(role) });
   } catch (error) {
-    return res.status(500).json({ status: false, message: 'Failed to update role.' });
+    return handleError(res, error, req);
   }
 };
 
@@ -195,7 +196,7 @@ export const deleteRole = async (req, res) => {
     await recordUserAudit(req, 'role.archived', { metadata: { roleId: role._id } });
     return res.json({ status: true, message: 'Role archived.' });
   } catch (error) {
-    return res.status(500).json({ status: false, message: 'Failed to archive role.' });
+    return handleError(res, error, req);
   }
 };
 
@@ -247,6 +248,6 @@ export const setRolePermissions = async (req, res) => {
       assigned: role.permissions,
     });
   } catch (error) {
-    return res.status(500).json({ status: false, message: 'Failed to update role permissions.' });
+    return handleError(res, error, req);
   }
 };
