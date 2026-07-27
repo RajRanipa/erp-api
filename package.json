@@ -16,8 +16,9 @@
     "migrate:item-module": "node scripts/migrateItemModule.js --apply",
     "audit:party-module": "node scripts/migratePartyModule.js",
     "migrate:party-module": "node scripts/migratePartyModule.js --apply",
-    "seed:permissions": "node scripts/seedPermissions.js",
-    "seed:inventory-permissions": "node scripts/seedInventoryPermissions.js"
+    "sync:permissions": "node scripts/syncPermissionCatalog.js",
+    "audit:user-module": "node scripts/migrateUserModule.js",
+    "migrate:user-module": "node scripts/migrateUserModule.js --apply"
   },
   "keywords": [],
   "author": "Raj",

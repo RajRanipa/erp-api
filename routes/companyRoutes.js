@@ -13,6 +13,7 @@ import auth, { roleAuth } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
+router.use(auth);
 
 // POST create
 router.post('/', roleAuth('companies:create'), createCompany);

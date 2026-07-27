@@ -11,7 +11,12 @@ const refreshTokenSchema = new mongoose.Schema({
     type: String,
     required: true,
     unique: true,
+    select: false,
   },
+  companyId: { type: mongoose.Schema.Types.ObjectId, ref: 'Company', index: true, default: null },
+  membershipId: { type: mongoose.Schema.Types.ObjectId, ref: 'Membership', index: true, default: null },
+  tokenVersion: { type: Number, required: true, default: 0 },
+  sessionId: { type: String, required: true, unique: true, index: true, default: () => crypto.randomUUID() },
   userAgent: String,
   ip: String,
   createdAt: {
@@ -25,7 +30,7 @@ const refreshTokenSchema = new mongoose.Schema({
   device:{
     type: String,
   }
-});
+}, { timestamps: true });
 
 // 👇 TTL index correctly defined here
 refreshTokenSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
@@ -47,7 +52,7 @@ refreshTokenSchema.statics.findMatchingToken = async function (plainToken, userI
   // console.log('plainToken', plainToken);
   // console.log('userId', userId);
   const hashed = this.hashToken(plainToken);
-  return await this.findOne({ token: hashed, userId });
+  return await this.findOne({ token: hashed, userId }).select('+token');
 };
 
 const RefreshToken = mongoose.model('RefreshToken', refreshTokenSchema);

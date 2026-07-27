@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
-import Permission from '../models/Permission.js';
+import crypto from 'crypto';
+import { resolveAccessContext } from '../services/accessControlService.js';
 
 export const ACCESS_TOKEN_EXPIRE_MINUTES = 15;
 export const REFRESH_TOKEN_EXPIRE_DAYS = 7;
@@ -15,29 +16,43 @@ export const REFRESH_TOKEN_EXPIRE_DAYS = 7;
 // };
 
 export const generateAccessToken = async (user) => {
-  // console.log("Generating Access Token for user:", user);
-  const permKeys = await Permission.distinct('key', { roles: user?.role });
+  const userId = user?._id || user?.id || user?.userId;
+  const context = await resolveAccessContext({
+    userId,
+    companyId: user?.companyId || null,
+  });
+  if (!context) throw new Error('Cannot generate token for an unknown user');
 
   const payload = {
-    userId: user._id || user.id,
-    companyId: user.companyId || null,
-    role: user.role || 'employee',
-    isSetupCompleted: user.isSetupCompleted || false,
-    permissions: Array.isArray(permKeys) ? permKeys : [],
+    userId: context.user._id,
+    companyId: context.companyId || null,
+    membershipId: context.membership?._id || null,
+    membershipVersion: context.membership?.accessVersion || 0,
+    roleId: context.role?._id || null,
+    role: context.roleKey,
+    isOwner: context.isOwner,
+    tokenVersion: context.user.tokenVersion || 0,
+    isSetupCompleted: user?.isSetupCompleted ?? context.user.isSetupCompleted ?? false,
+    permissions: context.permissions,
   };
-  // console.log("generateAccessToken payload -> ", payload)
-  const newToken = jwt.sign(payload, process.env.JWT_ACCESS_SECRET, {
+  return jwt.sign(payload, process.env.JWT_ACCESS_SECRET, {
     expiresIn: `${ACCESS_TOKEN_EXPIRE_MINUTES}m`,
   });
-  // console.log("generateAccessToken newToken -> ", newToken)
-  return newToken
 };
 
 // Generate refresh token (long-lived)
 export const generateRefreshToken = (user) => {
-  // console.log("Generating Refresh Token for user:", 'user =');
+  const sessionId = crypto.randomUUID();
   return jwt.sign(
-    { userId: user._id || user.id, email: user.email },
+    {
+      userId: user._id || user.id || user.userId,
+      companyId: user.companyId || null,
+      membershipId: user.membershipId || null,
+      membershipVersion: user.membershipVersion || 0,
+      tokenVersion: user.tokenVersion || 0,
+      sessionId,
+      type: 'refresh',
+    },
     process.env.JWT_REFRESH_SECRET,
     { expiresIn: `${REFRESH_TOKEN_EXPIRE_DAYS}d` }
   );

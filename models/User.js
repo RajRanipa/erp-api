@@ -19,13 +19,15 @@ const userSchema = new mongoose.Schema(
     password: {
       type: String,
       required: [true, 'Password is required'],
-      minlength: [6, 'Password must be at least 6 characters'],
+      minlength: [10, 'Password must be at least 10 characters'],
       select: false,
     },
     role: {
       type: String,
-      enum: ['owner', 'admin', 'manager', 'store_operator', 'production_manager', 'employee', 'accountant', 'viewer', 'staff'],
+      trim: true,
+      lowercase: true,
       required: [true, 'Role is required'],
+      default: 'employee',
     },
     companyId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -61,7 +63,7 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
-    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null, timestamps: true },
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     status: {
       type: String,
       enum: ['pending', 'active', 'suspended', 'disabled'],
@@ -72,6 +74,13 @@ const userSchema = new mongoose.Schema(
     disabledBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     // auth hygiene — bump to invalidate existing JWTs
     tokenVersion: { type: Number, default: 0 },
+    pendingEmail: {
+      type: String,
+      lowercase: true,
+      trim: true,
+      default: null,
+    },
+    passwordChangedAt: Date,
   },
   { timestamps: true }
 );
@@ -94,6 +103,8 @@ userSchema.methods.comparePassword = async function (inputPassword) {
 
   return isMatch;
 };
+
+userSchema.index({ companyId: 1, status: 1, fullName: 1 });
 
 const User = mongoose.model('User', userSchema);
 

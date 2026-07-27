@@ -3,8 +3,11 @@
 
 import Company from '../models/Company.js';
 import User from '../models/User.js';
+import Membership from '../models/Membership.js';
 import { handleError } from '../utils/errorHandler.js';
-import { ACCESS_TOKEN_EXPIRE_MINUTES, generateAccessToken } from '../utils/tokenUtils.js';
+import { generateAccessToken } from '../utils/tokenUtils.js';
+import { ensureCompanyRoles, findCompanyRole } from '../services/accessControlService.js';
+import { setAuthCookies } from '../utils/authCookies.js';
 
 // Helper: ensure the authenticated user can access the given company
 function assertCompanyAccess(req, companyDoc) {
@@ -247,15 +250,28 @@ export async function createCompany(req, res) {
       logoUrl: logoUrl || undefined,
     });
 
-    // Link user -> company
+    const userId = user.userId || user.id || user._id;
+    const companyRoles = await ensureCompanyRoles(company._id, userId);
+    const ownerRole = companyRoles.find((role) => role.isOwner)
+      || await findCompanyRole(company._id, 'owner');
+    await Membership.findOneAndUpdate(
+      { userId, companyId: company._id },
+      {
+        $set: { roleId: ownerRole._id, status: 'active', isDefault: true },
+        $setOnInsert: { joinedAt: new Date() },
+      },
+      { upsert: true, new: true },
+    );
+
+    // Compatibility mirror for modules that still read these fields directly.
     await User.findByIdAndUpdate(
-      user.userId || user.id || user._id,
-      { $set: { companyId: company._id }, $setOnInsert: {} },
+      userId,
+      { $set: { companyId: company._id, role: 'owner' } },
       { new: true }
     );
     // here if company is created we need to clear old accesstoken and create new accesstoken with this company id also 
     const payload = {
-      id: user._id || user.id,
+      id: userId,
       companyId: company._id || null,
       role: user.role || 'employee',
       isSetupCompleted: user.isSetupCompleted || false,
@@ -263,21 +279,9 @@ export async function createCompany(req, res) {
       companyName: company.companyName || null,
     };
 
-    res.clearCookie('accessToken', {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.Strict_Mode,
-      domain: process.env.Domain_Name.includes('localhost') ? '' : process.env.Domain_Name,
-    });
-    const accessToken = generateAccessToken(payload);
-
-    res.cookie('accessToken', accessToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.Strict_Mode,
-      domain: process.env.Domain_Name.includes('localhost') ? '' : process.env.Domain_Name,
-      maxAge: ACCESS_TOKEN_EXPIRE_MINUTES * 60 * 1000,
-    });
+    const accessToken = await generateAccessToken(payload);
+    const refreshToken = req.cookies?.refreshToken;
+    if (refreshToken) setAuthCookies(res, { accessToken, refreshToken });
 
     return res.status(201).json({ status: true, message: 'Company created', data: company });
   } catch (error) {
@@ -507,20 +511,9 @@ export async function finishCompany(req, res) {
     };
 
     // rotate cookie
-    res.clearCookie('accessToken', {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.Strict_Mode,
-      domain: process.env.Domain_Name?.includes('localhost') ? '' : process.env.Domain_Name,
-    });
-    const accessToken = generateAccessToken(payload);
-    res.cookie('accessToken', accessToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.Strict_Mode,
-      domain: process.env.Domain_Name?.includes('localhost') ? '' : process.env.Domain_Name,
-      maxAge: ACCESS_TOKEN_EXPIRE_MINUTES * 60 * 1000,
-    });
+    const accessToken = await generateAccessToken(payload);
+    const refreshToken = req.cookies?.refreshToken;
+    if (refreshToken) setAuthCookies(res, { accessToken, refreshToken });
 
     return res.status(200).json({ status: true, message: 'Company setup finished', data: saved });
   } catch (error) {

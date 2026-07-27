@@ -1,574 +1,624 @@
-// controllers/inviteController.js
 import crypto from 'crypto';
+import mongoose from 'mongoose';
 import Invite from '../models/Invite.js';
 import User from '../models/User.js';
 import Company from '../models/Company.js';
-import sendMail from '../utils/sendMail.js'; // your nodemailer/helper
-import Permission from '../models/Permission.js';
-import { getAllowedRoles } from '../controllers/permissionsController.js';
-import { handleError } from '../utils/errorHandler.js';
-import mongoose from 'mongoose';
+import Membership from '../models/Membership.js';
 import RefreshToken from '../models/RefreshToken.js';
+import UserAuditLog from '../models/UserAuditLog.js';
+import sendMail from '../utils/sendMail.js';
+import {
+  canManageRole,
+  countActiveOwners,
+  findCompanyRole,
+  resolveAccessContext,
+} from '../services/accessControlService.js';
+import { recordUserAudit } from '../utils/userAudit.js';
 
-const hash = (s) => crypto.createHash('sha256').update(s).digest('hex');
+const hash = (value) => crypto.createHash('sha256').update(value).digest('hex');
 const genToken = () => crypto.randomBytes(32).toString('hex');
+const normalizeEmail = (value) => String(value || '').trim().toLowerCase();
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-/**
- * Force logout across all devices:
- * - Bumps tokenVersion so existing JWTs become invalid (server must check tokenVersion on each request).
- * - Deletes refresh tokens if a RefreshToken model exists.
- */
-async function forceLogoutEverywhere(userId) {
-  // Ensure any existing tokens become invalid
-  await User.updateOne({ _id: userId }, { $inc: { tokenVersion: 1 } });
+const escapeHtml = (value = '') => String(value)
+  .replaceAll('&', '&amp;')
+  .replaceAll('<', '&lt;')
+  .replaceAll('>', '&gt;')
+  .replaceAll('"', '&quot;')
+  .replaceAll("'", '&#039;');
 
-  // If you keep refresh tokens, clear them (works only if model is registered)
-  try {
-    const RT = mongoose.models?.RefreshToken;
-    if (RT) {
-      await RT.deleteMany({ userId });
-    }
-  } catch (e) {
-    // ignore if model isn't present
+const safeInvite = (invite) => ({
+  _id: String(invite._id),
+  email: invite.email,
+  inviteeName: invite.inviteeName || '',
+  roleId: invite.roleId?._id ? String(invite.roleId._id) : String(invite.roleId || ''),
+  roleKey: invite.roleId?.key || invite.roleKey || invite.role,
+  roleName: invite.roleId?.name || invite.roleKey || invite.role,
+  companyName: invite.companyName || '',
+  status: invite.status,
+  emailStatus: invite.emailStatus,
+  expiresAt: invite.expiresAt,
+  createdAt: invite.createdAt,
+  updatedAt: invite.updatedAt,
+});
+
+async function actorContext(req) {
+  return req.authContext || resolveAccessContext({
+    userId: req.user.userId,
+    companyId: req.user.companyId,
+  });
+}
+
+async function resolveAssignableRole(req, reference) {
+  const role = await findCompanyRole(req.user.companyId, reference);
+  if (!role) return { error: 'Selected role does not exist or is archived.' };
+  const actor = await actorContext(req);
+  if (!canManageRole(actor, role)) {
+    return { error: 'You cannot assign a role with equal or greater authority than your own.' };
   }
+  return { role };
+}
+
+async function sendInviteEmail({ invite, token }) {
+  const link = `${process.env.CLIENT_URL}/accept-invite?token=${encodeURIComponent(token)}`;
+  const companyName = escapeHtml(invite.companyName || 'JNR ERP');
+  const inviteeName = escapeHtml(invite.inviteeName || '');
+  const roleName = escapeHtml(invite.roleId?.name || invite.roleKey);
+
+  await sendMail({
+    to: invite.email,
+    subject: `You're invited to ${invite.companyName || 'JNR ERP'}`,
+    html: `
+      <div style="background:#f4f4f5;padding:28px;font-family:Arial,sans-serif">
+        <div style="max-width:600px;margin:auto;background:#fff;border-radius:12px;padding:28px">
+          <h2 style="margin-top:0">${companyName}</h2>
+          <p>Hello${inviteeName ? ` ${inviteeName}` : ''},</p>
+          <p>You have been invited to join as <strong>${roleName}</strong>.</p>
+          <p>This secure invitation expires in 7 days.</p>
+          <p style="margin:28px 0">
+            <a href="${link}" style="background:#2563eb;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none">
+              Review invitation
+            </a>
+          </p>
+          <p style="color:#71717a;font-size:12px">If you did not expect this invitation, you can ignore this email.</p>
+        </div>
+      </div>`,
+  });
 }
 
 export async function createInvite(req, res) {
-  // console.log('createInvite hit -> ', req.user);
-  // requirePerm('users:invite')
-  const { email, role = 'staff', name = '' } = req.body || {};
-  const companyId = req.user.companyId;
-
-  // validation for role
-  const allowedRoles = getAllowedRoles(); // get all allowed roles
-  if (!role || !allowedRoles.includes(role)) {
-    return res.status(400).json({ status: false, message: 'Invalid role' });
-  }
-
-  // 1) do not allow inviting an email that already exists as a User (global uniqueness)
-  const existing = await User.findOne({ email });
-  if (existing) return res.status(409).json({ status: false, message: 'User with this email already exists' });
-
-  // 2) close older pending invites for same pair (optional)
-  await Invite.updateMany(
-    { companyId, email, status: 'pending' },
-    { $set: { status: 'revoked', revokedAt: new Date() } }
-  );
-
-  // ensure company info is available for new invite
-  let company = null;
   try {
-    company = await Company.findById(companyId).select('companyName').lean();
-  } catch (err) {
-    console.error('Failed to fetch company info for invite:', err);
+    const email = normalizeEmail(req.body?.email);
+    const inviteeName = String(req.body?.name || req.body?.inviteeName || '').trim();
+    const roleReference = req.body?.roleId || req.body?.role;
+    if (!EMAIL_RE.test(email)) {
+      return res.status(400).json({ status: false, message: 'A valid email is required.' });
+    }
+
+    const { role, error } = await resolveAssignableRole(req, roleReference);
+    if (error) return res.status(403).json({ status: false, message: error });
+
+    const existingUser = await User.findOne({ email }).select('_id');
+    if (existingUser) {
+      const membership = await Membership.findOne({
+        userId: existingUser._id,
+        companyId: req.user.companyId,
+      });
+      if (membership?.status === 'active') {
+        return res.status(409).json({ status: false, message: 'This person is already a member.' });
+      }
+    }
+
+    await Invite.updateMany(
+      { companyId: req.user.companyId, email, status: 'pending' },
+      { $set: { status: 'revoked', revokedAt: new Date() } },
+    );
+
+    const company = await Company.findById(req.user.companyId).select('companyName').lean();
+    const token = genToken();
+    const invite = await Invite.create({
+      companyId: req.user.companyId,
+      email,
+      inviteeName,
+      roleId: role._id,
+      roleKey: role.key,
+      role: role.key,
+      inviterId: req.user.userId,
+      tokenHash: hash(token),
+      companyName: company?.companyName || '',
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    });
+    invite.roleId = role;
+
+    try {
+      await sendInviteEmail({ invite, token });
+    } catch (mailError) {
+      await Invite.updateOne(
+        { _id: invite._id },
+        {
+          $set: {
+            status: 'revoked',
+            revokedAt: new Date(),
+            emailStatus: 'undeliverable',
+            emailStatusCode: mailError?.code || 'SEND_FAILED',
+          },
+        },
+      );
+      return res.status(502).json({
+        status: false,
+        message: 'The invitation email could not be delivered. No active invitation was left behind.',
+      });
+    }
+
+    await recordUserAudit(req, 'invite.created', {
+      metadata: { inviteId: invite._id, email, roleId: role._id },
+    });
+    return res.status(201).json({
+      status: true,
+      message: 'Invitation sent.',
+      data: safeInvite(invite),
+    });
+  } catch (error) {
+    console.error('createInvite error:', error);
+    return res.status(500).json({ status: false, message: 'Failed to send invitation.' });
   }
-
-  const inviteeName = (name || '').trim();
-
-  const token = genToken();
-  const tokenHash = hash(token);
-
-  // return // console.log('company', company);
-  const invite = await Invite.create({
-    companyId,
-    email,
-    role,
-    inviterId: req.user.userId || req.user.id || req.user._id || null,
-    tokenHash,
-    companyName: company?.companyName || '',
-    inviteeName: inviteeName,
-    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 days
-  });
-
-  const link = `${process.env.CLIENT_URL}/accept-invite?token=${encodeURIComponent(token)}`;
-  console.log('link 1', link);
-  await sendMail({
-    to: email,
-    subject: `You're invited to ${company?.companyName || 'our JNR ERP'}`,
-    html: `
-    <table width="100%" cellspacing="0" cellpadding="0" border="0" style="border-radius:8px; background-color:#e2e2e2; padding:24px 10px;">
-      <tr>
-        <td align="center">
-          <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px; background-color:#ffffff; border-radius:8px; overflow:hidden; font-family:Arial, sans-serif;">
-            <tr>
-              <td style="padding:20px 18px; border-bottom:1px solid #eee;">
-                <h1 style="margin:0; font-size:18px; color:#222;">${company?.companyName || 'JNR ERP'}</h1>
-              </td>
-            </tr>
-            <tr>
-              <td style="padding:20px 18px; font-size:14px; color:#333; line-height:1.6;">
-                <p style="margin:0 0 12px;">Hello${inviteeName ? ' ' + inviteeName : ''},</p>
-                <p style="margin:0 0 12px;">
-                  You’ve been invited to join <b>${company?.companyName || 'our JNR ERP workspace'}</b> as
-                  <b>${role}</b>.
-                </p>
-                <p style="margin:0 0 16px;">
-                  Click the button below to accept your invitation and set up your account. This link is secure and
-                  valid for <b>7 days</b>.
-                </p>
-                <p style="margin:0 0 20px;" align="center">
-                  <a href="${link}" style="display:inline-block; background-color:#007bff; color:#ffffff; text-decoration:none; padding:10px 24px; border-radius:4px; font-size:14px;">Accept your invite</a>
-                </p>
-                <p style="margin:0 0 8px; font-size:12px; color:#777;">
-                  If you did not expect this email, you can safely ignore it.
-                </p>
-              </td>
-            </tr>
-          </table>
-        </td>
-      </tr>
-    </table>
-    `
-  });
-
-  return res.json({ status: true, message: 'Invite sent', data: { id: invite._id, email, role } });
 }
 
 export async function resendInvite(req, res) {
-  // requirePerm('users:invite')
-  const { id } = req.params;
-  const invite = await Invite.findOne({ _id: id, companyId: req.user.companyId });
-  // console.log('resendInvite hit', invite);
-  if (!invite || invite.status !== 'pending') return res.status(404).json({ status: false, message: 'Invite not found' });
+  try {
+    const invite = await Invite.findOne({
+      _id: req.params.id,
+      companyId: req.user.companyId,
+      status: 'pending',
+    }).populate('roleId');
+    if (!invite) return res.status(404).json({ status: false, message: 'Pending invitation not found.' });
 
-  // rotate token
-  const token = genToken();
-  invite.tokenHash = hash(token);
-  invite.expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-  await invite.save();
+    const { role, error } = await resolveAssignableRole(req, invite.roleId?._id);
+    if (error) return res.status(403).json({ status: false, message: error });
 
-  const link = `${process.env.CLIENT_URL}/accept-invite?token=${encodeURIComponent(token)}`;
-  // await sendMail({ to: invite.email, subject: 'Your invite link', html: `<a href="${link}">Accept invite</a>` });
-  console.log('link 2', link);
-  await sendMail({
-    to: invite.email,
-    subject: `You're invited to ${invite?.companyName || 'our JNR ERP'}`,
-    html: `
-    <table width="100%" cellspacing="0"  cellpadding="0" border="0" style="border-radius:8px; background-color:#e2e2e2; padding:24px 10px;">
-      <tr>
-        <td align="center">
-          <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px; background-color:#ffffff; border-radius:8px; overflow:hidden; font-family:Arial, sans-serif;">
-            <tr>
-              <td style="padding:20px 18px; border-bottom:1px solid #eee;">
-                <h1 style="margin:0; font-size:18px; color:#222;">${invite?.companyName || 'JNR ERP'}</h1>
-              </td>
-            </tr>
-            <tr>
-              <td style="padding:20px 18px; font-size:14px; color:#333; line-height:1.6;">
-                <p style="margin:0 0 12px;">Hello${invite?.inviteeName ? ' ' + invite.inviteeName : ''},</p>
-                <p style="margin:0 0 12px;">
-                  This is a reminder of your invitation to join <b>${invite?.companyName || 'our JNR ERP workspace'}</b>
-                  as <b>${invite.role}</b>.
-                </p>
-                <p style="margin:0 0 16px;">
-                  Click the button below to accept your invitation. This link is secure and valid for <b>7 days</b> from now.
-                </p>
-                <p style="margin:0 0 20px;" align="center">
-                  <a href="${link}" style="display:inline-block; background-color:#007bff; color:#ffffff; text-decoration:none; padding:10px 24px; border-radius:4px; font-size:14px;">Accept your invite</a>
-                </p>
-                <p style="margin:0 0 8px; font-size:12px; color:#777;">
-                  If you did not expect this email, you can safely ignore it.
-                </p>
-              </td>
-            </tr>
-          </table>
-        </td>
-      </tr>
-    </table>
-    `
-  });
-  res.json({ status: true, message: 'Invite re-sent' });
+    const token = genToken();
+    invite.tokenHash = hash(token);
+    invite.expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    invite.emailStatus = 'active';
+    invite.roleId = role;
+    await invite.save();
+    await sendInviteEmail({ invite, token });
+    await recordUserAudit(req, 'invite.resent', { metadata: { inviteId: invite._id } });
+    return res.json({ status: true, message: 'Invitation resent.', data: safeInvite(invite) });
+  } catch (error) {
+    console.error('resendInvite error:', error);
+    return res.status(500).json({ status: false, message: 'Failed to resend invitation.' });
+  }
 }
 
 export async function revokeInvite(req, res) {
-  // requirePerm('users:invite')
-  const { id } = req.params;
   const invite = await Invite.findOneAndUpdate(
-    { _id: id, companyId: req.user.companyId, status: 'pending' },
-    { $set: { status: 'revoked', revokedAt: new Date() } },
-    { new: true }
-  );
-  if (!invite) return res.status(404).json({ status: false, message: 'Invite not found' });
-  res.json({ status: true, message: 'Invite revoked' });
+    { _id: req.params.id, companyId: req.user.companyId, status: 'pending' },
+    { $set: { status: 'revoked', revokedAt: new Date(), tokenHash: hash(genToken()) } },
+    { new: true },
+  ).populate('roleId');
+  if (!invite) return res.status(404).json({ status: false, message: 'Pending invitation not found.' });
+  await recordUserAudit(req, 'invite.revoked', { metadata: { inviteId: invite._id } });
+  return res.json({ status: true, message: 'Invitation revoked.' });
 }
 
 export async function validateInvite(req, res) {
-  const { token } = req.query || {};
-  if (!token) return res.status(400).json({ status: false, message: 'Missing token' });
-
-  const invite = await Invite.findOne({ tokenHash: hash(token), status: 'pending' });
-  if (!invite) return res.status(410).json({ status: false, message: 'Invalid or expired invite' });
-  if (invite.expiresAt < new Date()) return res.status(410).json({ status: false, message: 'Invite expired' });
-
-  res.json({ status: true, email: invite.email, companyName: invite.companyName, role: invite.role, name: invite.inviteeName || '' });
+  const token = String(req.query?.token || '');
+  if (!token) return res.status(400).json({ status: false, message: 'Invitation token is required.' });
+  const invite = await Invite.findOne({ tokenHash: hash(token), status: 'pending' }).populate('roleId');
+  if (!invite || invite.expiresAt <= new Date()) {
+    return res.status(410).json({ status: false, message: 'This invitation is invalid or expired.' });
+  }
+  const existingAccount = Boolean(await User.exists({ email: invite.email }));
+  return res.json({
+    status: true,
+    email: invite.email,
+    companyName: invite.companyName,
+    role: invite.roleId?.name || invite.roleKey,
+    roleKey: invite.roleId?.key || invite.roleKey,
+    name: invite.inviteeName || '',
+    existingAccount,
+    expiresAt: invite.expiresAt,
+  });
 }
 
 export async function acceptInvite(req, res) {
-  const { token, name, password } = req.body || {};
-  if (!token || !name || !password) return res.status(400).json({ status: false, message: 'Missing fields' });
+  try {
+    const token = String(req.body?.token || '');
+    const name = String(req.body?.name || '').trim();
+    const password = String(req.body?.password || '');
+    if (!token || !password) {
+      return res.status(400).json({ status: false, message: 'Token and password are required.' });
+    }
 
-  const invite = await Invite.findOne({ tokenHash: hash(token), status: 'pending' });
-  if (!invite) return res.status(410).json({ status: false, message: 'Invalid or expired invite' });
-  if (invite.expiresAt < new Date()) return res.status(410).json({ status: false, message: 'Invite expired' });
+    const invite = await Invite.findOne({ tokenHash: hash(token), status: 'pending' })
+      .select('+tokenHash')
+      .populate('roleId');
+    if (!invite || invite.expiresAt <= new Date() || !invite.roleId || invite.roleId.status !== 'active') {
+      return res.status(410).json({ status: false, message: 'This invitation is invalid or expired.' });
+    }
 
-  // email must still not exist
-  const existing = await User.findOne({ email: invite.email });
-  if (existing) return res.status(409).json({ status: false, message: 'Email already registered' });
+    let user = await User.findOne({ email: invite.email }).select('+password');
+    if (user) {
+      if (!(await user.comparePassword(password))) {
+        return res.status(401).json({ status: false, message: 'Password is incorrect for the existing account.' });
+      }
+      if (user.status !== 'active') {
+        return res.status(403).json({ status: false, message: 'This account is not active.' });
+      }
+    } else {
+      if (name.length < 2) {
+        return res.status(400).json({ status: false, message: 'Your name is required.' });
+      }
+      user = await User.create({
+        email: invite.email,
+        fullName: name,
+        password,
+        companyId: invite.companyId,
+        role: invite.roleId.key,
+        status: 'active',
+        isVerified: true,
+        isSetupCompleted: true,
+        createdBy: invite.inviterId,
+      });
+    }
 
-  // create user under company
-  const user = await User.create({
-    email: invite.email,
-    fullName: name,
-    password,
-    companyId: invite.companyId,
-    isSetupCompleted: invite.companyId ? true : false,
-    role: invite.role,
-    status: 'active',
-    isVerified: true
-  });
+    const membership = await Membership.findOneAndUpdate(
+      { userId: user._id, companyId: invite.companyId },
+      {
+        $set: {
+          roleId: invite.roleId._id,
+          status: 'active',
+          restoredAt: new Date(),
+        },
+        $setOnInsert: {
+          userId: user._id,
+          companyId: invite.companyId,
+          joinedAt: new Date(),
+          invitedBy: invite.inviterId,
+        },
+      },
+      { upsert: true, new: true },
+    );
 
-  invite.status = 'accepted';
-  invite.acceptedAt = new Date();
-  await invite.save();
+    if (!user.companyId) {
+      user.companyId = invite.companyId;
+      user.role = invite.roleId.key;
+      await user.save({ validateBeforeSave: false });
+    }
 
-  // stick to your policy: DO NOT log in on accept → redirect to login
-  res.json({ status: true, message: 'Account created. Please log in.', data: { email: user.email } });
+    invite.status = 'accepted';
+    invite.acceptedAt = new Date();
+    invite.tokenHash = hash(genToken());
+    await invite.save();
+    await recordUserAudit(
+      { ...req, user: { userId: invite.inviterId, companyId: invite.companyId } },
+      'invite.accepted',
+      { targetUserId: user._id, metadata: { membershipId: membership._id, inviteId: invite._id } },
+    );
+    return res.json({
+      status: true,
+      message: 'Invitation accepted. You can now log in.',
+      data: { email: user.email },
+    });
+  } catch (error) {
+    if (error?.code === 11000) {
+      return res.status(409).json({ status: false, message: 'This membership already exists.' });
+    }
+    console.error('acceptInvite error:', error);
+    return res.status(500).json({ status: false, message: 'Failed to accept invitation.' });
+  }
+}
+
+export async function declineInviteByToken(req, res) {
+  const token = String(req.body?.token || '');
+  if (!token) return res.status(400).json({ status: false, message: 'Invitation token is required.' });
+  const invite = await Invite.findOneAndUpdate(
+    { tokenHash: hash(token), status: 'pending' },
+    {
+      $set: {
+        status: 'declined',
+        declinedAt: new Date(),
+        tokenHash: hash(genToken()),
+      },
+    },
+    { new: true },
+  );
+  if (!invite) return res.status(410).json({ status: false, message: 'This invitation is invalid or expired.' });
+  return res.json({ status: true, message: 'Invitation declined.' });
 }
 
 export async function listInvites(req, res) {
   try {
-    const { status } = req.query || {};
-    const filter = { companyId: req.user?.companyId };
-    if (status && typeof status === 'string') {
-      // allow comma-separated: pending,accepted
-      const statuses = status.split(',').map(s => s.trim().toLowerCase());
-      filter.status = { $in: statuses };
-    }
-
-    // Optional pagination
-    const limit = Math.min(Number(req.query.limit) || 100, 200);
+    const allowedStatuses = ['pending', 'accepted', 'revoked', 'expired', 'declined'];
+    const requested = String(req.query?.status || '')
+      .split(',')
+      .map((value) => value.trim().toLowerCase())
+      .filter((value) => allowedStatuses.includes(value));
+    const filter = { companyId: req.user.companyId };
+    if (requested.length) filter.status = { $in: requested };
     const page = Math.max(Number(req.query.page) || 1, 1);
-    const skip = (page - 1) * limit;
-
-    const invites = await Invite.find(filter)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .select('-token') // don't leak token in lists
-      .lean();
-
-    const total = await Invite.countDocuments(filter);
-
-    res.json({ status: true, data: invites, meta: { total, page, limit } });
-  } catch (err) {
-    console.error('listInvites error:', err);
-    res.status(500).json({ status: false, message: 'Failed to list invites' });
-  }
-}
-// controllers/inviteController.js
-
-export const declineInviteByToken = async (req, res) => {
-  // console.log('declineInviteByToken hit');
-  try {
-    const { token } = req.body || {};
-    if (!token) return res.status(400).json({ status: false, message: 'Missing token' });
-    // console.log('token', token);
-    const invite = await Invite.findOne({ tokenHash: hash(token) });
-    if (!invite) return res.status(404).json({ status: false, message: 'Invalid invite token' });
-
-    if (invite.status !== 'pending')
-      return res.status(400).json({ status: false, message: `Invite already ${invite.status}` });
-
-    if (invite.expiresAt && invite.expiresAt < new Date())
-      return res.status(400).json({ status: false, message: 'Invite expired' });
-
-    invite.status = 'declined';
-    invite.declinedAt = new Date();
-    // Optional: rotate/clear token so it can’t be reused
-    invite.tokenHash = undefined;
-    await invite.save();
-    // console.log('invite', invite);
-
-    return res.json({ status: true, message: 'Invite declined' });
-  } catch (err) {
-    return res.status(500).json({ status: false, message: 'Failed to decline invite' });
-  }
-};
-
-// controllers/userController.js
-// Optional: only if you store refresh tokens
-// import RefreshToken from '../models/RefreshToken.js';
-
-export async function removeUser(req, res) {
-  const actingUser = req.user; // populated by your auth middleware
-  const { id } = req.params;
-
-  try {
-    // 1) You cannot remove yourself
-    if (String(actingUser.userId) === String(id)) {
-      return res.status(400).json({ status: false, message: 'You cannot remove yourself.' });
-    }
-
-    // 2) Find the user in the same company
-    const user = await User.findOne({ _id: id, companyId: actingUser.companyId });
-    if (!user) {
-      return res.status(404).json({ status: false, message: 'User not found in your company.' });
-    }
-
-    // 3) Prevent removing the last owner
-    if (user.role === 'owner') {
-      const ownerCount = await User.countDocuments({
-        companyId: user.companyId,
-        role: 'owner',
-        status: 'active',
-        _id: { $ne: user._id }
-      });
-      if (ownerCount === 0) {
-        return res.status(400).json({
-          status: false,
-          message: 'Cannot remove the last owner. Promote another user to owner first.'
-        });
-      }
-    }
-
-    // 4) Soft delete (disable the account) + bump tokenVersion
-    user.status = 'disabled';
-    user.disabledAt = new Date();
-    user.disabledBy = actingUser.userId;
-    user.tokenVersion = (user.tokenVersion || 0) + 1;
-    await user.save();
-
-    // 5) Optional: clear refresh tokens if you store them
-    await RefreshToken.deleteMany({ userId: user._id })
-      .catch((error) => {
-        console.error('Login Error:', error);
-        return handleError(res, error);
-      });
-
+    const limit = Math.min(Math.max(Number(req.query.limit) || 25, 1), 100);
+    const [invites, total] = await Promise.all([
+      Invite.find(filter)
+        .populate('roleId', 'key name')
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+      Invite.countDocuments(filter),
+    ]);
     return res.json({
       status: true,
-      message: 'User removed (disabled) successfully.',
-      data: { id: user._id }
+      data: invites.map(safeInvite),
+      meta: { total, page, limit, pages: Math.ceil(total / limit) },
     });
-  } catch (err) {
-    console.error('removeUser error:', err);
-    return res.status(500).json({ status: false, message: 'Failed to remove user.' });
-  }
-}
-
-export async function updateUserRole(req, res) {
-  const actingUser = req.user; // set by auth middleware
-  const { id } = req.params;
-  const { role: nextRole } = req.body || {};
-
-  try {
-    // validate role
-    const allowedRoles = getAllowedRoles(); // get all allowed roles
-    if (!nextRole || !allowedRoles.includes(nextRole)) {
-      return res.status(400).json({ status: false, message: 'Invalid role' });
-    }
-
-    // You cannot change your own role here (optional safety)
-    if (String(actingUser.userId) === String(id)) {
-      return res.status(400).json({ status: false, message: 'You cannot change your own role.' });
-    }
-
-    // find target user in same company
-    const user = await User.findOne({ _id: id, companyId: actingUser.companyId });
-    if (!user) {
-      return res.status(404).json({ status: false, message: 'User not found in your company.' });
-    }
-
-    // prevent demoting the last owner
-    if (user.role === 'owner' && nextRole !== 'owner') {
-      const ownerCount = await User.countDocuments({ companyId: user.companyId, role: 'owner', status: 'active', _id: { $ne: user._id } });
-      if (ownerCount === 0) {
-        return res.status(400).json({ status: false, message: 'Cannot change role of the last owner.' });
-      }
-    }
-
-    user.role = nextRole;
-    // realign permissions with role map
-    const permKeys = await Permission.getKeysForRole(nextRole);
-    user.permissions = permKeys;
-    await user.save();
-
-    // Invalidate all existing sessions (JWTs + refresh tokens if any)
-    await forceLogoutEverywhere(user._id);
-
-    return res.json({ status: true, message: 'Role updated; user must log in again.', data: { id: user._id, role: user.role } });
-  } catch (err) {
-    console.error('updateUserRole error:', err);
-    return res.status(500).json({ status: false, message: 'Failed to update role' });
+  } catch (error) {
+    return res.status(500).json({ status: false, message: 'Failed to list invitations.' });
   }
 }
 
 export async function listUsers(req, res) {
   try {
-    const { status } = req.query || {};
-    const filter = { companyId: req.user?.companyId };
-    if (status && typeof status === 'string') {
-      // allow comma-separated: pending,accepted
-      const statuses = status.split(',').map(s => s.trim().toLowerCase());
-      filter.status = { $in: statuses };
-    }
-
-    // Optional pagination
-    const limit = Math.min(Number(req.query.limit) || 100, 200);
     const page = Math.max(Number(req.query.page) || 1, 1);
-    const skip = (page - 1) * limit;
+    const limit = Math.min(Math.max(Number(req.query.limit) || 25, 1), 100);
+    const q = String(req.query.q || '').trim();
+    const sortMap = {
+      name: 'user.fullName',
+      email: 'user.email',
+      role: 'role.name',
+      status: 'status',
+      lastSeenAt: 'user.lastSeenAt',
+      createdAt: 'createdAt',
+    };
+    const sortField = sortMap[req.query.sortBy] || 'user.fullName';
+    const direction = req.query.sortDir === 'desc' ? -1 : 1;
+    const match = {
+      companyId: new mongoose.Types.ObjectId(req.user.companyId),
+    };
+    if (['active', 'suspended', 'disabled'].includes(req.query.status)) match.status = req.query.status;
 
-    const users = await User.find(filter)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .select('-token') // don't leak token in lists
-      .lean();
-
-    const total = await User.countDocuments(filter);
-
-    res.json({ status: true, data: users, meta: { total, page, limit } });
-  } catch (err) {
-    console.error('listUsers error:', err);
-    res.status(500).json({ status: false, message: 'Failed to list users' });
+    const pipeline = [
+      { $match: match },
+      { $lookup: { from: 'users', localField: 'userId', foreignField: '_id', as: 'user' } },
+      { $unwind: '$user' },
+      { $lookup: { from: 'roles', localField: 'roleId', foreignField: '_id', as: 'role' } },
+      { $unwind: '$role' },
+    ];
+    if (q) {
+      const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(escaped, 'i');
+      pipeline.push({
+        $match: {
+          $or: [
+            { 'user.fullName': regex },
+            { 'user.email': regex },
+            { 'role.name': regex },
+            { 'role.key': regex },
+          ],
+        },
+      });
+    }
+    pipeline.push(
+      {
+        $facet: {
+          data: [
+            { $sort: { [sortField]: direction, _id: 1 } },
+            { $skip: (page - 1) * limit },
+            { $limit: limit },
+            {
+              $project: {
+                _id: '$user._id',
+                membershipId: '$_id',
+                fullName: '$user.fullName',
+                email: '$user.email',
+                status: 1,
+                accountStatus: '$user.status',
+                lastSeenAt: '$user.lastSeenAt',
+                joinedAt: 1,
+                role: '$role.key',
+                roleId: '$role._id',
+                roleName: '$role.name',
+                roleRank: '$role.rank',
+                isOwner: '$role.isOwner',
+              },
+            },
+          ],
+          total: [{ $count: 'count' }],
+        },
+      },
+    );
+    const [result] = await Membership.aggregate(pipeline);
+    const total = result?.total?.[0]?.count || 0;
+    return res.json({
+      status: true,
+      data: result?.data || [],
+      meta: { total, page, limit, pages: Math.ceil(total / limit) },
+    });
+  } catch (error) {
+    console.error('listUsers error:', error);
+    return res.status(500).json({ status: false, message: 'Failed to list members.' });
   }
 }
-export async function meUser(req, res) {
+
+export async function updateUserRole(req, res) {
   try {
-    const actingUser = req.user; // set by auth middleware
-    const { id } = req.params;
-    if (String(actingUser.userId.trim()) !== String(id.trim())) {
-      return res.status(401).json({ status: false, message: 'Unauthorized' });
+    const targetUserId = req.params.id;
+    if (!mongoose.isValidObjectId(targetUserId)) {
+      return res.status(400).json({ status: false, message: 'Invalid member id.' });
     }
-
-    const user = await User.findOne({
-      _id: actingUser.userId,
-      companyId: actingUser.companyId,
-    })
-      .select('-password -tokenVersion') // do not leak sensitive fields
-      .lean();
-
-    if (!user) {
-      return res.status(404).json({ status: false, message: 'User not found' });
+    if (String(req.user.userId) === String(targetUserId)) {
+      return res.status(400).json({ status: false, message: 'You cannot change your own role.' });
     }
-
-    return res.json({ status: true, user });
-  } catch (err) {
-    console.error('meUser error:', err);
-    return res.status(500).json({ status: false, message: 'Failed to fetch current user' });
+    const membership = await Membership.findOne({
+      userId: targetUserId,
+      companyId: req.user.companyId,
+    }).populate('roleId');
+    if (!membership) return res.status(404).json({ status: false, message: 'Member not found.' });
+    const nextRole = await findCompanyRole(req.user.companyId, req.body?.roleId || req.body?.role);
+    if (!nextRole) return res.status(400).json({ status: false, message: 'Selected role is invalid.' });
+    const actor = await actorContext(req);
+    if (!canManageRole(actor, membership.roleId, { allowEqual: true }) || !canManageRole(actor, nextRole)) {
+      return res.status(403).json({ status: false, message: 'You cannot make this role change.' });
+    }
+    if (membership.roleId.isOwner && !nextRole.isOwner) {
+      const remainingOwners = await countActiveOwners(req.user.companyId, targetUserId);
+      if (remainingOwners === 0) {
+        return res.status(409).json({ status: false, message: 'The company must always have an active owner.' });
+      }
+    }
+    const previousRoleId = membership.roleId._id;
+    membership.roleId = nextRole._id;
+    membership.accessVersion = (membership.accessVersion || 0) + 1;
+    await membership.save();
+    await User.updateOne(
+      { _id: targetUserId, companyId: req.user.companyId },
+      { $set: { role: nextRole.key } },
+    );
+    await RefreshToken.deleteMany({ userId: targetUserId, companyId: req.user.companyId });
+    await recordUserAudit(req, 'membership.role_changed', {
+      targetUserId,
+      metadata: { fromRoleId: previousRoleId, toRoleId: nextRole._id },
+    });
+    return res.json({
+      status: true,
+      message: 'Member role updated. Company sessions were revoked.',
+      data: { id: targetUserId, roleId: nextRole._id, role: nextRole.key, roleName: nextRole.name },
+    });
+  } catch (error) {
+    return res.status(500).json({ status: false, message: 'Failed to update member role.' });
   }
+}
+
+export async function removeUser(req, res) {
+  try {
+    const targetUserId = req.params.id;
+    if (String(req.user.userId) === String(targetUserId)) {
+      return res.status(400).json({ status: false, message: 'You cannot suspend yourself.' });
+    }
+    const membership = await Membership.findOne({
+      userId: targetUserId,
+      companyId: req.user.companyId,
+    }).populate('roleId');
+    if (!membership) return res.status(404).json({ status: false, message: 'Member not found.' });
+    const actor = await actorContext(req);
+    if (!canManageRole(actor, membership.roleId, { allowEqual: true })) {
+      return res.status(403).json({ status: false, message: 'You cannot suspend this member.' });
+    }
+    if (membership.roleId.isOwner && await countActiveOwners(req.user.companyId, targetUserId) === 0) {
+      return res.status(409).json({ status: false, message: 'The last owner cannot be suspended.' });
+    }
+    membership.status = 'suspended';
+    membership.accessVersion = (membership.accessVersion || 0) + 1;
+    membership.suspendedAt = new Date();
+    membership.suspendedBy = req.user.userId;
+    await membership.save();
+    await RefreshToken.deleteMany({ userId: targetUserId, companyId: req.user.companyId });
+    await recordUserAudit(req, 'membership.suspended', { targetUserId });
+    return res.json({ status: true, message: 'Member suspended.', data: { id: targetUserId } });
+  } catch (error) {
+    return res.status(500).json({ status: false, message: 'Failed to suspend member.' });
+  }
+}
+
+export async function restoreUser(req, res) {
+  const membership = await Membership.findOneAndUpdate(
+    { userId: req.params.id, companyId: req.user.companyId, status: { $ne: 'active' } },
+    {
+      $set: {
+        status: 'active',
+        restoredAt: new Date(),
+        restoredBy: req.user.userId,
+      },
+      $inc: { accessVersion: 1 },
+      $unset: { suspendedAt: 1, suspendedBy: 1 },
+    },
+    { new: true },
+  );
+  if (!membership) return res.status(404).json({ status: false, message: 'Suspended member not found.' });
+  await User.updateOne(
+    { _id: req.params.id, status: 'disabled' },
+    { $set: { status: 'active' }, $unset: { disabledAt: 1, disabledBy: 1 } },
+  );
+  await recordUserAudit(req, 'membership.restored', { targetUserId: req.params.id });
+  return res.json({ status: true, message: 'Member restored.' });
+}
+
+export async function meUser(req, res) {
+  const user = await User.findById(req.user.userId)
+    .select('fullName email preferences lastSeenAt status createdAt updatedAt')
+    .lean();
+  if (!user) return res.status(404).json({ status: false, message: 'User not found.' });
+  return res.json({
+    status: true,
+    user: {
+      ...user,
+      role: req.user.role,
+      roleName: req.user.roleName,
+      companyId: req.user.companyId,
+      membershipId: req.user.membershipId,
+    },
+  });
 }
 
 export async function updateMyProfile(req, res) {
   try {
-    const actingUser = req.user;
-    if (!actingUser?.userId || !actingUser?.companyId) {
-      return res.status(401).json({ status: false, message: 'Unauthorized' });
+    const fullName = String(req.body?.fullName || '').trim();
+    if (fullName.length < 2 || fullName.length > 120) {
+      return res.status(400).json({ status: false, message: 'Name must be between 2 and 120 characters.' });
     }
-
-    const { fullName, email } = req.body || {};
-
-    const user = await User.findOne({
-      _id: actingUser.userId,
-      companyId: actingUser.companyId,
-    });
-
-    if (!user) {
-      return res.status(404).json({ status: false, message: 'User not found' });
-    }
-
-    // Update name if provided
-    if (typeof fullName === 'string' && fullName.trim()) {
-      user.fullName = fullName.trim();
-    }
-
-    // If email is changing, ensure uniqueness
-    if (email && email !== user.email) {
-      const normalizedEmail = String(email).toLowerCase().trim();
-
-      const existing = await User.findOne({
-        email: normalizedEmail,
-        _id: { $ne: user._id },
-      });
-
-      if (existing) {
-        return res
-          .status(409)
-          .json({ status: false, message: 'Email already registered' });
-      }
-
-      user.email = normalizedEmail;
-      // In future: user.isVerified = false; send verification OTP
-    }
-
-    await user.save();
-
-    const safeUser = user.toObject();
-    delete safeUser.password;
-    delete safeUser.tokenVersion;
-
-    return res.json({
-      status: true,
-      message: 'Profile updated',
-      user: safeUser,
-    });
-  } catch (err) {
-    console.error('updateMyProfile error:', err);
-    return res
-      .status(500)
-      .json({ status: false, message: 'Failed to update profile' });
+    const user = await User.findByIdAndUpdate(
+      req.user.userId,
+      { $set: { fullName } },
+      { new: true, runValidators: true },
+    ).select('fullName email preferences');
+    await recordUserAudit(req, 'profile.updated', { targetUserId: req.user.userId });
+    return res.json({ status: true, message: 'Profile updated.', user });
+  } catch (error) {
+    return res.status(500).json({ status: false, message: 'Failed to update profile.' });
   }
 }
 
 export async function updateMyPreferences(req, res) {
   try {
-    const actingUser = req.user;
-    if (!actingUser?.userId || !actingUser?.companyId) {
-      return res.status(401).json({ status: false, message: 'Unauthorized' });
-    }
-
-    const { theme, language, notifications } = req.body || {};
-
-    const user = await User.findOne({
-      _id: actingUser.userId,
-      companyId: actingUser.companyId,
-    });
-
-    if (!user) {
-      return res.status(404).json({ status: false, message: 'User not found' });
-    }
-
-    // Ensure preferences object exists
-    if (!user.preferences) {
-      user.preferences = {};
-    }
-
-    if (theme) user.preferences.theme = theme;
-    if (language) user.preferences.language = language;
-
-    if (notifications && typeof notifications === 'object') {
-      if (!user.preferences.notifications) {
-        user.preferences.notifications = {};
+    const allowedThemes = ['light', 'dark', 'system'];
+    const allowedLanguages = ['en', 'hi', 'fr'];
+    const update = {};
+    if (req.body?.theme !== undefined) {
+      if (!allowedThemes.includes(req.body.theme)) {
+        return res.status(400).json({ status: false, message: 'Invalid theme.' });
       }
-      if (typeof notifications.emailUpdates === 'boolean') {
-        user.preferences.notifications.emailUpdates = notifications.emailUpdates;
+      update['preferences.theme'] = req.body.theme;
+    }
+    if (req.body?.language !== undefined) {
+      if (!allowedLanguages.includes(req.body.language)) {
+        return res.status(400).json({ status: false, message: 'Invalid language.' });
       }
-      if (typeof notifications.inAppAlerts === 'boolean') {
-        user.preferences.notifications.inAppAlerts = notifications.inAppAlerts;
+      update['preferences.language'] = req.body.language;
+    }
+    for (const key of ['emailUpdates', 'inAppAlerts']) {
+      if (typeof req.body?.notifications?.[key] === 'boolean') {
+        update[`preferences.notifications.${key}`] = req.body.notifications[key];
       }
     }
-
-    await user.save();
-
-    return res.json({
-      status: true,
-      message: 'Preferences updated',
-      preferences: user.preferences,
-    });
-  } catch (err) {
-    console.error('updateMyPreferences error:', err);
-    return res
-      .status(500)
-      .json({ status: false, message: 'Failed to update preferences' });
+    const user = await User.findByIdAndUpdate(
+      req.user.userId,
+      { $set: update },
+      { new: true, runValidators: true },
+    ).select('preferences');
+    return res.json({ status: true, message: 'Preferences updated.', preferences: user.preferences });
+  } catch (error) {
+    return res.status(500).json({ status: false, message: 'Failed to update preferences.' });
   }
+}
+
+export async function listUserAudit(req, res) {
+  const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 100);
+  const rows = await UserAuditLog.find({ companyId: req.user.companyId })
+    .populate('actorId', 'fullName email')
+    .populate('targetUserId', 'fullName email')
+    .sort({ createdAt: -1 })
+    .limit(limit)
+    .lean();
+  return res.json({ status: true, data: rows });
 }
