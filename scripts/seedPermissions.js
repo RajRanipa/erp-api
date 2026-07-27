@@ -30,6 +30,7 @@ const all = [
   'parameters:dimensions:read','parameters:dimensions:create','parameters:dimensions:update','parameters:dimensions:delete',
   'inventory:read','inventory:receipt','inventory:issue','inventory:adjust',
   'inventory:transfer','inventory:reserve','inventory:repack',
+  'parties:read','parties:write','parties:import','parties:export',
   'users:invite:read','users:read','users:invite:create','users:invite:resend','users:invite:revoke','users:remove',
   'warehouses:read','warehouses:update','warehouses:create','warehouses:delete',
   'reports:view','transactions:approve'
@@ -56,7 +57,8 @@ await Permission.updateMany({ key: { $in: [
   'items:read','items:create','items:update','items:status:update',
   'parameters:read','parameters:categories:read','parameters:producttypes:read',
   'parameters:densities:read','parameters:temperatures:read','parameters:dimensions:read',
-  'inventory:read','inventory:receipt','inventory:transfer','inventory:reserve','inventory:repack',
+    'inventory:read','inventory:receipt','inventory:transfer','inventory:reserve','inventory:repack',
+    'parties:read','parties:write','parties:import','parties:export',
   'users:invite:read','users:read','users:invite:create','users:invite:resend','users:invite:revoke','users:remove',
   'warehouses:read','warehouses:update','warehouses:create','warehouses:delete'
 ]}}, { $addToSet: { roles: 'manager' } });
@@ -67,7 +69,8 @@ await Permission.updateMany({ key: { $in: [
   'parameters:read','parameters:categories:read','parameters:producttypes:read',
   'parameters:densities:read','parameters:temperatures:read','parameters:dimensions:read',
   'inventory:read','inventory:receipt','inventory:issue','inventory:adjust',
-  'inventory:transfer','inventory:reserve','inventory:repack',
+    'inventory:transfer','inventory:reserve','inventory:repack',
+    'parties:read',
   'users:invite:read','users:invite:resend',
   'warehouses:read','warehouses:update','warehouses:create','warehouses:delete'
 ]}}, { $addToSet: { roles: 'store_operator' } });
@@ -77,18 +80,20 @@ await Permission.updateMany({ key: { $in: [
   'items:read','items:create','items:update',
   'parameters:read','parameters:categories:read','parameters:producttypes:read',
   'parameters:densities:read','parameters:temperatures:read','parameters:dimensions:read',
-  'inventory:read','inventory:receipt','inventory:repack','inventory:adjust','inventory:transfer',
+    'inventory:read','inventory:receipt','inventory:repack','inventory:adjust','inventory:transfer',
+    'parties:read',
   'warehouses:read','warehouses:update','warehouses:create','warehouses:delete'
 ]}}, { $addToSet: { roles: 'production_manager' } });
 
 // accountant
 await Permission.updateMany({ key: { $in: [
-  'reports:view','transactions:approve','inventory:issue'
+    'reports:view','transactions:approve','inventory:issue',
+    'parties:read','parties:write','parties:import','parties:export'
 ]}}, { $addToSet: { roles: 'accountant' } });
 
 // investor
 await Permission.updateMany({ key: { $in: [
-  'items:read','inventory:read','users:read'
+    'items:read','inventory:read','users:read','parties:read'
 ]}}, { $addToSet: { roles: 'investor' } });
 
 

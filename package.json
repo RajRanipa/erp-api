@@ -14,6 +14,8 @@
     "migrate:inventory-items": "node scripts/migrateInventoryItemMetadata.js --apply",
     "audit:item-module-data": "node scripts/migrateItemModule.js",
     "migrate:item-module": "node scripts/migrateItemModule.js --apply",
+    "audit:party-module": "node scripts/migratePartyModule.js",
+    "migrate:party-module": "node scripts/migratePartyModule.js --apply",
     "seed:permissions": "node scripts/seedPermissions.js",
     "seed:inventory-permissions": "node scripts/seedInventoryPermissions.js"
   },

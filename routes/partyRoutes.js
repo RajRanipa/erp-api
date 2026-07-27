@@ -8,10 +8,14 @@ import {
   createParty,
   getPartyById,
   listParties,
+  getPartySummary,
   getPartyOptions,
+  getAccountOwnerOptions,
+  checkPartyDuplicates,
   updateParty,
   updatePartyStatus,
-  deleteParty,
+  archiveParty,
+  restoreParty,
   exportPartiesXlsx,
   importPartiesXlsx,
 } from '../controllers/PartyController.js';
@@ -32,6 +36,9 @@ const upload = multer({
 // READ: lists / dropdowns
 router.get('/', roleAuth('parties:read'), listParties);
 router.get('/options', roleAuth('parties:read'), getPartyOptions);
+router.get('/account-owners', roleAuth('parties:read'), getAccountOwnerOptions);
+router.get('/summary', roleAuth('parties:read'), getPartySummary);
+router.post('/check-duplicates', roleAuth('parties:read'), checkPartyDuplicates);
 
 // BULK: export/import
 router.get('/export/xlsx', roleAuth('parties:export'), exportPartiesXlsx);
@@ -43,6 +50,7 @@ router.get('/:id', roleAuth('parties:read'), getPartyById);
 router.post('/', roleAuth('parties:write'), createParty);
 router.patch('/:id', roleAuth('parties:write'), updateParty);
 router.patch('/:id/status', roleAuth('parties:write'), updatePartyStatus);
-router.delete('/:id', roleAuth('parties:write'), deleteParty);
+router.post('/:id/restore', roleAuth('parties:write'), restoreParty);
+router.delete('/:id', roleAuth('parties:write'), archiveParty);
 
 export default router;

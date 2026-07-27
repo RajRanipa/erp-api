@@ -22,6 +22,7 @@ export const rolePermissions = {
     'parameters:densities:read','parameters:temperatures:read','parameters:dimensions:read',
     'inventory:read', 'inventory:receipt', 'inventory:transfer',
     'inventory:reserve', 'inventory:repack',
+    'parties:read', 'parties:write', 'parties:import', 'parties:export',
     'users:invite:read', 'users:read', 'users:invite:create', 'users:invite:resend', 'users:invite:revoke','users:remove', 
     'warehouses:read', 'warehouses:update', 'warehouses:create', 'warehouses:delete'
   ],
@@ -31,6 +32,7 @@ export const rolePermissions = {
     'parameters:densities:read','parameters:temperatures:read','parameters:dimensions:read',
     'inventory:read', 'inventory:receipt', 'inventory:issue','inventory:adjust',
     'inventory:transfer', 'inventory:reserve', 'inventory:repack',
+    'parties:read',
     'users:invite:read','users:invite:resend',
     'warehouses:read', 'warehouses:update', 'warehouses:create', 'warehouses:delete'
   ],
@@ -40,12 +42,14 @@ export const rolePermissions = {
     'parameters:densities:read','parameters:temperatures:read','parameters:dimensions:read',
     'inventory:read', 'inventory:receipt', 'inventory:repack','inventory:adjust',
     'inventory:transfer',
+    'parties:read',
     'warehouses:read', 'warehouses:update', 'warehouses:create', 'warehouses:delete'
   ],
   accountant: [
-    'reports:view','transactions:approve', 'inventory:issue', 
+    'reports:view','transactions:approve', 'inventory:issue',
+    'parties:read', 'parties:write', 'parties:import', 'parties:export',
   ],
   investor: [
-    'items:read','inventory:read', 'users:read'
+    'items:read','inventory:read', 'users:read', 'parties:read'
   ],
 };
