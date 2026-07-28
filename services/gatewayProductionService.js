@@ -843,6 +843,7 @@ export async function reconcilePendingGatewayInventory({ limit = 100 } = {}) {
 
     for (const document of documents) {
         const resolvedType = await resolveProductType(document.productCode);
+        console.log('resolvetyp :- ', resolvedType);
         const targetCategories = inventoryCategoriesForStatus(
             resolvedType.categories,
             document.statusOk,
