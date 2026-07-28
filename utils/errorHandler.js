@@ -141,11 +141,15 @@ export function handleError(res, err, req = null) {
     });
 }
 
-export function notFoundHandler(req, _res, next) {
-    next(new AppError(`Route ${req.method} ${req.originalUrl} was not found.`, {
+export function notFoundHandler(req, res) {
+    // An unmatched public URL is expected internet traffic, not an application
+    // failure. Respond consistently without polluting error monitoring. Real
+    // controller/service 404s still pass through the centralized logger.
+    return sendError(res, {
         statusCode: 404,
         code: 'ROUTE_NOT_FOUND',
-    }));
+        message: 'Route not found.',
+    });
 }
 
 export function expressErrorHandler(err, req, res, next) {

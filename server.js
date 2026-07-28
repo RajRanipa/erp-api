@@ -51,6 +51,8 @@ const cwd = process.cwd();
 const uploadsBase = path.basename(cwd) === 'backend-api' ? cwd : path.join(cwd, 'backend-api');
 const uploadsDir = path.join(uploadsBase, 'uploads');
 // console.log('[Static] Serving /uploads from:', uploadsDir);
+app.use(apiContext);
+app.use(securityProbeGuard);
 app.use('/uploads', express.static(uploadsDir));
 
 app.use(cors({
@@ -62,8 +64,6 @@ app.use(cors({
 }));
 app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '2mb' }));
 app.use(cookieParser());
-app.use(apiContext);
-app.use(securityProbeGuard);
 
 app.get('/', (req, res) => {
   res.json({

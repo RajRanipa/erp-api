@@ -6,6 +6,9 @@ const EXACT_PROBE_FILES = new Set([
   '.drone.yml',
   '.drone.yaml',
   '.travis.yml',
+  '.travis.yaml',
+  '.azure-pipelines.yml',
+  '.azure-pipelines.yaml',
   'jenkinsfile',
   'bitbucket-pipelines.yml',
   'bitbucket-pipelines.yaml',
@@ -15,10 +18,16 @@ const EXACT_PROBE_FILES = new Set([
   'appveyor.yaml',
   'docker-compose.yml',
   'docker-compose.yaml',
+  'dockerfile',
+  'makefile',
+  'procfile',
+  'app.yml',
+  'app.yaml',
 ]);
 
 const SENSITIVE_DOT_SEGMENTS = new Set([
   '.aws',
+  '.buildkite',
   '.circleci',
   '.docker',
   '.env',
@@ -33,6 +42,8 @@ const SENSITIVE_DOT_SEGMENTS = new Set([
 ]);
 
 const SENSITIVE_FILE_SUFFIX = /\.(?:bak|dump|key|pem|sql|sqlite|sqlite3|swp)$/i;
+const COMPOSE_MANIFEST = /^(?:docker-)?compose(?:\.[a-z0-9_-]+)*\.ya?ml$/i;
+const DOCKERFILE_VARIANT = /^dockerfile(?:\.[a-z0-9_-]+)*$/i;
 
 function safelyDecodePath(value) {
   let decoded = String(value || '').split('?')[0];
@@ -57,7 +68,10 @@ export function isSensitiveProbePath(value) {
     || segment.startsWith('.env.')
   ))) return true;
   const fileName = segments.at(-1) || '';
-  return EXACT_PROBE_FILES.has(fileName) || SENSITIVE_FILE_SUFFIX.test(fileName);
+  return EXACT_PROBE_FILES.has(fileName)
+    || COMPOSE_MANIFEST.test(fileName)
+    || DOCKERFILE_VARIANT.test(fileName)
+    || SENSITIVE_FILE_SUFFIX.test(fileName);
 }
 
 /**
