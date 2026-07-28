@@ -8,6 +8,6 @@ router.get('/test', gatewayAuth, (req, res) => {
     res.json({ message: 'Gateway connection is healthy.' });
 });
 
-router.post("/blanket/production", ingestBlanketProduction);
+router.post("/blanket/production", gatewayAuth, ingestBlanketProduction);
 
 export default router;

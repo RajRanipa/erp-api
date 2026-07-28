@@ -35,6 +35,14 @@ const ProductionBlanketRollSchema = new Schema(
 
     // inventory linkage
     inventoryPosted: { type: Boolean, default: false, index: true },
+    inventoryStatus: {
+      type: String,
+      enum: ["PENDING", "POSTED", "NOT_APPLICABLE", "FAILED"],
+      default: "PENDING",
+      index: true,
+    },
+    inventoryLastError: { type: String, default: null },
+    inventoryLastAttemptAt: { type: Date, default: null },
     inventoryRef: {
       ledgerId: { type: Schema.Types.ObjectId, ref: "InventoryLedger" },
       snapshotId: { type: Schema.Types.ObjectId, ref: "InventorySnapshot" },

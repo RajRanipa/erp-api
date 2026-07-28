@@ -26,6 +26,7 @@ import { inviteRoutes, inviteAuthRoutes, settingRoutes} from './routes/usersRout
 import { fileURLToPath } from 'url';
 import permissionsRoute from './routes/permissionsRoute.js';
 import { startReportScheduler } from './services/scheduler.js';
+import { startGatewayInventoryReconciler } from './services/gatewayInventoryReconciler.js';
 import { apiContext } from './middleware/apiMiddleware.js';
 import securityProbeGuard from './middleware/securityProbeGuard.js';
 import { expressErrorHandler, notFoundHandler } from './utils/errorHandler.js';
@@ -98,6 +99,7 @@ app.use("/auth/gateway", gatewayAuthRoutes);
 app.use("/gateway", gatewayRoutes); 
 // Start server
 await startReportScheduler();
+startGatewayInventoryReconciler();
 
 
 // This is the password you will enter in the Meta Dashboard

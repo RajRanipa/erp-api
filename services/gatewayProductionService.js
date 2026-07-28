@@ -24,10 +24,13 @@ const SIZE_CODE_MAP = {
 };
 
 function normalizeStatus(v) {
-    // supports true/false and 0/1
     if (typeof v === "boolean") return v;
     if (typeof v === "number") return v === 1;
-    if (typeof v === "string") return v === "true" || v === "1";
+    if (typeof v === "string") {
+        return ["true", "1", "ok", "pass", "yes"].includes(
+            v.trim().toLowerCase()
+        );
+    }
     return false;
 }
 
@@ -213,7 +216,10 @@ function inventoryQuantityForGatewayRecord(productCode, weightKg, itemUom) {
     );
 }
 
-async function resolveCampaign() {
+async function resolveCampaign(companyId) {
+    // Campaigns are currently global records and do not yet carry companyId.
+    // Keep this lookup compatible until the manufacturing migration adds it.
+    void companyId;
     const campaign = await Campaign.findOne({ status: "RUNNING" }).lean();
     return campaign?._id;
 }
@@ -224,15 +230,27 @@ export async function ingestBlanketBatch({ companyId, payload }) {
             throw new AppError("companyId is required for gateway ingestion", { statusCode: 400, code: "MISSING_COMPANY" });
         }
 
-        const { gatewayId, sentAt, records } = payload || {};
+        const {
+            gatewayId,
+            sentAt,
+            records,
+            clientBatchId = null,
+            contractVersion = "1.0",
+        } = payload || {};
         if (!gatewayId) {
             throw new AppError("gatewayId is required", { statusCode: 400, code: "MISSING_GATEWAY" });
         }
         if (!Array.isArray(records)) {
             throw new AppError("records must be an array", { statusCode: 400, code: "INVALID_PAYLOAD" });
         }
+        if (records.length === 0 || records.length > 100) {
+            throw new AppError("records must contain between 1 and 100 entries", {
+                statusCode: 400,
+                code: "INVALID_PAYLOAD",
+            });
+        }
 
-        const campaign = await resolveCampaign();
+        const campaign = await resolveCampaign(companyId);
         if (!campaign) {
             throw new AppError("Campaign not found", { statusCode: 400, code: "INVALID_SITUATION" });
         }
@@ -241,6 +259,8 @@ export async function ingestBlanketBatch({ companyId, payload }) {
             campaign,
             companyId,
             gatewayId,
+            clientBatchId,
+            contractVersion,
             sentAt: safeDate(sentAt),
             recordsCount: records.length,
             rawPayload: payload,
@@ -254,11 +274,16 @@ export async function ingestBlanketBatch({ companyId, payload }) {
 
         const summary = {
             batchId: batch._id,
+            received: records.length,
             inserted: 0,
             duplicates: 0,
             postedToInventory: 0,
+            inventorySkipped: 0,
+            inventoryPending: 0,
             failed: 0,
             errors: [],
+            warnings: [],
+            recordResults: [],
         };
 
         const campaignSummary = {
@@ -272,6 +297,17 @@ export async function ingestBlanketBatch({ companyId, payload }) {
         // --- FLAT ARRAY LOOP STARTS HERE ---
         for (const rec of records) {
             const recordId = rec?.recordId;
+            const recordResult = {
+                recordId: recordId ? String(recordId) : null,
+                scaleNo: Number(rec?.scaleNo) || null,
+                accepted: false,
+                retryable: true,
+                storageStatus: "REJECTED",
+                inventoryStatus: "NOT_ATTEMPTED",
+                code: null,
+                message: null,
+            };
+            summary.recordResults.push(recordResult);
             // console.log("Processing recordId", recordId);
 
             const productCode = Number(rec?.productCode);
@@ -286,8 +322,42 @@ export async function ingestBlanketBatch({ companyId, payload }) {
             const weightKg = Number(rec?.weight || 0);
             const statusOk = normalizeStatus(rec?.status);
 
-            // ignore empty/invalid lines
-            if (!scaleNo) continue;
+            if (!recordId || String(recordId).length > 120) {
+                summary.failed++;
+                recordResult.code = "INVALID_RECORD_ID";
+                recordResult.message = "recordId is required and must not exceed 120 characters";
+                summary.errors.push(
+                    `scale ${scaleNo || "unknown"}: ${recordResult.message}`
+                );
+                continue;
+            }
+            if (![1, 2, 3].includes(scaleNo)) {
+                summary.failed++;
+                recordResult.code = "INVALID_SCALE";
+                recordResult.message = `Unsupported scaleNo: ${rec?.scaleNo}`;
+                summary.errors.push(
+                    `recordId ${recordId}: ${recordResult.message}`
+                );
+                continue;
+            }
+            if (![1, 2, 3, 4, 5].includes(productCode)) {
+                summary.failed++;
+                recordResult.code = "INVALID_PRODUCT_CODE";
+                recordResult.message = `Unsupported productCode: ${rec?.productCode}`;
+                summary.errors.push(
+                    `recordId ${recordId}: ${recordResult.message}`
+                );
+                continue;
+            }
+            if (!Number.isFinite(weightKg) || weightKg <= 0) {
+                summary.failed++;
+                recordResult.code = "INVALID_WEIGHT";
+                recordResult.message = `weight must be greater than zero; received ${rec?.weight}`;
+                summary.errors.push(
+                    `recordId ${recordId}: ${recordResult.message}`
+                );
+                continue;
+            }
 
             // resolve shared refs
             const resolveErrors = [];
@@ -348,8 +418,8 @@ export async function ingestBlanketBatch({ companyId, payload }) {
                 resolveErrors.push("productTypeId not resolved; skipping dimension/temperature/density/matchedItem resolution");
             }
 
+            let doc = null;
             try {
-                let doc;
                 let isNewRecord = false;
                 try {
                     doc = await ProductionBlanketRoll.create({
@@ -377,6 +447,9 @@ export async function ingestBlanketBatch({ companyId, payload }) {
                     });
                     isNewRecord = true;
                     summary.inserted++;
+                    recordResult.accepted = true;
+                    recordResult.retryable = false;
+                    recordResult.storageStatus = "INSERTED";
                 } catch (error) {
                     if (error?.code !== 11000) throw error;
                     doc = await ProductionBlanketRoll.findOne({
@@ -387,6 +460,9 @@ export async function ingestBlanketBatch({ companyId, payload }) {
                     });
                     if (!doc) throw error;
                     summary.duplicates++;
+                    recordResult.accepted = true;
+                    recordResult.retryable = false;
+                    recordResult.storageStatus = "DUPLICATE";
                     await ProductionBlanketRoll.updateOne(
                         { _id: doc._id, inventoryPosted: false },
                         {
@@ -425,19 +501,79 @@ export async function ingestBlanketBatch({ companyId, payload }) {
                 // Inventory posting (1-to-1 Traceability)
                 const shouldPost = productCode === 5 ? statusOk === false && weightKg > 0 : statusOk === true && weightKg > 0;
 
-                if (!shouldPost || doc.inventoryPosted) {
+                if (doc.inventoryPosted) {
+                    recordResult.inventoryStatus = "ALREADY_POSTED";
+                    await ProductionBlanketRoll.updateOne(
+                        { _id: doc._id },
+                        {
+                            $set: {
+                                inventoryStatus: "POSTED",
+                                inventoryLastError: null,
+                            },
+                        }
+                    );
+                    continue;
+                }
+
+                if (!shouldPost) {
+                    summary.inventorySkipped++;
+                    recordResult.inventoryStatus = "NOT_APPLICABLE";
+                    recordResult.code = statusOk
+                        ? "UNSUPPORTED_INVENTORY_RULE"
+                        : "REJECTED_PRODUCT";
+                    recordResult.message = statusOk
+                        ? "Record is not eligible for inventory posting"
+                        : "Rejected non-ET production is recorded but not received into inventory";
+                    await ProductionBlanketRoll.updateOne(
+                        { _id: doc._id },
+                        {
+                            $set: {
+                                inventoryStatus: "NOT_APPLICABLE",
+                                inventoryLastError: null,
+                            },
+                        }
+                    );
                     continue;
                 }
 
                 if (!warehouseId) {
+                    const message = "Warehouse not found to post inventory";
+                    summary.inventoryPending++;
+                    summary.warnings.push(`recordId ${recordId} scale ${scaleNo}: ${message}`);
+                    recordResult.inventoryStatus = "PENDING";
+                    recordResult.code = "WAREHOUSE_NOT_FOUND";
+                    recordResult.message = message;
                     await ProductionBlanketRoll.updateOne(
                         { _id: doc._id },
-                        { $push: { resolveErrors: "Warehouse not found to post inventory" } }
+                        {
+                            $set: {
+                                inventoryStatus: "PENDING",
+                                inventoryLastError: message,
+                                inventoryLastAttemptAt: new Date(),
+                            },
+                            $addToSet: { resolveErrors: message },
+                        }
                     );
                     continue;
                 }
 
                 if (!matchedItemId) {
+                    const message = resolveErrors.join("; ") || "Matching Item not found";
+                    summary.inventoryPending++;
+                    summary.warnings.push(`recordId ${recordId} scale ${scaleNo}: ${message}`);
+                    recordResult.inventoryStatus = "PENDING";
+                    recordResult.code = "ITEM_NOT_MATCHED";
+                    recordResult.message = message;
+                    await ProductionBlanketRoll.updateOne(
+                        { _id: doc._id },
+                        {
+                            $set: {
+                                inventoryStatus: "PENDING",
+                                inventoryLastError: message,
+                                inventoryLastAttemptAt: new Date(),
+                            },
+                        }
+                    );
                     continue;
                 }
 
@@ -470,6 +606,9 @@ export async function ingestBlanketBatch({ companyId, payload }) {
                     {
                         $set: {
                             inventoryPosted: true,
+                            inventoryStatus: "POSTED",
+                            inventoryLastError: null,
+                            inventoryLastAttemptAt: new Date(),
                             inventoryRef: {
                                 ledgerId: invRes?.ledger?._id,
                                 snapshotId: invRes?.snapshot?._id,
@@ -483,19 +622,48 @@ export async function ingestBlanketBatch({ companyId, payload }) {
                     summary.postedToInventory++;
                     campaignSummary.goodFiberKg += weightKg;
                 }
+                recordResult.inventoryStatus = "POSTED";
             } catch (err) {
-                summary.failed++;
-                summary.errors.push(`recordId ${recordId} scale ${scaleNo}: ${err.message}`);
+                if (doc) {
+                    const message = `Inventory posting failed: ${err.message}`;
+                    recordResult.accepted = true;
+                    recordResult.retryable = false;
+                    recordResult.inventoryStatus = "FAILED";
+                    recordResult.code = err.code || "INVENTORY_POST_FAILED";
+                    recordResult.message = message;
+                    summary.inventoryPending++;
+                    summary.warnings.push(
+                        `recordId ${recordId} scale ${scaleNo}: ${message}`
+                    );
+                    await ProductionBlanketRoll.updateOne(
+                        { _id: doc._id },
+                        {
+                            $set: {
+                                inventoryStatus: "FAILED",
+                                inventoryLastError: message,
+                                inventoryLastAttemptAt: new Date(),
+                            },
+                            $addToSet: { resolveErrors: message },
+                        }
+                    ).catch(() => {});
+                } else {
+                    summary.failed++;
+                    recordResult.code = err.code || "RECORD_STORE_FAILED";
+                    recordResult.message = err.message;
+                    summary.errors.push(`recordId ${recordId} scale ${scaleNo}: ${err.message}`);
+                }
             }
         }
 
         // finalize batch status
-        const status =
-            summary.failed === 0 && summary.errors.length === 0
-                ? "PROCESSED"
-                : summary.postedToInventory > 0
-                    ? "PARTIAL"
-                    : "FAILED";
+        const acceptedCount = summary.recordResults.filter(
+            result => result.accepted
+        ).length;
+        const status = acceptedCount === 0
+            ? "FAILED"
+            : summary.failed > 0 || summary.inventoryPending > 0
+                ? "PARTIAL"
+                : "PROCESSED";
 
         await GatewayIngestBatch.updateOne(
             { _id: batch._id },
@@ -531,6 +699,7 @@ export async function ingestBlanketBatch({ companyId, payload }) {
             batchId: batch._id,
             status,
             summary,
+            recordResults: summary.recordResults,
         };
 
         console.log('Batch Result : ', result.status, result.summary);
@@ -543,4 +712,168 @@ export async function ingestBlanketBatch({ companyId, payload }) {
         };
         throw error;
     }
+}
+
+export async function reconcilePendingGatewayInventory({ limit = 100 } = {}) {
+    const documents = await ProductionBlanketRoll.find({
+        inventoryPosted: false,
+        $or: [
+            { inventoryStatus: { $in: ["PENDING", "FAILED"] } },
+            { inventoryStatus: { $exists: false } },
+        ],
+    })
+        .sort({ at: 1, _id: 1 })
+        .limit(Math.min(Math.max(Number(limit) || 100, 1), 500))
+        .lean();
+
+    const summary = {
+        scanned: documents.length,
+        posted: 0,
+        notApplicable: 0,
+        stillPending: 0,
+        failed: 0,
+    };
+    const companyContext = new Map();
+
+    for (const document of documents) {
+        const shouldPost = document.productCode === 5
+            ? document.statusOk === false && document.weightKg > 0
+            : document.statusOk === true && document.weightKg > 0;
+        if (!shouldPost) {
+            await ProductionBlanketRoll.updateOne(
+                { _id: document._id, inventoryPosted: false },
+                {
+                    $set: {
+                        inventoryStatus: "NOT_APPLICABLE",
+                        inventoryLastError: null,
+                    },
+                }
+            );
+            summary.notApplicable++;
+            continue;
+        }
+
+        const companyKey = String(document.companyId);
+        let context = companyContext.get(companyKey);
+        if (!context) {
+            context = {
+                warehouseId: await resolveWarehouseId(document.companyId),
+                packingId: await resolvePackingItem(document.companyId),
+            };
+            companyContext.set(companyKey, context);
+        }
+
+        try {
+            if (!context.warehouseId) {
+                throw new AppError("Warehouse not found to post inventory", {
+                    statusCode: 409,
+                    code: "WAREHOUSE_NOT_FOUND",
+                });
+            }
+
+            let matchedItem = document.matchedItem
+                ? await Item.findOne({
+                    _id: document.matchedItem,
+                    companyId: document.companyId,
+                    status: "active",
+                }).select("_id UOM").lean()
+                : null;
+
+            if (!matchedItem) {
+                const resolvedType = await resolveProductType(document.productCode);
+                if (!resolvedType.id) {
+                    throw new AppError(resolvedType.err, {
+                        statusCode: 409,
+                        code: "PRODUCT_TYPE_NOT_RESOLVED",
+                    });
+                }
+                const itemFilter = {
+                    companyId: document.companyId,
+                    category: resolvedType.category,
+                    productType: resolvedType.id,
+                    temperature: document.temperature,
+                    status: "active",
+                };
+                if (document.productCode !== 5) {
+                    itemFilter.packing = context.packingId;
+                    itemFilter.dimension = document.dimension;
+                }
+                if (![3, 5].includes(document.productCode)) {
+                    itemFilter.density = document.density;
+                }
+                matchedItem = await matchFGItem(itemFilter);
+            }
+
+            if (!matchedItem) {
+                throw new AppError("Matching Item not found for gateway specifications", {
+                    statusCode: 409,
+                    code: "ITEM_NOT_MATCHED",
+                });
+            }
+
+            const quantity = inventoryQuantityForGatewayRecord(
+                document.productCode,
+                document.weightKg,
+                matchedItem.UOM || "roll"
+            );
+            const result = await invReceive({
+                companyId: document.companyId,
+                itemId: matchedItem._id,
+                warehouseId: context.warehouseId,
+                uom: matchedItem.UOM || "roll",
+                qty: quantity,
+                by: null,
+                note: `Reconciled gateway ${document.gatewayId} recordId ${document.recordId} scale ${document.scaleNo}`,
+                refType: "PROD_GATEWAY",
+                refId: document._id,
+                idempotencyKey: `PROD_GATEWAY:${document.companyId}:${document.gatewayId}:${document.recordId}:${document.scaleNo}`,
+                enforceNonNegative: false,
+                batchNo: document.batchNo || null,
+                at: document.at,
+            });
+            const linked = await ProductionBlanketRoll.updateOne(
+                { _id: document._id, inventoryPosted: false },
+                {
+                    $set: {
+                        matchedItem: matchedItem._id,
+                        inventoryPosted: true,
+                        inventoryStatus: "POSTED",
+                        inventoryLastError: null,
+                        inventoryLastAttemptAt: new Date(),
+                        inventoryRef: {
+                            ledgerId: result?.ledger?._id,
+                            snapshotId: result?.snapshot?._id,
+                        },
+                    },
+                }
+            );
+            if (linked.modifiedCount > 0) {
+                summary.posted++;
+                await Campaign.updateOne(
+                    { _id: document.campaign },
+                    { $inc: { totalGoodFiberProduced: document.weightKg } }
+                );
+            }
+        } catch (error) {
+            const message = String(error?.message || error).slice(0, 1000);
+            await ProductionBlanketRoll.updateOne(
+                { _id: document._id, inventoryPosted: false },
+                {
+                    $set: {
+                        inventoryStatus: "PENDING",
+                        inventoryLastError: message,
+                        inventoryLastAttemptAt: new Date(),
+                    },
+                    $addToSet: { resolveErrors: message },
+                }
+            );
+            if (["WAREHOUSE_NOT_FOUND", "ITEM_NOT_MATCHED", "PRODUCT_TYPE_NOT_RESOLVED"].includes(error?.code)) {
+                summary.stillPending++;
+            } else {
+                summary.failed++;
+            }
+        }
+    }
+
+    return summary;
 }

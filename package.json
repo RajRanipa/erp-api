@@ -20,7 +20,9 @@
     "audit:user-module": "node scripts/migrateUserModule.js",
     "migrate:user-module": "node scripts/migrateUserModule.js --apply",
     "audit:procurement-module": "node scripts/migrateProcurementModule.js",
-    "migrate:procurement-module": "node scripts/migrateProcurementModule.js --apply"
+    "migrate:procurement-module": "node scripts/migrateProcurementModule.js --apply",
+    "audit:gateway-module": "node scripts/migrateGatewayModule.js",
+    "migrate:gateway-module": "node scripts/migrateGatewayModule.js --apply"
   },
   "keywords": [],
   "author": "Raj",
