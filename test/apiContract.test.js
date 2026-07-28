@@ -44,6 +44,18 @@ test('API success responses move pagination and summaries into meta', () => {
   assert.equal(response.message, 'Loaded.');
 });
 
+test('API success responses preserve domain workflow status values', () => {
+  const envelope = buildSuccessEnvelope({
+    _id: 'item-1',
+    name: 'ET',
+    status: 'draft',
+  });
+
+  assert.equal(envelope.success, true);
+  assert.equal(envelope.status, true);
+  assert.equal(envelope.data.status, 'draft');
+});
+
 test('API error responses never mix error details with success data', () => {
   const response = buildErrorEnvelope({
     message: 'Validation failed.',

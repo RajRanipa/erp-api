@@ -39,6 +39,13 @@ const successPayload = (payload) => {
     ...content
   } = payload;
 
+  // `status` is also a legitimate domain field on Items, procurement
+  // documents, users, and other resources. Only consume the old API-level
+  // boolean form; preserve workflow values such as "draft" and "active".
+  if (hasOwn(payload, 'status') && typeof _legacyStatus !== 'boolean') {
+    content.status = _legacyStatus;
+  }
+
   if (hasOwn(payload, 'data')) {
     const { data, ...additional } = content;
     return {
