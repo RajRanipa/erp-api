@@ -19,6 +19,7 @@ import itemRoutes from './routes/itemsRoutes.js'
 import companyRoutes from './routes/companyRoutes.js'
 import uploadRoutes from './routes/uploadRoutes.js';
 import inventoryRoutes from './routes/inventoryRoutes.js';
+import procurementRoutes from './routes/procurementRoutes.js';
 import gatewayRoutes from './routes/gatewayRoutes.js';
 import gatewayAuthRoutes from './routes/gatewayAuthRoutes.js';
 import { inviteRoutes, inviteAuthRoutes, settingRoutes} from './routes/usersRoutes.js';
@@ -26,6 +27,7 @@ import { fileURLToPath } from 'url';
 import permissionsRoute from './routes/permissionsRoute.js';
 import { startReportScheduler } from './services/scheduler.js';
 import { apiContext } from './middleware/apiMiddleware.js';
+import securityProbeGuard from './middleware/securityProbeGuard.js';
 import { expressErrorHandler, notFoundHandler } from './utils/errorHandler.js';
 
 // after all routes:
@@ -60,6 +62,7 @@ app.use(cors({
 app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '2mb' }));
 app.use(cookieParser());
 app.use(apiContext);
+app.use(securityProbeGuard);
 
 app.get('/', (req, res) => {
   res.json({
@@ -84,6 +87,7 @@ app.use('/api/items', itemRoutes);
 app.use('/api/company', companyRoutes);
 app.use('/api/uploads', uploadRoutes);
 app.use('/api/inventory', inventoryRoutes);
+app.use('/api/procurement', procurementRoutes);
 app.use('/api/users', inviteRoutes);
 app.use('/api/permissions', permissionsRoute);
 app.use('/api/myaccount', settingRoutes);

@@ -57,6 +57,15 @@ export function normalizeError(err) {
             details: { path: err.path, value: err.value },
         });
     }
+    else if (err.name === 'VersionError') {
+        appErr = new AppError(
+            'This record was changed by another request. Refresh and try again.',
+            {
+                statusCode: 409,
+                code: 'STALE_WRITE',
+            }
+        );
+    }
     // JWT errors
     else if (err.name === 'JsonWebTokenError') {
         appErr = new AppError('Invalid token', { statusCode: 401, code: 'INVALID_TOKEN' });

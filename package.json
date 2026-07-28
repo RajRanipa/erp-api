@@ -18,7 +18,9 @@
     "migrate:party-module": "node scripts/migratePartyModule.js --apply",
     "sync:permissions": "node scripts/syncPermissionCatalog.js",
     "audit:user-module": "node scripts/migrateUserModule.js",
-    "migrate:user-module": "node scripts/migrateUserModule.js --apply"
+    "migrate:user-module": "node scripts/migrateUserModule.js --apply",
+    "audit:procurement-module": "node scripts/migrateProcurementModule.js",
+    "migrate:procurement-module": "node scripts/migrateProcurementModule.js --apply"
   },
   "keywords": [],
   "author": "Raj",
