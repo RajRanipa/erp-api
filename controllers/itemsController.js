@@ -425,16 +425,29 @@ export const updateItem = async (req, res) => {
       INVENTORY_IDENTITY_FIELDS.has(field)
     );
     if (changedInventoryIdentityFields.length) {
-      const [hasLedger, hasSnapshot] = await Promise.all([
+      const [hasLedger, hasStockBalance] = await Promise.all([
         InventoryLedger.exists({ companyId: item.companyId, itemId: item._id }),
-        InventorySnapshot.exists({ companyId: item.companyId, itemId: item._id }),
+        InventorySnapshot.exists({
+          companyId: item.companyId,
+          itemId: item._id,
+          $or: [
+            { onHand: { $gt: 0 } },
+            { reserved: { $gt: 0 } },
+          ],
+        }),
       ]);
-      if (hasLedger || hasSnapshot) {
+      if (hasLedger || hasStockBalance) {
         throw fail(
-          'Category, UOM and product type cannot change after inventory activity exists',
+          'Category, UOM and product type cannot change when historical inventory '
+          + 'movements or a stock balance exists. Create a replacement Item or use '
+          + 'a controlled inventory migration.',
           409,
           'INVENTORY_IDENTITY_LOCKED',
-          { fields: changedInventoryIdentityFields },
+          {
+            fields: changedInventoryIdentityFields,
+            hasLedgerHistory: Boolean(hasLedger),
+            hasStockBalance: Boolean(hasStockBalance),
+          },
         );
       }
     }
