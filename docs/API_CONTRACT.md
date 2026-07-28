@@ -109,12 +109,13 @@ PLC product codes resolve to ProductType names:
 5 et
 ```
 
-The gateway populates the ProductType's `categories` and matches the active
-tenant Item inside a compatible parent category. It does not assume every
-gateway output is Finished Goods:
+The gateway uses only the first entry in the ProductType's `categories` array
+and matches the active tenant Item in that parent category. Category order is
+therefore significant: place the category intended for gateway inventory first.
+The gateway does not assume every output is Finished Goods:
 
-- accepted output excludes the `NC` category;
-- rejected output excludes the `FG` category;
+- accepted output cannot enter an `NC` first category;
+- rejected output cannot enter an `FG` first category;
 - product code `5` remains inventory-eligible and normally resolves to an
   `et` Item in `NC / non-conformance`;
 - the matched Item's UOM controls conversion from the PLC weight in kilograms;

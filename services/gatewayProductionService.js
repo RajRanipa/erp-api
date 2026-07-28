@@ -35,33 +35,31 @@ export function categoryKeyFromName(name) {
 }
 
 /**
- * A ProductType may belong to more than one Item category. Good output should
- * not resolve to NC, while rejected output should not silently enter FG stock.
- * This also allows future gateway outputs to target RAW/PACKING/NC categories.
+ * Gateway processing uses the first category configured on ProductType.
+ * Accepted output cannot enter NC, and rejected output cannot enter FG.
  */
-export function inventoryCategoriesForStatus(categories = [], statusOk = false) {
-    const normalized = categories
-        .map(category => ({
-            id: category?.id || category?._id || null,
-            name: String(category?.name || "").trim().toLowerCase(),
-            key: category?.key || categoryKeyFromName(category?.name),
-        }))
-        .filter(category => category.id && category.key);
+export function inventoryCategoryForStatus(category = null, statusOk = false) {
+    const normalized = {
+        id: category?.id || category?._id || null,
+        name: String(category?.name || "").trim().toLowerCase(),
+        key: category?.key || categoryKeyFromName(category?.name),
+    };
 
-    return normalized.filter(category =>
-        statusOk ? category.key !== "NC" : category.key !== "FG"
-    );
+    if (!normalized.id || !normalized.key) return null;
+    if (statusOk && normalized.key === "NC") return null;
+    if (!statusOk && normalized.key === "FG") return null;
+    return normalized;
 }
 
 export function shouldPostGatewayInventory({
     productCode,
     statusOk,
     weightKg,
-    targetCategories = [],
+    targetCategory = null,
 }) {
     if (!Number.isFinite(Number(weightKg)) || Number(weightKg) <= 0) return false;
     if (statusOk || Number(productCode) === 5) return true;
-    return targetCategories.some(category => category.key !== "FG");
+    return Boolean(targetCategory?.key && targetCategory.key !== "FG");
 }
 
 function normalizeStatus(v) {
@@ -174,28 +172,44 @@ async function resolveProductType(productCode) {
     };
 
     const name = PRODUCT_CODE_MAP[productCode];
-    if (!name) return { id: null, err: `Unsupported productCode: ${productCode}` };
+    if (!name) {
+        return {
+            id: null,
+            name: null,
+            category: null,
+            err: `Unsupported productCode: ${productCode}`,
+        };
+    }
 
     const pt = await ProductType?.findOne({ name }).populate("categories", "name").lean();
 
-    if (!pt) return { id: null, err: `ProductType '${name}' not found in DB` };
-    const categories = (pt.categories || [])
-        .map(category => ({
-            id: category?._id || null,
-            name: String(category?.name || "").trim().toLowerCase(),
-            key: categoryKeyFromName(category?.name),
-        }))
-        .filter(category => category.id && category.key);
-
-    if (!categories.length) {
+    if (!pt) {
         return {
             id: null,
             name,
-            categories: [],
-            err: `ProductType '${name}' is not assigned to a supported Item category`,
+            category: null,
+            err: `ProductType '${name}' not found in DB`,
         };
     }
-    return { id: pt._id, name, categories, err: null };
+
+    const firstCategory = pt.categories?.[0] || null;
+    const category = firstCategory
+        ? {
+            id: firstCategory._id || null,
+            name: String(firstCategory.name || "").trim().toLowerCase(),
+            key: categoryKeyFromName(firstCategory.name),
+        }
+        : null;
+
+    if (!category?.id || !category.key) {
+        return {
+            id: null,
+            name,
+            category: null,
+            err: `ProductType '${name}' has no supported first Item category`,
+        };
+    }
+    return { id: pt._id, name, category, err: null };
 }
 
 // async function resolveTempDensity(companyId, temperatureValue, densityValue) {
@@ -423,14 +437,12 @@ export async function ingestBlanketBatch({ companyId, payload }) {
             // resolve shared refs
             const resolveErrors = [];
             const resolvedProductType = await resolveProductType(productCode);
-            const productTypeId = resolvedProductType.id;
+            const productTypeId = resolvedProductType?.id;
             if (resolvedProductType.err) resolveErrors.push(resolvedProductType.err);
-            const targetCategories = inventoryCategoriesForStatus(
-                resolvedProductType.categories,
+            const targetCategory = inventoryCategoryForStatus(
+                resolvedProductType.category,
                 statusOk,
             );
-            const targetCategoryIds = targetCategories.map(category => category.id);
-            const targetCategoryKeys = targetCategories.map(category => category.key);
 
             let dimensionId = null;
             let temperatureId = null;
@@ -474,11 +486,11 @@ export async function ingestBlanketBatch({ companyId, payload }) {
                     resolveErrors.push("Active packing Item 'plastic bag' was not found");
                 }
 
-                if (targetCategoryIds.length && requiredSpecificationsResolved) {
+                if (targetCategory && requiredSpecificationsResolved) {
                     const itemFilter = {
                         companyId,
-                        category: { $in: targetCategoryIds },
-                        categoryKey: { $in: targetCategoryKeys },
+                        category: targetCategory.id,
+                        categoryKey: targetCategory.key,
                         productType: productTypeId,
                         temperature: temperatureId,
                         status: "active",
@@ -498,19 +510,16 @@ export async function ingestBlanketBatch({ companyId, payload }) {
                         matchedItemCategoryId = match.item.category;
                         matchedItemCategoryKey = match.item.categoryKey;
                     } else {
-                        const categoryDescription = targetCategories
-                            .map(category => `${category.key}:${category.name}`)
-                            .join(",");
                         resolveErrors.push(
-                            `${match.err}: categories=${categoryDescription} `
+                            `${match.err}: category=${targetCategory.key}:${targetCategory.name} `
                             + `productType=${resolvedProductType.name} `
                             + `temperature=${temperatureValue} density=${densityValue} `
                             + `sizeCode=${sizeCode} packing=${packingId || "none"}`
                         );
                     }
-                } else if (!targetCategoryIds.length && (statusOk || productCode === 5)) {
+                } else if (!targetCategory && (statusOk || productCode === 5)) {
                     resolveErrors.push(
-                        `ProductType '${resolvedProductType.name}' has no category `
+                        `ProductType '${resolvedProductType.name}' has no first category `
                         + `eligible for ${statusOk ? "accepted" : "rejected"} inventory`
                     );
                 }
@@ -607,7 +616,7 @@ export async function ingestBlanketBatch({ companyId, payload }) {
                     productCode,
                     statusOk,
                     weightKg,
-                    targetCategories,
+                    targetCategory,
                 });
 
                 if (doc.inventoryPosted) {
@@ -843,18 +852,15 @@ export async function reconcilePendingGatewayInventory({ limit = 100 } = {}) {
 
     for (const document of documents) {
         const resolvedType = await resolveProductType(document.productCode);
-        console.log('resolvetyp :- ', resolvedType);
-        const targetCategories = inventoryCategoriesForStatus(
-            resolvedType.categories,
+        const targetCategory = inventoryCategoryForStatus(
+            resolvedType.category,
             document.statusOk,
         );
-        const targetCategoryIds = targetCategories.map(category => category.id);
-        const targetCategoryKeys = targetCategories.map(category => category.key);
         const shouldPost = shouldPostGatewayInventory({
             productCode: document.productCode,
             statusOk: document.statusOk,
             weightKg: document.weightKg,
-            targetCategories,
+            targetCategory,
         });
         if (!shouldPost) {
             await ProductionBlanketRoll.updateOne(
@@ -888,13 +894,13 @@ export async function reconcilePendingGatewayInventory({ limit = 100 } = {}) {
                 });
             }
 
-            let matchedItem = document.matchedItem
+            let matchedItem = document.matchedItem && targetCategory
                 ? await Item.findOne({
                     _id: document.matchedItem,
                     companyId: document.companyId,
                     status: "active",
-                    category: { $in: targetCategoryIds },
-                    categoryKey: { $in: targetCategoryKeys },
+                    category: targetCategory.id,
+                    categoryKey: targetCategory.key,
                 }).select("_id UOM category categoryKey").lean()
                 : null;
 
@@ -905,9 +911,9 @@ export async function reconcilePendingGatewayInventory({ limit = 100 } = {}) {
                         code: "PRODUCT_TYPE_NOT_RESOLVED",
                     });
                 }
-                if (!targetCategoryIds.length) {
+                if (!targetCategory) {
                     throw new AppError(
-                        `ProductType '${resolvedType.name}' has no category eligible for this quality status`,
+                        `ProductType '${resolvedType.name}' has no first category eligible for this quality status`,
                         {
                             statusCode: 409,
                             code: "INVENTORY_CATEGORY_NOT_RESOLVED",
@@ -916,8 +922,8 @@ export async function reconcilePendingGatewayInventory({ limit = 100 } = {}) {
                 }
                 const itemFilter = {
                     companyId: document.companyId,
-                    category: { $in: targetCategoryIds },
-                    categoryKey: { $in: targetCategoryKeys },
+                    category: targetCategory.id,
+                    categoryKey: targetCategory.key,
                     productType: resolvedType.id,
                     temperature: document.temperature,
                     status: "active",

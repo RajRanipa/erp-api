@@ -60,17 +60,17 @@ try {
     { name: "et" },
     { projection: { name: 1, categories: 1 } },
   );
-  const etCategoryIds = etProductType?.categories || [];
-  const etCategories = etCategoryIds.length
-    ? await categories.find(
-      { _id: { $in: etCategoryIds } },
+  const etCategoryId = etProductType?.categories?.[0] || null;
+  const etCategory = etCategoryId
+    ? await categories.findOne(
+      { _id: etCategoryId },
       { projection: { name: 1 } },
-    ).toArray()
-    : [];
+    )
+    : null;
   const configuredCompanyId = process.env.GATEWAY_COMPANY_ID;
   const etItemFilter = {
     productType: etProductType?._id || null,
-    category: { $in: etCategoryIds },
+    category: etCategoryId,
     status: "active",
   };
   if (configuredCompanyId && mongoose.isValidObjectId(configuredCompanyId)) {
@@ -93,14 +93,13 @@ try {
     : [];
   result.etConfiguration = {
     productTypeId: etProductType?._id || null,
-    categories: etCategories.map(category => ({
-      id: category._id,
-      name: category.name,
-    })),
+    category: etCategory
+      ? { id: etCategory._id, name: etCategory.name }
+      : null,
     activeMatchingItems: etItems,
     ready:
       Boolean(etProductType)
-      && etCategories.some(category => category.name === "non-conformance")
+      && etCategory?.name === "non-conformance"
       && etItems.some(item => item.categoryKey === "NC"),
   };
 

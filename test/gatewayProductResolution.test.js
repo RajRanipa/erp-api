@@ -2,16 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   categoryKeyFromName,
-  inventoryCategoriesForStatus,
+  inventoryCategoryForStatus,
   inventoryQuantityForGatewayRecord,
   shouldPostGatewayInventory,
 } from '../services/gatewayProductionService.js';
-
-const categories = [
-  { id: 'fg-id', name: 'finished goods' },
-  { id: 'nc-id', name: 'non-conformance' },
-  { id: 'raw-id', name: 'raw material' },
-];
 
 test('maps controlled Category names to Item category keys', () => {
   assert.equal(categoryKeyFromName('Finished Goods'), 'FG');
@@ -20,14 +14,27 @@ test('maps controlled Category names to Item category keys', () => {
   assert.equal(categoryKeyFromName('packing material'), 'PACKING');
 });
 
-test('routes accepted and rejected gateway output to compatible categories', () => {
+test('routes gateway output using one ProductType category', () => {
   assert.deepEqual(
-    inventoryCategoriesForStatus(categories, true).map(category => category.key),
-    ['FG', 'RAW'],
+    inventoryCategoryForStatus(
+      { id: 'fg-id', name: 'finished goods' },
+      true,
+    ),
+    { id: 'fg-id', name: 'finished goods', key: 'FG' },
+  );
+  assert.equal(
+    inventoryCategoryForStatus(
+      { id: 'fg-id', name: 'finished goods' },
+      false,
+    ),
+    null,
   );
   assert.deepEqual(
-    inventoryCategoriesForStatus(categories, false).map(category => category.key),
-    ['NC', 'RAW'],
+    inventoryCategoryForStatus(
+      { id: 'nc-id', name: 'non-conformance' },
+      false,
+    ),
+    { id: 'nc-id', name: 'non-conformance', key: 'NC' },
   );
 });
 
@@ -37,7 +44,7 @@ test('ET remains inventory-eligible while rejected FG-only output does not', () 
       productCode: 5,
       statusOk: false,
       weightKg: 12.5,
-      targetCategories: [],
+      targetCategory: null,
     }),
     true,
   );
@@ -46,7 +53,7 @@ test('ET remains inventory-eligible while rejected FG-only output does not', () 
       productCode: 1,
       statusOk: false,
       weightKg: 12.5,
-      targetCategories: [{ id: 'fg-id', name: 'finished goods', key: 'FG' }],
+      targetCategory: { id: 'fg-id', name: 'finished goods', key: 'FG' },
     }),
     false,
   );
@@ -55,7 +62,7 @@ test('ET remains inventory-eligible while rejected FG-only output does not', () 
       productCode: 1,
       statusOk: false,
       weightKg: 12.5,
-      targetCategories: [{ id: 'nc-id', name: 'non-conformance', key: 'NC' }],
+      targetCategory: { id: 'nc-id', name: 'non-conformance', key: 'NC' },
     }),
     true,
   );
