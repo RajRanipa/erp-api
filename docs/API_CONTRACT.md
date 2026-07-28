@@ -96,3 +96,30 @@ Send the returned refresh token on refresh:
 The legacy `userId` refresh format remains temporarily supported for installed
 clients authenticated with `X-Gateway-Key`. Its response includes a deprecation
 message in `meta`.
+
+### Production product and inventory resolution
+
+PLC product codes resolve to ProductType names:
+
+```text
+1 blanket
+2 bulk
+3 board
+4 module
+5 et
+```
+
+The gateway populates the ProductType's `categories` and matches the active
+tenant Item inside a compatible parent category. It does not assume every
+gateway output is Finished Goods:
+
+- accepted output excludes the `NC` category;
+- rejected output excludes the `FG` category;
+- product code `5` remains inventory-eligible and normally resolves to an
+  `et` Item in `NC / non-conformance`;
+- the matched Item's UOM controls conversion from the PLC weight in kilograms;
+- rejected ET inventory does not increment good-production totals.
+
+Unmatched or ambiguous Items leave the production record in `PENDING`/`FAILED`
+inventory state for reconciliation. They are never acknowledged as inventory
+posted without an idempotent InventoryLedger receipt.

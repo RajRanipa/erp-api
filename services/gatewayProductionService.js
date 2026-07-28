@@ -23,6 +23,47 @@ const SIZE_CODE_MAP = {
     8: { length: 8000, width: 600, thickness: 30 },
 };
 
+const CATEGORY_KEY_BY_NAME = Object.freeze({
+    "raw material": "RAW",
+    "finished goods": "FG",
+    "packing material": "PACKING",
+    "non-conformance": "NC",
+});
+
+export function categoryKeyFromName(name) {
+    return CATEGORY_KEY_BY_NAME[String(name || "").trim().toLowerCase()] || null;
+}
+
+/**
+ * A ProductType may belong to more than one Item category. Good output should
+ * not resolve to NC, while rejected output should not silently enter FG stock.
+ * This also allows future gateway outputs to target RAW/PACKING/NC categories.
+ */
+export function inventoryCategoriesForStatus(categories = [], statusOk = false) {
+    const normalized = categories
+        .map(category => ({
+            id: category?.id || category?._id || null,
+            name: String(category?.name || "").trim().toLowerCase(),
+            key: category?.key || categoryKeyFromName(category?.name),
+        }))
+        .filter(category => category.id && category.key);
+
+    return normalized.filter(category =>
+        statusOk ? category.key !== "NC" : category.key !== "FG"
+    );
+}
+
+export function shouldPostGatewayInventory({
+    productCode,
+    statusOk,
+    weightKg,
+    targetCategories = [],
+}) {
+    if (!Number.isFinite(Number(weightKg)) || Number(weightKg) <= 0) return false;
+    if (statusOk || Number(productCode) === 5) return true;
+    return targetCategories.some(category => category.key !== "FG");
+}
+
 function normalizeStatus(v) {
     if (typeof v === "boolean") return v;
     if (typeof v === "number") return v === 1;
@@ -135,21 +176,26 @@ async function resolveProductType(productCode) {
     const name = PRODUCT_CODE_MAP[productCode];
     if (!name) return { id: null, err: `Unsupported productCode: ${productCode}` };
 
-    // ProductType schema only has `name` (lowercased enum)
     const pt = await ProductType?.findOne({ name }).populate("categories", "name").lean();
-    // console.log("gateway --- resolveProductType ", name, pt);
 
     if (!pt) return { id: null, err: `ProductType '${name}' not found in DB` };
-    const finishedGoodsCategory = (pt.categories || []).find(
-        category => String(category?.name || '').toLowerCase() === 'finished goods'
-    );
-    if (!finishedGoodsCategory) {
+    const categories = (pt.categories || [])
+        .map(category => ({
+            id: category?._id || null,
+            name: String(category?.name || "").trim().toLowerCase(),
+            key: categoryKeyFromName(category?.name),
+        }))
+        .filter(category => category.id && category.key);
+
+    if (!categories.length) {
         return {
             id: null,
-            err: `ProductType '${name}' is not assigned to Finished Goods`,
+            name,
+            categories: [],
+            err: `ProductType '${name}' is not assigned to a supported Item category`,
         };
     }
-    return { id: pt._id, category: finishedGoodsCategory._id, err: null };
+    return { id: pt._id, name, categories, err: null };
 }
 
 // async function resolveTempDensity(companyId, temperatureValue, densityValue) {
@@ -199,17 +245,32 @@ async function resolveTemp({ productTypeId, temperatureValue }) {
     return { tempId: temp?._id || null, errs };
 }
 
-async function matchFGItem(body) {
-    return Item.findOne(body).select("_id UOM name").lean();
+async function matchGatewayItem(filter) {
+    const matches = await Item.find(filter)
+        .select("_id UOM name category categoryKey")
+        .sort({ _id: 1 })
+        .limit(2)
+        .lean();
+    if (matches.length > 1) {
+        return {
+            item: null,
+            err: "Multiple active Items match the gateway specifications",
+        };
+    }
+    return {
+        item: matches[0] || null,
+        err: matches.length ? null : "Matching active Item not found",
+    };
 }
 
-function inventoryQuantityForGatewayRecord(productCode, weightKg, itemUom) {
-    if (![2, 5].includes(productCode)) return 1;
-
+export function inventoryQuantityForGatewayRecord(weightKg, itemUom) {
     const uom = String(itemUom || '').trim().toLowerCase();
     if (uom === 'kg') return weightKg;
     if (['g', 'gram', 'grams'].includes(uom)) return weightKg * 1000;
     if (['ton', 'tonne', 't'].includes(uom)) return weightKg / 1000;
+    if (['roll', 'rolls', 'pc', 'pcs', 'piece', 'pieces', 'unit', 'units'].includes(uom)) {
+        return 1;
+    }
     throw new AppError(
         `Gateway weight cannot be posted to Item UOM "${itemUom}"`,
         { statusCode: 409, code: "GATEWAY_UOM_MISMATCH" }
@@ -361,14 +422,23 @@ export async function ingestBlanketBatch({ companyId, payload }) {
 
             // resolve shared refs
             const resolveErrors = [];
-            const { id: productTypeId, err: ptErr, category } = await resolveProductType(productCode);
-            if (ptErr) resolveErrors.push(ptErr);
+            const resolvedProductType = await resolveProductType(productCode);
+            const productTypeId = resolvedProductType.id;
+            if (resolvedProductType.err) resolveErrors.push(resolvedProductType.err);
+            const targetCategories = inventoryCategoriesForStatus(
+                resolvedProductType.categories,
+                statusOk,
+            );
+            const targetCategoryIds = targetCategories.map(category => category.id);
+            const targetCategoryKeys = targetCategories.map(category => category.key);
 
             let dimensionId = null;
             let temperatureId = null;
             let densityId = null;
             let matchedItemId = null;
             let matchedItemUom = "roll";
+            let matchedItemCategoryId = null;
+            let matchedItemCategoryKey = null;
 
             if (productTypeId) {
                 if (productCode !== 5) {
@@ -387,32 +457,62 @@ export async function ingestBlanketBatch({ companyId, payload }) {
                     const dens = await resolveDensity({ productTypeId, densityValue });
                     densityId = dens.densId;
                     if (dens.errs?.length) resolveErrors.push(...dens.errs);
-                    // console.log('dens -> ', dens);
                 }
 
-                const bodyformatch = {
-                    companyId,
-                    category: category,
-                    productType: productTypeId,
-                    temperature: temperatureId,
-                    status: "active",
+                const requiredSpecificationsResolved = Boolean(
+                    temperatureId
+                    && (
+                        productCode === 5
+                        || (
+                            dimensionId
+                            && packingId
+                            && (productCode === 3 || densityId)
+                        )
+                    )
+                );
+                if (productCode !== 5 && !packingId) {
+                    resolveErrors.push("Active packing Item 'plastic bag' was not found");
                 }
-                // console.log('bodyformatch 11 ', bodyformatch, "productCode 11 ", productCode, productCode !== 5);
-                if (productCode !== 5) {
-                    bodyformatch.packing = packingId;
-                    bodyformatch.dimension = dimensionId;
-                }
-                if (![3, 5].includes(productCode)) {
-                    bodyformatch.density = densityId;
-                }
-                // console.log('bodyformatch 22 ', bodyformatch, "productCode 22 ", productCode);
-                const matchedItem = await matchFGItem(bodyformatch);
 
-                if (matchedItem) {
-                    matchedItemId = matchedItem._id;
-                    matchedItemUom = matchedItem.UOM || "roll";
-                } else {
-                    resolveErrors.push(`FG Item not found for specs: category=${category} productType=${productTypeId} temp=${temperatureId} density=${densityId} dimension=${dimensionId} packing=${packingId}`);
+                if (targetCategoryIds.length && requiredSpecificationsResolved) {
+                    const itemFilter = {
+                        companyId,
+                        category: { $in: targetCategoryIds },
+                        categoryKey: { $in: targetCategoryKeys },
+                        productType: productTypeId,
+                        temperature: temperatureId,
+                        status: "active",
+                    };
+                    if (productCode !== 5) {
+                        itemFilter.packing = packingId;
+                        itemFilter.dimension = dimensionId;
+                    }
+                    if (![3, 5].includes(productCode)) {
+                        itemFilter.density = densityId;
+                    }
+
+                    const match = await matchGatewayItem(itemFilter);
+                    if (match.item) {
+                        matchedItemId = match.item._id;
+                        matchedItemUom = match.item.UOM || "roll";
+                        matchedItemCategoryId = match.item.category;
+                        matchedItemCategoryKey = match.item.categoryKey;
+                    } else {
+                        const categoryDescription = targetCategories
+                            .map(category => `${category.key}:${category.name}`)
+                            .join(",");
+                        resolveErrors.push(
+                            `${match.err}: categories=${categoryDescription} `
+                            + `productType=${resolvedProductType.name} `
+                            + `temperature=${temperatureValue} density=${densityValue} `
+                            + `sizeCode=${sizeCode} packing=${packingId || "none"}`
+                        );
+                    }
+                } else if (!targetCategoryIds.length && (statusOk || productCode === 5)) {
+                    resolveErrors.push(
+                        `ProductType '${resolvedProductType.name}' has no category `
+                        + `eligible for ${statusOk ? "accepted" : "rejected"} inventory`
+                    );
                 }
             } else {
                 resolveErrors.push("productTypeId not resolved; skipping dimension/temperature/density/matchedItem resolution");
@@ -442,6 +542,8 @@ export async function ingestBlanketBatch({ companyId, payload }) {
                         dimension: dimensionId,
                         packingItem: productCode === 5 ? null : packingId,
                         matchedItem: matchedItemId,
+                        itemCategory: matchedItemCategoryId,
+                        itemCategoryKey: matchedItemCategoryKey,
                         resolveErrors,
                         ingestBatchId: batch._id,
                     });
@@ -473,6 +575,8 @@ export async function ingestBlanketBatch({ companyId, payload }) {
                                 dimension: dimensionId,
                                 packingItem: productCode === 5 ? null : packingId,
                                 matchedItem: matchedItemId,
+                                itemCategory: matchedItemCategoryId,
+                                itemCategoryKey: matchedItemCategoryKey,
                                 resolveErrors,
                             },
                         }
@@ -499,7 +603,12 @@ export async function ingestBlanketBatch({ companyId, payload }) {
                 }
 
                 // Inventory posting (1-to-1 Traceability)
-                const shouldPost = productCode === 5 ? statusOk === false && weightKg > 0 : statusOk === true && weightKg > 0;
+                const shouldPost = shouldPostGatewayInventory({
+                    productCode,
+                    statusOk,
+                    weightKg,
+                    targetCategories,
+                });
 
                 if (doc.inventoryPosted) {
                     recordResult.inventoryStatus = "ALREADY_POSTED";
@@ -518,12 +627,9 @@ export async function ingestBlanketBatch({ companyId, payload }) {
                 if (!shouldPost) {
                     summary.inventorySkipped++;
                     recordResult.inventoryStatus = "NOT_APPLICABLE";
-                    recordResult.code = statusOk
-                        ? "UNSUPPORTED_INVENTORY_RULE"
-                        : "REJECTED_PRODUCT";
-                    recordResult.message = statusOk
-                        ? "Record is not eligible for inventory posting"
-                        : "Rejected non-ET production is recorded but not received into inventory";
+                    recordResult.code = "NO_INVENTORY_CATEGORY";
+                    recordResult.message =
+                        "Production is recorded, but its ProductType category is not eligible for this quality status";
                     await ProductionBlanketRoll.updateOne(
                         { _id: doc._id },
                         {
@@ -578,7 +684,6 @@ export async function ingestBlanketBatch({ companyId, payload }) {
                 }
 
                 const inventoryQuantity = inventoryQuantityForGatewayRecord(
-                    productCode,
                     weightKg,
                     matchedItemUom
                 );
@@ -620,7 +725,7 @@ export async function ingestBlanketBatch({ companyId, payload }) {
                 // Only the process that changes false → true owns the counters.
                 if (inventoryLinkResult.modifiedCount > 0) {
                     summary.postedToInventory++;
-                    campaignSummary.goodFiberKg += weightKg;
+                    if (statusOk) campaignSummary.goodFiberKg += weightKg;
                 }
                 recordResult.inventoryStatus = "POSTED";
             } catch (err) {
@@ -720,6 +825,7 @@ export async function reconcilePendingGatewayInventory({ limit = 100 } = {}) {
         $or: [
             { inventoryStatus: { $in: ["PENDING", "FAILED"] } },
             { inventoryStatus: { $exists: false } },
+            { productCode: 5, inventoryStatus: "NOT_APPLICABLE" },
         ],
     })
         .sort({ at: 1, _id: 1 })
@@ -736,9 +842,19 @@ export async function reconcilePendingGatewayInventory({ limit = 100 } = {}) {
     const companyContext = new Map();
 
     for (const document of documents) {
-        const shouldPost = document.productCode === 5
-            ? document.statusOk === false && document.weightKg > 0
-            : document.statusOk === true && document.weightKg > 0;
+        const resolvedType = await resolveProductType(document.productCode);
+        const targetCategories = inventoryCategoriesForStatus(
+            resolvedType.categories,
+            document.statusOk,
+        );
+        const targetCategoryIds = targetCategories.map(category => category.id);
+        const targetCategoryKeys = targetCategories.map(category => category.key);
+        const shouldPost = shouldPostGatewayInventory({
+            productCode: document.productCode,
+            statusOk: document.statusOk,
+            weightKg: document.weightKg,
+            targetCategories,
+        });
         if (!shouldPost) {
             await ProductionBlanketRoll.updateOne(
                 { _id: document._id, inventoryPosted: false },
@@ -776,20 +892,31 @@ export async function reconcilePendingGatewayInventory({ limit = 100 } = {}) {
                     _id: document.matchedItem,
                     companyId: document.companyId,
                     status: "active",
-                }).select("_id UOM").lean()
+                    category: { $in: targetCategoryIds },
+                    categoryKey: { $in: targetCategoryKeys },
+                }).select("_id UOM category categoryKey").lean()
                 : null;
 
             if (!matchedItem) {
-                const resolvedType = await resolveProductType(document.productCode);
                 if (!resolvedType.id) {
                     throw new AppError(resolvedType.err, {
                         statusCode: 409,
                         code: "PRODUCT_TYPE_NOT_RESOLVED",
                     });
                 }
+                if (!targetCategoryIds.length) {
+                    throw new AppError(
+                        `ProductType '${resolvedType.name}' has no category eligible for this quality status`,
+                        {
+                            statusCode: 409,
+                            code: "INVENTORY_CATEGORY_NOT_RESOLVED",
+                        },
+                    );
+                }
                 const itemFilter = {
                     companyId: document.companyId,
-                    category: resolvedType.category,
+                    category: { $in: targetCategoryIds },
+                    categoryKey: { $in: targetCategoryKeys },
                     productType: resolvedType.id,
                     temperature: document.temperature,
                     status: "active",
@@ -801,7 +928,14 @@ export async function reconcilePendingGatewayInventory({ limit = 100 } = {}) {
                 if (![3, 5].includes(document.productCode)) {
                     itemFilter.density = document.density;
                 }
-                matchedItem = await matchFGItem(itemFilter);
+                const match = await matchGatewayItem(itemFilter);
+                matchedItem = match.item;
+                if (!matchedItem && match.err) {
+                    throw new AppError(match.err, {
+                        statusCode: 409,
+                        code: "ITEM_NOT_MATCHED",
+                    });
+                }
             }
 
             if (!matchedItem) {
@@ -812,7 +946,6 @@ export async function reconcilePendingGatewayInventory({ limit = 100 } = {}) {
             }
 
             const quantity = inventoryQuantityForGatewayRecord(
-                document.productCode,
                 document.weightKg,
                 matchedItem.UOM || "roll"
             );
@@ -836,6 +969,8 @@ export async function reconcilePendingGatewayInventory({ limit = 100 } = {}) {
                 {
                     $set: {
                         matchedItem: matchedItem._id,
+                        itemCategory: matchedItem.category,
+                        itemCategoryKey: matchedItem.categoryKey,
                         inventoryPosted: true,
                         inventoryStatus: "POSTED",
                         inventoryLastError: null,
@@ -849,10 +984,12 @@ export async function reconcilePendingGatewayInventory({ limit = 100 } = {}) {
             );
             if (linked.modifiedCount > 0) {
                 summary.posted++;
-                await Campaign.updateOne(
-                    { _id: document.campaign },
-                    { $inc: { totalGoodFiberProduced: document.weightKg } }
-                );
+                if (document.statusOk) {
+                    await Campaign.updateOne(
+                        { _id: document.campaign },
+                        { $inc: { totalGoodFiberProduced: document.weightKg } }
+                    );
+                }
             }
         } catch (error) {
             const message = String(error?.message || error).slice(0, 1000);
@@ -867,7 +1004,12 @@ export async function reconcilePendingGatewayInventory({ limit = 100 } = {}) {
                     $addToSet: { resolveErrors: message },
                 }
             );
-            if (["WAREHOUSE_NOT_FOUND", "ITEM_NOT_MATCHED", "PRODUCT_TYPE_NOT_RESOLVED"].includes(error?.code)) {
+            if ([
+                "WAREHOUSE_NOT_FOUND",
+                "ITEM_NOT_MATCHED",
+                "PRODUCT_TYPE_NOT_RESOLVED",
+                "INVENTORY_CATEGORY_NOT_RESOLVED",
+            ].includes(error?.code)) {
                 summary.stillPending++;
             } else {
                 summary.failed++;

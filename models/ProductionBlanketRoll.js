@@ -31,6 +31,11 @@ const ProductionBlanketRollSchema = new Schema(
     dimension: { type: Schema.Types.ObjectId, ref: "Dimension" },
     packingItem: { type: Schema.Types.ObjectId, ref: "Item" },
     matchedItem: { type: Schema.Types.ObjectId, ref: "Item" },
+    itemCategory: { type: Schema.Types.ObjectId, ref: "Category" },
+    itemCategoryKey: {
+      type: String,
+      enum: ["FG", "RAW", "PACKING", "NC"],
+    },
     resolveErrors: [{ type: String }],
 
     // inventory linkage
