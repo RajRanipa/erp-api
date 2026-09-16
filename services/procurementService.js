@@ -4,7 +4,7 @@ import GoodsReceipt, {
   GOODS_RECEIPT_STATUS,
   INSPECTION_STATUS,
 } from '../models/GoodsReceipt.js';
-import Item from '../models/Item.js';
+import ItemMaster from '../models/ItemMaster.js';
 import Party from '../models/Party.js';
 import PurchaseInvoice, {
   PURCHASE_INVOICE_STATUS,
@@ -16,11 +16,17 @@ import PurchaseReturn, {
   PURCHASE_RETURN_STATUS,
 } from '../models/PurchaseReturn.js';
 import Warehouse from '../models/Warehouse.js';
-import { issue as issueInventory, receive as receiveInventory } from './inventoryService.js';
+import {
+  postIssueInSession,
+  postReceiptInSession,
+} from './inventoryV2Service.js';
 import { AppError } from '../utils/errorHandler.js';
 
 const EPSILON = 0.000001;
-const ALLOWED_ITEM_CATEGORIES = new Set(['RAW', 'PACKING', 'FG']);
+const procurementCategory = itemClassCode => ({
+  PACKAGING: 'PACKING',
+  FINISHED_GOOD: 'FG',
+}[itemClassCode] || 'RAW');
 const EDITABLE_PO_STATUSES = new Set([
   PURCHASE_ORDER_STATUS.DRAFT,
   PURCHASE_ORDER_STATUS.REJECTED,
@@ -228,12 +234,15 @@ async function getWarehouse(companyId, warehouseId, session = null) {
 async function getItems(companyId, itemIds, session = null) {
   const uniqueIds = [...new Set(itemIds.map(String))];
   uniqueIds.forEach(itemId => validateId(itemId, 'itemId'));
-  const query = Item.find({
+  const query = ItemMaster.find({
     _id: { $in: uniqueIds },
     companyId,
     status: 'active',
-    categoryKey: { $in: [...ALLOWED_ITEM_CATEGORIES] },
-  }).select('name sku categoryKey description UOM purchasePrice');
+    'capabilities.purchasable': true,
+    'capabilities.inventory': true,
+  })
+    .select('name sku description baseUom itemClassId')
+    .populate('itemClassId', 'code');
   if (session) query.session(session);
   const items = await query.lean();
   if (items.length !== uniqueIds.length) {
@@ -243,7 +252,12 @@ async function getItems(companyId, itemIds, session = null) {
       'INVALID_PURCHASE_ITEM',
     );
   }
-  return new Map(items.map(item => [String(item._id), item]));
+  return new Map(items.map(item => [String(item._id), {
+    ...item,
+    categoryKey: procurementCategory(item.itemClassId?.code),
+    UOM: item.baseUom,
+    purchasePrice: 0,
+  }]));
 }
 
 function deliveryAddressFrom(bodyAddress, warehouse) {
@@ -776,22 +790,28 @@ export async function postGoodsReceipt({ companyId, userId, receiptId }) {
       }
       if (accepted > EPSILON) {
         const requestId = `GRN:${receipt._id}:${receiptLine._id}`;
-        await receiveInventory({
-          companyId,
+        await postReceiptInSession(companyId, userId, {
           itemId: receiptLine.itemId,
           warehouseId: receipt.warehouseId,
-          uom: receiptLine.uom,
-          qty: accepted,
-          by: userId,
-          at: receipt.receivedAt,
-          note: `Accepted against ${receipt.grnNumber}`,
-          refType: 'GOODS_RECEIPT',
-          refId: receipt.grnNumber,
-          batchNo: normalizeOptional(receiptLine.batchNo, 120),
+          quantity: accepted,
+          unitCost: Number(poLine.unitPrice || 0),
+          receivedAt: receipt.receivedAt,
+          manufacturedAt: receiptLine.manufacturedAt,
+          expiresAt: receiptLine.expiresAt,
+          supplierPartyId: receipt.supplierId,
+          supplierLotNo: normalizeOptional(receiptLine.supplierBatchNo, 120),
+          lotNo: normalizeOptional(receiptLine.batchNo, 120) || undefined,
           bin: normalizeOptional(receiptLine.bin, 120),
+          qualityStatus: 'AVAILABLE',
+          processStatus: 'AVAILABLE',
+          sourceType: 'GOODS_RECEIPT',
+          sourceId: String(receipt._id),
+          effectiveAt: receipt.receivedAt,
+          note: `Accepted against ${receipt.grnNumber}`,
+          referenceType: 'GOODS_RECEIPT',
+          referenceId: receipt.grnNumber,
           idempotencyKey: requestId,
-          session,
-        });
+        }, session);
         receiptLine.inventoryPostedQty = accepted;
         receiptLine.inventoryRequestId = requestId;
       }
@@ -898,22 +918,29 @@ export async function resolveGoodsReceiptInspection({
       }
       if (accepted > EPSILON) {
         const requestId = `GRN-QC:${receipt._id}:${receiptLine._id}`;
-        await receiveInventory({
-          companyId,
+        const poLine = findOrderLine(order, receiptLine.poLineId);
+        await postReceiptInSession(companyId, userId, {
           itemId: receiptLine.itemId,
           warehouseId: receipt.warehouseId,
-          uom: receiptLine.uom,
-          qty: accepted,
-          by: userId,
-          at: new Date(),
-          note: `Quarantine accepted against ${receipt.grnNumber}`,
-          refType: 'GOODS_RECEIPT_QC',
-          refId: receipt.grnNumber,
-          batchNo: normalizeOptional(receiptLine.batchNo, 120),
+          quantity: accepted,
+          unitCost: Number(poLine.unitPrice || 0),
+          receivedAt: new Date(),
+          manufacturedAt: receiptLine.manufacturedAt,
+          expiresAt: receiptLine.expiresAt,
+          supplierPartyId: receipt.supplierId,
+          supplierLotNo: normalizeOptional(receiptLine.supplierBatchNo, 120),
+          lotNo: normalizeOptional(receiptLine.batchNo, 120) || undefined,
           bin: normalizeOptional(receiptLine.bin, 120),
+          qualityStatus: 'AVAILABLE',
+          processStatus: 'AVAILABLE',
+          sourceType: 'GOODS_RECEIPT_QC',
+          sourceId: String(receipt._id),
+          effectiveAt: new Date(),
+          note: `Quarantine accepted against ${receipt.grnNumber}`,
+          referenceType: 'GOODS_RECEIPT_QC',
+          referenceId: receipt.grnNumber,
           idempotencyKey: requestId,
-          session,
-        });
+        }, session);
         receiptLine.inventoryPostedQty = roundQuantity(
           Number(receiptLine.inventoryPostedQty) + accepted,
         );
@@ -1171,22 +1198,18 @@ export async function postPurchaseReturn({ companyId, userId, returnId }) {
         );
       }
       const requestId = `PRN:${purchaseReturn._id}:${returnLine._id}`;
-      await issueInventory({
-        companyId,
+      await postIssueInSession(companyId, userId, {
         itemId: returnLine.itemId,
         warehouseId: purchaseReturn.warehouseId,
-        uom: returnLine.uom,
-        qty: returnLine.qty,
-        by: userId,
-        at: purchaseReturn.returnDate,
-        note: `${returnLine.reason} against ${purchaseReturn.returnNumber}`,
-        refType: 'PURCHASE_RETURN',
-        refId: purchaseReturn.returnNumber,
-        batchNo: normalizeOptional(returnLine.batchNo, 120),
+        quantity: returnLine.qty,
+        lotNo: normalizeOptional(returnLine.batchNo, 120) || undefined,
         bin: normalizeOptional(returnLine.bin, 120),
+        effectiveAt: purchaseReturn.returnDate,
+        note: `${returnLine.reason} against ${purchaseReturn.returnNumber}`,
+        referenceType: 'PURCHASE_RETURN',
+        referenceId: purchaseReturn.returnNumber,
         idempotencyKey: requestId,
-        session,
-      });
+      }, session);
       returnLine.inventoryRequestId = requestId;
       receiptLine.returnedQty = roundQuantity(
         Number(receiptLine.returnedQty) + Number(returnLine.qty),

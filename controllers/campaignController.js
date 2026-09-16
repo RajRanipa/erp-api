@@ -1,6 +1,9 @@
 import Campaign from '../models/Campaign.js';
 import { handleError } from '../utils/errorHandler.js';
 
+const companyIdFromRequest = req =>
+  req.user?.companyId || req.user?.company?._id || req.user?.company;
+
 // --- helpers ---------------------------------------------------------------
 function normalizeDate(d) {
   if (!d) return null;
@@ -109,6 +112,7 @@ export const createCampaign = async (req, res) => {
     const { name, startDate, endDate, status, remarks, totalRawIssued, totalFiberProduced, meltReturns } = req.body || {};
 
     const doc = new Campaign({
+      companyId: companyIdFromRequest(req),
       name: String(name).trim(),
       startDate: normalizeDate(startDate),
       endDate: endDate ? normalizeDate(endDate) : undefined,
@@ -129,7 +133,10 @@ export const createCampaign = async (req, res) => {
 
 export const activeCampaigns = async (req, res) => {
   try {
-    const rows = await Campaign.find({status : 'RUNNING'}).sort({ startDate: -1, createdAt: -1 }).lean();
+    const rows = await Campaign.find({
+      companyId: companyIdFromRequest(req),
+      status: 'RUNNING',
+    }).sort({ startDate: -1, createdAt: -1 }).lean();
     return res.status(200).json(rows);
   } catch (err) {
     return handleError(res, err, req);
@@ -138,7 +145,8 @@ export const activeCampaigns = async (req, res) => {
 
 export const listCampaigns = async (req, res) => {
   try {
-    const rows = await Campaign.find({}).sort({ startDate: -1, createdAt: -1 }).lean();
+    const rows = await Campaign.find({ companyId: companyIdFromRequest(req) })
+      .sort({ startDate: -1, createdAt: -1 }).lean();
     // console.log(rows);
     return res.status(200).json(rows);
   } catch (err) {
@@ -149,7 +157,7 @@ export const listCampaigns = async (req, res) => {
 export const getCampaignById = async (req, res) => {
   try {
     const { id } = req.params;
-    const row = await Campaign.findById(id).lean();
+    const row = await Campaign.findOne({ _id: id, companyId: companyIdFromRequest(req) }).lean();
     // console.log("getCampaignById", row);
     if (!row) return res.status(404).json({ success: false, message: 'Campaign not found' });
     return res.status(200).json(row);
@@ -174,7 +182,11 @@ export const updateCampaign = async (req, res) => {
       meltReturns: Number(meltReturns) || 0,
     };
 
-    const updated = await Campaign.findByIdAndUpdate(id, patch, { new: true });
+    const updated = await Campaign.findOneAndUpdate(
+      { _id: id, companyId: companyIdFromRequest(req) },
+      patch,
+      { new: true },
+    );
     if (!updated) return res.status(404).json({ success: false, message: 'Campaign not found' });
     return res.status(200).json({ success: true, data: pickCampaign(updated) });
   } catch (err) {
@@ -185,7 +197,10 @@ export const updateCampaign = async (req, res) => {
 export const deleteCampaign = async (req, res) => {
   try {
     const { id } = req.params;
-    const deleted = await Campaign.findByIdAndDelete(id);
+    const deleted = await Campaign.findOneAndDelete({
+      _id: id,
+      companyId: companyIdFromRequest(req),
+    });
     if (!deleted) return res.status(404).json({ success: false, message: 'Campaign not found' });
     return res.status(200).json({ success: true, message: 'Campaign deleted' });
   } catch (err) {

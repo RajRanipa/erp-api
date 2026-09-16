@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import Warehouse from '../models/Warehouse.js';
-import InventoryLedger from '../models/InventoryLedger.js';
-import InventorySnapshot from '../models/InventorySnapshot.js';
+import InventoryBalanceV2 from '../models/InventoryBalanceV2.js';
+import InventoryTransactionV2 from '../models/InventoryTransactionV2.js';
 import { AppError, handleError } from '../utils/errorHandler.js';
 import { applyAuditCreate, applyAuditUpdate } from '../utils/auditHelper.js';
 
@@ -158,9 +158,12 @@ export const deleteWarehouse = async (req, res) => {
     const warehouse = await Warehouse.findOne({ _id: req.params.id, companyId });
     if (!warehouse) throw fail('Warehouse not found', 404, 'WAREHOUSE_NOT_FOUND');
 
-    const [ledgerCount, stockCount] = await Promise.all([
-      InventoryLedger.countDocuments({ companyId, warehouseId: warehouse._id }),
-      InventorySnapshot.countDocuments({
+    const [transactionCount, stockCount] = await Promise.all([
+      InventoryTransactionV2.countDocuments({
+        companyId,
+        'entries.warehouseId': warehouse._id,
+      }),
+      InventoryBalanceV2.countDocuments({
         companyId,
         warehouseId: warehouse._id,
         $or: [{ onHand: { $ne: 0 } }, { reserved: { $ne: 0 } }],
@@ -181,7 +184,7 @@ export const deleteWarehouse = async (req, res) => {
       success: true,
       message: 'Warehouse archived',
       data: warehouse,
-      ledgerCount,
+      transactionCount,
     });
   } catch (error) {
     return handleError(res, error);

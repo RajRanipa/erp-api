@@ -52,6 +52,32 @@ const ProductionBlanketRollSchema = new Schema(
       ledgerId: { type: Schema.Types.ObjectId, ref: "InventoryLedger" },
       snapshotId: { type: Schema.Types.ObjectId, ref: "InventorySnapshot" },
     },
+    inventoryV2Posted: { type: Boolean, default: false, index: true },
+    inventoryV2Status: {
+      type: String,
+      enum: ["PENDING_MAPPING", "POSTED", "FAILED", "NOT_APPLICABLE"],
+      default: "PENDING_MAPPING",
+      index: true,
+    },
+    inventoryV2LastError: { type: String, default: null },
+    inventoryV2ItemId: {
+      type: Schema.Types.ObjectId,
+      ref: "ItemMaster",
+      default: null,
+      index: true,
+    },
+    inventoryV2TransactionId: {
+      type: Schema.Types.ObjectId,
+      ref: "InventoryTransactionV2",
+      default: null,
+    },
+    inventoryV2SerialId: {
+      type: Schema.Types.ObjectId,
+      ref: "InventorySerialV2",
+      default: null,
+      index: true,
+    },
+    inventoryV2SerialNo: { type: String, default: null, index: true },
 
     ingestBatchId: { type: Schema.Types.ObjectId, ref: "GatewayIngestBatch" },
   },

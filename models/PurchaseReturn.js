@@ -11,7 +11,7 @@ export const PURCHASE_RETURN_STATUS = Object.freeze({
 
 const PurchaseReturnLineSchema = new Schema({
   goodsReceiptLineId: { type: Schema.Types.ObjectId, required: true },
-  itemId: { type: Schema.Types.ObjectId, ref: 'Item', required: true },
+  itemId: { type: Schema.Types.ObjectId, ref: 'ItemMaster', required: true },
   itemName: { type: String, required: true, trim: true, maxlength: 160 },
   qty: quantityField,
   uom: { type: String, required: true, trim: true, lowercase: true, maxlength: 30 },

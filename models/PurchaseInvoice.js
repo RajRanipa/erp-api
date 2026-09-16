@@ -18,7 +18,7 @@ export const PURCHASE_INVOICE_STATUS = Object.freeze({
 
 const PurchaseInvoiceLineSchema = new Schema({
   poLineId: { type: Schema.Types.ObjectId, required: true },
-  itemId: { type: Schema.Types.ObjectId, ref: 'Item', required: true },
+  itemId: { type: Schema.Types.ObjectId, ref: 'ItemMaster', required: true },
   itemName: { type: String, required: true, trim: true, maxlength: 160 },
   invoicedQty: quantityField,
   uom: { type: String, required: true, trim: true, lowercase: true, maxlength: 30 },
@@ -34,7 +34,7 @@ const PurchaseInvoiceLineSchema = new Schema({
 
 const InvoiceVarianceSchema = new Schema({
   lineId: { type: Schema.Types.ObjectId, default: null },
-  itemId: { type: Schema.Types.ObjectId, ref: 'Item', default: null },
+  itemId: { type: Schema.Types.ObjectId, ref: 'ItemMaster', default: null },
   type: {
     type: String,
     enum: ['QUANTITY', 'PRICE', 'MISSING_RECEIPT', 'OTHER'],

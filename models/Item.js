@@ -181,6 +181,21 @@ ItemSchema.pre('validate', async function (next) {
   next();
 });
 
+// Non-conformance Items are generic inventory buckets. Product
+// specifications belong to the originating production record, not the Item.
+ItemSchema.pre('validate', function enforceNonConformancePolicy(next) {
+  if (this.categoryKey === 'NC') {
+    this.productType = null;
+    this.temperature = null;
+    this.density = null;
+    this.dimension = null;
+    this.packing = null;
+    this.brandType = undefined;
+    this.productColor = '';
+  }
+  next();
+});
+
 ItemSchema.pre('validate', async function validateItemReferences(next) {
   try {
     const [

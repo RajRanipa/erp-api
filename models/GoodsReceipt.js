@@ -19,7 +19,7 @@ export const INSPECTION_STATUS = Object.freeze({
 const GoodsReceiptLineSchema = new Schema({
   poLineId: { type: Schema.Types.ObjectId, required: true },
   lineNumber: { type: Number, required: true, min: 1 },
-  itemId: { type: Schema.Types.ObjectId, ref: 'Item', required: true },
+  itemId: { type: Schema.Types.ObjectId, ref: 'ItemMaster', required: true },
   itemName: { type: String, required: true, trim: true, maxlength: 160 },
   uom: { type: String, required: true, trim: true, lowercase: true, maxlength: 30 },
   orderedQty: quantityField,

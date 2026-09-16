@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import GoodsReceipt from '../models/GoodsReceipt.js';
-import Item from '../models/Item.js';
+import ItemMaster from '../models/ItemMaster.js';
 import Party from '../models/Party.js';
 import PurchaseInvoice from '../models/PurchaseInvoice.js';
 import PurchaseOrder, { PURCHASE_ORDER_STATUS } from '../models/PurchaseOrder.js';
@@ -211,14 +211,24 @@ export async function getProcurementLookups(req, res) {
     const filter = {
       companyId,
       status: 'active',
-      categoryKey: { $in: ['RAW', 'PACKING', 'FG'] },
+      'capabilities.purchasable': true,
+      'capabilities.inventory': true,
     };
-    if (regex) filter.$or = [{ sku: regex }, { name: regex }, { grade: regex }];
-    rows = await Item.find(filter)
-      .select('sku name grade categoryKey UOM purchasePrice')
-      .sort({ categoryKey: 1, name: 1, _id: 1 })
+    if (regex) filter.$or = [{ sku: regex }, { name: regex }, { description: regex }];
+    const items = await ItemMaster.find(filter)
+      .select('sku name description baseUom itemClassId')
+      .populate('itemClassId', 'code name')
+      .sort({ name: 1, _id: 1 })
       .limit(limit)
       .lean();
+    rows = items.map(item => ({
+      ...item,
+      categoryKey: item.itemClassId?.code === 'PACKAGING'
+        ? 'PACKING'
+        : item.itemClassId?.code === 'FINISHED_GOOD' ? 'FG' : 'RAW',
+      UOM: item.baseUom,
+      purchasePrice: 0,
+    }));
   } else {
     throw new AppError('Lookup type is invalid', {
       statusCode: 400,

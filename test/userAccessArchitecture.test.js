@@ -40,6 +40,16 @@ test('every route authorization requirement exists in the permission catalogue',
   assert.deepEqual(missing, []);
 });
 
+test('public trace API is mounted before authenticated Item Master APIs', () => {
+  const serverPath = path.resolve(dirname, '../server.js');
+  const source = fs.readFileSync(serverPath, 'utf8');
+  const publicTrace = source.indexOf("app.use('/api/public', publicTraceRoutes)");
+  const authenticatedApi = source.indexOf("app.use('/api/item-master', itemMasterRoutes)");
+  assert.ok(publicTrace >= 0, 'public trace route must be mounted');
+  assert.ok(authenticatedApi >= 0, 'Item Master API route must be mounted');
+  assert.ok(publicTrace < authenticatedApi, 'public trace must precede authenticated APIs');
+});
+
 test('default owner role is protected and receives the complete catalogue', () => {
   const owner = DEFAULT_ROLE_TEMPLATES.find((role) => role.key === 'owner');
   assert.equal(owner.isOwner, true);
@@ -80,4 +90,3 @@ test('custom role keys are deterministic and safe', () => {
   assert.equal(normalizeRoleKey(' Purchase Supervisor '), 'purchase_supervisor');
   assert.equal(normalizeRoleKey('OWNER<script>'), 'ownerscript');
 });
-

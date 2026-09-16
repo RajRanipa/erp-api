@@ -39,7 +39,7 @@ test('does not intercept legitimate ERP, webhook, or well-known routes', () => {
   for (const path of [
     '/',
     '/api/procurement/orders',
-    '/api/items/options',
+    '/api/item-master/items',
     '/gateway/blanket/production',
     '/webhook',
     '/.well-known/acme-challenge/token',

@@ -22,7 +22,7 @@ export const PURCHASE_ORDER_STATUS = Object.freeze({
 
 const PurchaseOrderLineSchema = new Schema({
   lineNumber: { type: Number, required: true, min: 1 },
-  itemId: { type: Schema.Types.ObjectId, ref: 'Item', required: true },
+  itemId: { type: Schema.Types.ObjectId, ref: 'ItemMaster', required: true },
   itemName: { type: String, required: true, trim: true, maxlength: 160 },
   sku: { type: String, trim: true, uppercase: true, maxlength: 80, default: '' },
   categoryKey: {

@@ -26,9 +26,10 @@ try {
     productCode: 5,
     inventoryStatus: "NOT_APPLICABLE",
   };
-  const [missingStatusCount, etRequeueCount] = await Promise.all([
+  const [missingStatusCount, etRequeueCount, missingV2StatusCount] = await Promise.all([
     rolls.countDocuments(missingStatus),
     rolls.countDocuments(legacyEtNotApplicable),
+    rolls.countDocuments({ inventoryV2Status: { $exists: false } }),
   ]);
   const scanned = missingStatusCount + etRequeueCount;
   const planned = {
@@ -43,6 +44,7 @@ try {
       statusOk: false,
     }),
     etRequeued: etRequeueCount,
+    v2Initialized: missingV2StatusCount,
   };
   planned.pending =
     missingStatusCount
@@ -69,8 +71,8 @@ try {
     : null;
   const configuredCompanyId = process.env.GATEWAY_COMPANY_ID;
   const etItemFilter = {
-    productType: etProductType?._id || null,
     category: etCategoryId,
+    name: { $regex: /^et$/i },
     status: "active",
   };
   if (configuredCompanyId && mongoose.isValidObjectId(configuredCompanyId)) {
@@ -100,10 +102,23 @@ try {
     ready:
       Boolean(etProductType)
       && etCategory?.name === "non-conformance"
-      && etItems.some(item => item.categoryKey === "NC"),
+      && etItems.length === 1
+      && etItems[0].categoryKey === "NC",
   };
 
   if (apply) {
+    await rolls.updateMany(
+      { inventoryV2Posted: { $exists: false } },
+      {
+        $set: {
+          inventoryV2Posted: false,
+          inventoryV2Status: "PENDING_MAPPING",
+          inventoryV2LastError: null,
+          inventoryV2ItemId: null,
+          inventoryV2TransactionId: null,
+        },
+      },
+    );
     const posted = await rolls.updateMany(
       { ...missingStatus, inventoryPosted: true },
       { $set: { inventoryStatus: "POSTED" } }

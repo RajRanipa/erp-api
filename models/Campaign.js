@@ -5,6 +5,13 @@ import mongoose from 'mongoose';
 
 const campaignSchema = mongoose.Schema(
   {
+    companyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Company',
+      required: true,
+      immutable: true,
+      index: true,
+    },
     name: { type: String, required: true, trim: true },
     startDate: { type: Date, required: true },
     endDate: { type: Date },
@@ -27,10 +34,10 @@ const campaignSchema = mongoose.Schema(
 }
 );
 
-campaignSchema.index({ startDate: 1 });
+campaignSchema.index({ companyId: 1, startDate: 1 });
 
 campaignSchema.index(
-  { status: 1 },
+  { companyId: 1, status: 1 },
   {
     unique: true,
     partialFilterExpression: {

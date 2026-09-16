@@ -8,17 +8,15 @@ import cookieParser from 'cookie-parser';
 import path from 'path';
 
 import productionRoutes from './routes/productionRoutes.js';
-import producttypeRoutes from './routes/producttypeRoutes.js';
-import parameterRoutes from './routes/parameterRoutes.js';
-import categoryRoutes from './routes/categoryRoutes.js';
 import campaignRoutes from './routes/campaignRoutes.js';
-import batchesRouter from './routes/batchesRoutes.js';
 import partyRouter from './routes/partyRoutes.js';
 import warehouseRoutes from './routes/warehouseRoutes.js'
-import itemRoutes from './routes/itemsRoutes.js'
+import itemMasterRoutes from './routes/itemMasterRoutes.js';
+import inventoryV2Routes from './routes/inventoryV2Routes.js';
+import publicTraceRoutes from './routes/publicTraceRoutes.js';
+import manufacturingV2Routes from './routes/manufacturingV2Routes.js';
 import companyRoutes from './routes/companyRoutes.js'
 import uploadRoutes from './routes/uploadRoutes.js';
-import inventoryRoutes from './routes/inventoryRoutes.js';
 import procurementRoutes from './routes/procurementRoutes.js';
 import gatewayRoutes from './routes/gatewayRoutes.js';
 import gatewayAuthRoutes from './routes/gatewayAuthRoutes.js';
@@ -35,8 +33,8 @@ import { expressErrorHandler, notFoundHandler } from './utils/errorHandler.js';
 // Load env variables
 dotenv.config();
 
-// Connect to MongoDB
-connectDB();
+// Fail startup before accepting traffic if the database is unavailable.
+await connectDB();
 
 // Initialize Express app
 const app = express();
@@ -58,7 +56,13 @@ app.use('/uploads', express.static(uploadsDir));
 app.use(cors({
   origin: process.env.CLIENT_URL,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-Request-ID'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'X-Requested-With',
+    'X-Request-ID',
+    'Idempotency-Key',
+  ],
   exposedHeaders: ['X-Request-ID', 'Server-Timing'],
   credentials: true,
 }));
@@ -77,17 +81,17 @@ app.get('/', (req, res) => {
 
 // Use routes
 app.use('/auth',authRoutes); // This makes the route http://localhost:5000/api/send-contact-email
-app.use('/api/product-type', producttypeRoutes);
-app.use('/api', parameterRoutes);
-app.use('/api/category', categoryRoutes);
+// Public trace routes must be registered before the broad authenticated
+// parameter router mounted at /api, otherwise router.use(auth) intercepts them.
+app.use('/api/public', publicTraceRoutes);
 app.use('/api/campaigns', campaignRoutes);
-app.use('/api/batches', batchesRouter);
 app.use('/api/parties', partyRouter);
 app.use('/api/warehouses', warehouseRoutes);
-app.use('/api/items', itemRoutes);
+app.use('/api/item-master', itemMasterRoutes);
+app.use('/api/inventory-v2', inventoryV2Routes);
+app.use('/api/manufacturing-v2', manufacturingV2Routes);
 app.use('/api/company', companyRoutes);
 app.use('/api/uploads', uploadRoutes);
-app.use('/api/inventory', inventoryRoutes);
 app.use('/api/procurement', procurementRoutes);
 app.use('/api/users', inviteRoutes);
 app.use('/api/permissions', permissionsRoute);
