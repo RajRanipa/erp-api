@@ -146,6 +146,13 @@ export async function ingestBlanketBatch({ companyId, payload }) {
     rawPayload: payload,
     processingStatus: 'RECEIVED',
   });
+  console.info('[gateway:batch-saved]', JSON.stringify({
+    gatewayId: String(gatewayId),
+    clientBatchId,
+    batchId: String(batch._id),
+    records: records.length,
+    campaignId: String(campaign._id),
+  }));
   const warehouseId = await resolveGatewayWarehouseId(companyId);
   const summary = {
     received: records.length,
@@ -193,6 +200,15 @@ export async function ingestBlanketBatch({ companyId, payload }) {
         });
         summary.inserted += 1;
         result.storageStatus = 'INSERTED';
+        console.info('[gateway:record-saved]', JSON.stringify({
+          gatewayId: String(gatewayId),
+          batchId: String(batch._id),
+          recordId: record.recordId,
+          scaleNo: record.scaleNo,
+          productionId: String(document._id),
+          weightKg: record.weightKg,
+          storageStatus: result.storageStatus,
+        }));
         updateCampaignSummary(campaignSummary, record);
       } catch (error) {
         if (error?.code !== 11000) throw error;
@@ -205,6 +221,13 @@ export async function ingestBlanketBatch({ companyId, payload }) {
         if (!document) throw error;
         summary.duplicates += 1;
         result.storageStatus = 'DUPLICATE';
+        console.info('[gateway:record-duplicate]', JSON.stringify({
+          gatewayId: String(gatewayId),
+          batchId: String(batch._id),
+          recordId: record.recordId,
+          scaleNo: record.scaleNo,
+          productionId: String(document._id),
+        }));
       }
       result.accepted = true;
       result.retryable = false;
@@ -214,6 +237,17 @@ export async function ingestBlanketBatch({ companyId, payload }) {
         ? null
         : inventory.status;
       result.message = inventory.message;
+      console.info('[gateway:inventory-result]', JSON.stringify({
+        gatewayId: String(gatewayId),
+        batchId: String(batch._id),
+        recordId: record.recordId,
+        scaleNo: record.scaleNo,
+        productionId: String(document._id),
+        inventoryStatus: inventory.status,
+        posted: Boolean(inventory.posted),
+        duplicate: Boolean(inventory.duplicate),
+        message: inventory.message || null,
+      }));
       if (inventory.posted) {
         if (!inventory.duplicate) summary.postedToInventory += 1;
       } else if (inventory.status === 'NOT_APPLICABLE') {
@@ -234,9 +268,24 @@ export async function ingestBlanketBatch({ companyId, payload }) {
         result.inventoryStatus = 'FAILED';
         summary.inventoryPending += 1;
         summary.warnings.push(`recordId ${result.recordId}: ${message}`);
+        console.warn('[gateway:inventory-failed]', JSON.stringify({
+          gatewayId: String(gatewayId),
+          batchId: String(batch._id),
+          recordId: result.recordId,
+          productionId: String(document._id),
+          code: result.code,
+          message,
+        }));
       } else {
         summary.failed += 1;
         summary.errors.push(`recordId ${result.recordId || 'unknown'}: ${message}`);
+        console.error('[gateway:record-rejected]', JSON.stringify({
+          gatewayId: String(gatewayId),
+          batchId: String(batch._id),
+          recordId: result.recordId,
+          code: result.code,
+          message,
+        }));
       }
     }
   }
@@ -249,6 +298,18 @@ export async function ingestBlanketBatch({ companyId, payload }) {
     { _id: batch._id },
     { $set: { processingStatus: status, processingSummary: summary } },
   );
+  console.info('[gateway:batch-completed]', JSON.stringify({
+    gatewayId: String(gatewayId),
+    clientBatchId,
+    batchId: String(batch._id),
+    status,
+    received: summary.received,
+    inserted: summary.inserted,
+    duplicates: summary.duplicates,
+    postedToInventory: summary.postedToInventory,
+    inventoryPending: summary.inventoryPending,
+    failed: summary.failed,
+  }));
   if (Object.values(campaignSummary).some(Boolean)) {
     const updated = await Campaign.updateOne(
       { _id: campaign._id, companyId, status: 'RUNNING' },
