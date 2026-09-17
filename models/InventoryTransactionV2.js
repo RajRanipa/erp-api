@@ -50,6 +50,8 @@ const inventoryTransactionV2Schema = new Schema({
   effectiveAt: { type: Date, default: Date.now, required: true, index: true },
   referenceType: { type: String, trim: true, uppercase: true, default: null },
   referenceId: { type: String, trim: true, default: null },
+  reason: { type: String, trim: true, default: null, maxlength: 500 },
+  authorizationReference: { type: String, trim: true, default: null, maxlength: 200 },
   note: { type: String, trim: true, default: '', maxlength: 2000 },
   entries: { type: [entrySchema], required: true },
   totalValueIn: { type: Number, min: 0, default: 0 },

@@ -10,6 +10,7 @@ import {
   deleteItemMaster,
   familyFormSchema,
   getItemMaster,
+  getItemMasterEditContext,
   listItemMasters,
   listItemMasterOptions,
   listItemSetup,
@@ -311,6 +312,16 @@ export async function getMasterItem(req, res) {
   try {
     return sendSuccess(res, {
       data: await getItemMaster(companyIdFromRequest(req), req.params.id),
+    });
+  } catch (error) {
+    return handleError(res, error, req);
+  }
+}
+
+export async function getMasterItemEditContext(req, res) {
+  try {
+    return sendSuccess(res, {
+      data: await getItemMasterEditContext(companyIdFromRequest(req), req.params.id),
     });
   } catch (error) {
     return handleError(res, error, req);

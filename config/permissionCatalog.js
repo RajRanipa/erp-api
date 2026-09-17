@@ -41,7 +41,7 @@ export const PERMISSION_CATALOG = [
   define('items:status:update', 'Change item status'),
 
   define('inventory:read', 'View inventory'),
-  define('inventory:receipt', 'Receive inventory'),
+  define('inventory:receipt', 'Post manual production receipts'),
   define('inventory:issue', 'Issue inventory'),
   define('inventory:adjust', 'Adjust inventory'),
   define('inventory:transfer', 'Transfer inventory'),

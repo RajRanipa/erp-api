@@ -435,6 +435,34 @@ export async function getItemMaster(companyId, itemId) {
   return item;
 }
 
+export async function getItemMasterEditContext(companyId, itemId) {
+  const item = await getItemMaster(companyId, itemId);
+  const familyId = item.familyId?._id || item.familyId;
+  const [setup, form] = await Promise.all([
+    listItemSetup(companyId),
+    familyFormSchema(companyId, familyId),
+  ]);
+
+  const referenceAttributes = form.attributes.filter(
+    attribute => attribute.dataType === 'reference' && attribute.referenceFamilyCode,
+  );
+  const optionEntries = await Promise.all(
+    referenceAttributes.map(async attribute => [
+      attribute.code,
+      await listItemMasterOptions(companyId, {
+        familyCode: attribute.referenceFamilyCode,
+      }),
+    ]),
+  );
+
+  return {
+    item,
+    setup,
+    form,
+    referenceOptions: Object.fromEntries(optionEntries),
+  };
+}
+
 const deletionDependencyChecks = Object.freeze([
   {
     code: 'INVENTORY_TRANSACTIONS',

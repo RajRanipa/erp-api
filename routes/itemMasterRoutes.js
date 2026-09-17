@@ -9,6 +9,7 @@ import {
   getFamilyForm,
   getItemMasterSetup,
   getMasterItem,
+  getMasterItemEditContext,
   getMasterItemDeletionAssessment,
   listMasterItems,
   listMasterItemOptions,
@@ -36,6 +37,7 @@ router.get(
   roleAuth('items:delete'),
   getMasterItemDeletionAssessment,
 );
+router.get('/items/:id/edit-context', roleAuth('items:read'), getMasterItemEditContext);
 router.get('/items/:id', roleAuth('items:read'), getMasterItem);
 router.put('/items/:id', roleAuth('items:update'), updateMasterItem);
 router.patch('/items/:id/status', roleAuth('items:status:update'), changeMasterItemStatus);

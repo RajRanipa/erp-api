@@ -127,24 +127,32 @@ export async function ensureLegacyMembership(user) {
 export async function resolveAccessContext({ userId, companyId = null }) {
   if (!mongoose.isValidObjectId(userId)) return null;
 
-  const user = await User.findById(userId)
+  const suppliedCompanyId = objectId(companyId);
+  const userPromise = User.findById(userId)
     .select('_id email fullName status isVerified tokenVersion companyId role isSetupCompleted')
     .lean();
+  const membershipPromise = suppliedCompanyId
+    ? Membership.findOne({ userId, companyId: suppliedCompanyId })
+      .populate('roleId')
+      .lean()
+    : Promise.resolve(null);
+  const [user, suppliedMembership] = await Promise.all([userPromise, membershipPromise]);
 
   if (!user) return null;
 
-  const requestedCompanyId = objectId(companyId || user.companyId);
-  let membership = null;
+  const requestedCompanyId = suppliedCompanyId || objectId(user.companyId);
+  let membership = suppliedMembership;
 
-  if (requestedCompanyId) {
+  if (requestedCompanyId && !suppliedCompanyId) {
     membership = await Membership.findOne({
       userId: user._id,
       companyId: requestedCompanyId,
-    }).populate('roleId');
+    }).populate('roleId').lean();
 
-    if (!membership && user.companyId && String(user.companyId) === String(requestedCompanyId)) {
-      membership = await ensureLegacyMembership(user);
-    }
+  }
+  if (!membership && requestedCompanyId
+    && user.companyId && String(user.companyId) === String(requestedCompanyId)) {
+    membership = await ensureLegacyMembership(user);
   }
 
   const role = membership?.roleId || null;
@@ -190,4 +198,3 @@ export async function countActiveOwners(companyId, excludedUserId = null) {
   if (excludedUserId) filter.userId = { $ne: excludedUserId };
   return Membership.countDocuments(filter);
 }
-

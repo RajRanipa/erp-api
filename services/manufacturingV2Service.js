@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import mongoose from 'mongoose';
 import InventoryLotV2 from '../models/InventoryLotV2.js';
 import InventoryTransactionV2 from '../models/InventoryTransactionV2.js';
+import ItemFamily from '../models/ItemFamily.js';
 import ItemMaster from '../models/ItemMaster.js';
 import ManufacturingRecipeV2 from '../models/ManufacturingRecipeV2.js';
 import ProductionOrderV2 from '../models/ProductionOrderV2.js';
@@ -50,6 +51,45 @@ async function activeOutputItem(companyId, itemId) {
   return item;
 }
 
+async function validateBlanketPlasticPacking(
+  companyId,
+  output,
+  componentItems,
+  recipeComponents,
+  basisQuantity,
+) {
+  if (output.familyId?.code !== 'BLANKET') return;
+  const plasticBagFamily = await ItemFamily.findOne({
+    companyId,
+    code: 'PLASTIC_BAG',
+    status: 'active',
+  }).select('_id').lean();
+  if (!plasticBagFamily) {
+    throw fail(
+      'Create an active PLASTIC_BAG Item Family before configuring a Blanket recipe',
+      409,
+      'PLASTIC_BAG_FAMILY_REQUIRED',
+    );
+  }
+  const itemById = new Map(componentItems.map(item => [String(item._id), item]));
+  const plasticPerRoll = recipeComponents.reduce((total, component) => {
+    const item = itemById.get(String(component.itemId));
+    if (
+      normalizeCode(component.stage || 'RELEASE') !== 'PACKING'
+      || String(item?.familyId) !== String(plasticBagFamily._id)
+    ) return total;
+    return total + Number(component.quantity || 0) / basisQuantity;
+  }, 0);
+  if (Math.abs(plasticPerRoll - 1) > 1e-9) {
+    throw fail(
+      'A Blanket recipe must consume exactly one PLASTIC_BAG at PACKING for every output roll',
+      409,
+      'BLANKET_PLASTIC_BAG_REQUIRED',
+      { configuredPerRoll: Number(plasticPerRoll.toFixed(6)) },
+    );
+  }
+}
+
 export async function createRecipe(companyId, actorId, input = {}) {
   const output = await activeOutputItem(companyId, input.outputItemId);
   const basisQuantity = positive(input.basisQuantity || 1, 'basisQuantity');
@@ -66,6 +106,13 @@ export async function createRecipe(companyId, actorId, input = {}) {
   if (components.length !== new Set(componentIds.map(String)).size) {
     throw fail('Every component must be an active consumable Item', 409, 'INVALID_RECIPE_COMPONENT');
   }
+  await validateBlanketPlasticPacking(
+    companyId,
+    output,
+    components,
+    input.components,
+    basisQuantity,
+  );
   const stages = new Set(input.components.map(component => normalizeCode(component.stage || 'RELEASE')));
   if (output.familyId?.code === 'BOARD' && !stages.has('RELEASE')) {
     throw fail(
@@ -122,6 +169,20 @@ export async function activateRecipe(companyId, recipeId, actorId) {
   if (recipe.status !== 'DRAFT') {
     throw fail('Only a Draft recipe can be activated', 409, 'RECIPE_NOT_DRAFT');
   }
+  const output = await activeOutputItem(companyId, recipe.outputItemId);
+  const componentItems = await ItemMaster.find({
+    _id: { $in: recipe.components.map(component => component.itemId) },
+    companyId,
+    status: 'active',
+    'capabilities.consumable': true,
+  }).lean();
+  await validateBlanketPlasticPacking(
+    companyId,
+    output,
+    componentItems,
+    recipe.components,
+    recipe.basisQuantity,
+  );
   await ManufacturingRecipeV2.updateMany(
     {
       companyId,

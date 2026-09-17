@@ -7,6 +7,7 @@ import InventorySerialV2 from '../models/InventorySerialV2.js';
 import InventoryTransactionV2 from '../models/InventoryTransactionV2.js';
 import ItemFamily from '../models/ItemFamily.js';
 import ItemMaster from '../models/ItemMaster.js';
+import ManufacturingRecipeV2 from '../models/ManufacturingRecipeV2.js';
 import Warehouse from '../models/Warehouse.js';
 import Campaign from '../models/Campaign.js';
 import Company from '../models/Company.js';
@@ -704,6 +705,8 @@ async function createPostedTransaction(companyId, actorId, input, entries, sessi
     effectiveAt: input.effectiveAt || new Date(),
     referenceType: normalizeCode(input.referenceType),
     referenceId: normalizeOptional(input.referenceId),
+    reason: normalizeOptional(input.reason || input.manualReason),
+    authorizationReference: normalizeOptional(input.authorizationReference),
     note: String(input.note || '').trim(),
     entries,
     totalValueIn,
@@ -740,6 +743,281 @@ export async function postReceipt(companyId, actorId, input = {}) {
       ...input,
       type: 'RECEIPT',
     }, [entry], session);
+  });
+  const serialIds = (result.transaction?.entries || [])
+    .flatMap(entry => entry.serialIds || []);
+  result.serials = serialIds.length
+    ? await InventorySerialV2.find({ companyId, _id: { $in: serialIds } })
+      .select('serialNo catchQuantity catchUom catchSource manufacturedAt traceSnapshot lotId')
+      .sort({ createdAt: 1, _id: 1 })
+      .lean()
+    : [];
+  return result;
+}
+
+export async function postManualProductionReceipt(companyId, actorId, input = {}) {
+  const result = await idempotentPost(companyId, input.idempotencyKey, async session => {
+    const item = await loadContext(companyId, input.itemId, input.warehouseId, session);
+    if (!item.capabilities?.manufacturable) {
+      throw fail(
+        'Manual production receipts can only use manufacturable Items',
+        409,
+        'ITEM_NOT_MANUFACTURABLE',
+      );
+    }
+    const receiptMode = normalizeCode(input.receiptMode);
+    if (!['PRODUCTION', 'GATEWAY_FALLBACK'].includes(receiptMode)) {
+      throw fail(
+        'Manual production receipt type must be Production or Gateway fallback',
+        400,
+        'INVALID_MANUAL_PRODUCTION_RECEIPT_TYPE',
+      );
+    }
+    if (!input.campaignId) {
+      throw fail('Campaign is required for production receipts', 400, 'CAMPAIGN_REQUIRED');
+    }
+    objectId(input.campaignId, 'campaignId');
+    const campaign = await Campaign.findOne({
+      _id: input.campaignId,
+      companyId,
+      status: 'RUNNING',
+    }).session(session).select('_id').lean();
+    if (!campaign) {
+      throw fail(
+        'A running Campaign is required for manual production receipts',
+        409,
+        'RUNNING_CAMPAIGN_REQUIRED',
+      );
+    }
+    if (!validDateOrNull(input.manufacturedAt, 'manufacturedAt')) {
+      throw fail(
+        'Manufacture date and time is required',
+        400,
+        'MANUFACTURED_AT_REQUIRED',
+      );
+    }
+    if (!normalizeOptional(input.manualReason)) {
+      throw fail(
+        'A reason is required for every manual production receipt',
+        400,
+        'MANUAL_PRODUCTION_REASON_REQUIRED',
+      );
+    }
+    const entry = await receiptLine(companyId, {
+      ...input,
+      sourceType: 'MANUAL_RECEIPT',
+      qualityStatus: 'AVAILABLE',
+      processStatus: 'AVAILABLE',
+      receiptMode,
+    }, session);
+    return createPostedTransaction(companyId, actorId, {
+      ...input,
+      type: 'RECEIPT',
+      referenceType: receiptMode === 'GATEWAY_FALLBACK'
+        ? 'GATEWAY_FALLBACK'
+        : 'MANUAL_PRODUCTION',
+    }, [entry], session);
+  });
+  const serialIds = (result.transaction?.entries || [])
+    .flatMap(entry => entry.serialIds || []);
+  result.serials = serialIds.length
+    ? await InventorySerialV2.find({ companyId, _id: { $in: serialIds } })
+      .select('serialNo catchQuantity catchUom catchSource manufacturedAt traceSnapshot lotId')
+      .sort({ createdAt: 1, _id: 1 })
+      .lean()
+    : [];
+  return result;
+}
+
+export async function postOpeningStockAdjustment(companyId, actorId, input = {}) {
+  return idempotentPost(companyId, input.idempotencyKey, async session => {
+    if (!normalizeOptional(input.reason)) {
+      throw fail('Adjustment reason is required', 400, 'ADJUSTMENT_REASON_REQUIRED');
+    }
+    if (!normalizeOptional(input.referenceId)) {
+      throw fail('Adjustment reference is required', 400, 'ADJUSTMENT_REFERENCE_REQUIRED');
+    }
+    if (!normalizeOptional(input.authorizationReference)) {
+      throw fail(
+        'Approval or authorization reference is required',
+        400,
+        'ADJUSTMENT_AUTHORIZATION_REQUIRED',
+      );
+    }
+    if (input.unitCost === null || input.unitCost === undefined || input.unitCost === '') {
+      throw fail('Opening stock valuation is required', 400, 'ADJUSTMENT_VALUATION_REQUIRED');
+    }
+    nonNegative(input.unitCost, 'unitCost');
+    const effectiveAt = validDateOrNull(input.effectiveAt, 'effectiveAt') || new Date();
+    const auditNote = [
+      `Reason: ${String(input.reason).trim()}`,
+      `Authorization: ${String(input.authorizationReference).trim()}`,
+      normalizeOptional(input.note),
+    ].filter(Boolean).join(' | ');
+    const entry = await receiptLine(companyId, {
+      ...input,
+      sourceType: 'OPENING_STOCK',
+      sourceId: String(input.referenceId).trim(),
+      qualityStatus: normalizeCode(input.qualityStatus) || 'AVAILABLE',
+      processStatus: normalizeCode(input.qualityStatus) === 'REJECTED'
+        ? 'REJECTED'
+        : 'AVAILABLE',
+      receivedAt: effectiveAt,
+    }, session, { skipSerials: true });
+    return createPostedTransaction(companyId, actorId, {
+      ...input,
+      type: 'ADJUSTMENT',
+      effectiveAt,
+      referenceType: 'OPENING_STOCK_ADJUSTMENT',
+      referenceId: String(input.referenceId).trim(),
+      note: auditNote,
+    }, [entry], session);
+  });
+}
+
+export async function postGatewayPackedBlanketReceipt(companyId, actorId, input = {}) {
+  const result = await idempotentPost(companyId, input.idempotencyKey, async session => {
+    const blanket = await ItemMaster.findOne({
+      _id: input.itemId,
+      companyId,
+      status: 'active',
+      'capabilities.inventory': true,
+      'capabilities.manufacturable': true,
+    }).populate('familyId', 'code').session(session).lean();
+    if (!blanket || blanket.familyId?.code !== 'BLANKET') {
+      throw fail(
+        'Automatic gateway packing is only available for active manufacturable Blanket Items',
+        409,
+        'GATEWAY_PACKING_ITEM_INVALID',
+      );
+    }
+    const quantity = positive(input.quantity, 'quantity');
+    enforceWholeUnit(blanket, quantity);
+    const recipe = await ManufacturingRecipeV2.findOne({
+      companyId,
+      outputItemId: blanket._id,
+      status: 'ACTIVE',
+    }).populate({
+      path: 'components.itemId',
+      select: 'sku name baseUom status capabilities familyId itemClassId',
+      populate: [
+        { path: 'familyId', select: 'code' },
+        { path: 'itemClassId', select: 'code' },
+      ],
+    }).session(session).lean();
+    if (!recipe) {
+      throw fail(
+        'An active Blanket recipe with Plastic Bag packing is required before gateway stock can post',
+        409,
+        'GATEWAY_BLANKET_RECIPE_REQUIRED',
+      );
+    }
+    const manufacturedAt = validDateOrNull(input.manufacturedAt, 'manufacturedAt') || new Date();
+    if (
+      (recipe.effectiveFrom && manufacturedAt < new Date(recipe.effectiveFrom))
+      || (recipe.effectiveTo && manufacturedAt > new Date(recipe.effectiveTo))
+    ) {
+      throw fail(
+        'The active Blanket recipe is not effective at the PLC manufacture time',
+        409,
+        'GATEWAY_BLANKET_RECIPE_NOT_EFFECTIVE',
+      );
+    }
+    const plasticComponents = (recipe.components || []).filter(component =>
+      normalizeCode(component.stage) === 'PACKING'
+      && component.itemId?.familyId?.code === 'PLASTIC_BAG');
+    if (!plasticComponents.length) {
+      throw fail(
+        'The active Blanket recipe must contain a PLASTIC_BAG component at the PACKING stage',
+        409,
+        'GATEWAY_PLASTIC_BAG_COMPONENT_REQUIRED',
+      );
+    }
+    if (plasticComponents.some(component =>
+      component.itemId?.status !== 'active'
+      || !component.itemId?.capabilities?.inventory
+      || !component.itemId?.capabilities?.consumable
+      || component.itemId?.itemClassId?.code !== 'PACKAGING')) {
+      throw fail(
+        'Gateway Plastic Bag components must be active, inventory-enabled consumable Packaging Items',
+        409,
+        'GATEWAY_PLASTIC_BAG_COMPONENT_INVALID',
+      );
+    }
+    const plasticPerRoll = roundQuantity(plasticComponents.reduce(
+      (total, component) => total + Number(component.quantity || 0) / Number(recipe.basisQuantity),
+      0,
+    ));
+    if (Math.abs(plasticPerRoll - 1) > EPSILON) {
+      throw fail(
+        'The active Blanket recipe must consume exactly one Plastic Bag per roll',
+        409,
+        'GATEWAY_PLASTIC_BAG_QUANTITY_INVALID',
+        { configuredPerRoll: plasticPerRoll },
+      );
+    }
+    const grouped = new Map();
+    for (const component of plasticComponents) {
+      const itemId = String(component.itemId._id);
+      const perRoll = Number(component.quantity) / Number(recipe.basisQuantity);
+      grouped.set(itemId, roundQuantity((grouped.get(itemId)?.quantity || 0) + perRoll));
+      grouped.get(itemId).item = component.itemId;
+    }
+    const normalizedComponents = [...grouped.entries()]
+      .map(([itemId, value]) => ({
+        itemId,
+        quantity: value.quantity,
+        uom: value.item.baseUom,
+      }))
+      .sort((left, right) => String(left.itemId).localeCompare(String(right.itemId)));
+    const packingLabel = 'Plastic Bag';
+    const packingKey = `PACK-${crypto.createHash('sha256')
+      .update(`${packingLabel.toLowerCase()}|${normalizedComponents
+        .map(row => `${row.itemId}:${row.quantity}`).join('|')}`)
+      .digest('hex').slice(0, 20).toUpperCase()}`;
+    const entries = [];
+    for (const component of normalizedComponents) {
+      entries.push(await issueLine(companyId, {
+        itemId: component.itemId,
+        warehouseId: input.packagingWarehouseId || input.warehouseId,
+        quantity: roundQuantity(component.quantity * quantity),
+        qualityStatus: 'AVAILABLE',
+      }, session));
+    }
+    const packagingValue = roundMoney(entries.reduce(
+      (total, entry) => total + Number(entry.value || 0),
+      0,
+    ));
+    const baseOutputValue = roundMoney(quantity * nonNegative(input.unitCost ?? 0, 'unitCost'));
+    const packedLotNo = input.lotNo
+      ? `${normalizeCode(input.lotNo).slice(0, 96)}-PB`
+      : undefined;
+    const receipt = await receiptLine(companyId, {
+      ...input,
+      quantity,
+      lotNo: packedLotNo,
+      unitCost: roundMoney((baseOutputValue + packagingValue) / quantity),
+      qualityStatus: 'AVAILABLE',
+      processStatus: 'PACKED',
+      sourceType: 'PROD_GATEWAY',
+    }, session);
+    await InventoryLotV2.updateOne(
+      { _id: receipt.lotId, companyId },
+      {
+        $set: {
+          packingLabel,
+          packingKey,
+          packagingComponents: normalizedComponents,
+        },
+      },
+      { session },
+    );
+    entries.push(receipt);
+    return createPostedTransaction(companyId, actorId, {
+      ...input,
+      type: 'CONVERSION',
+      referenceType: 'PROD_GATEWAY_PACKED_BLANKET',
+    }, entries, session);
   });
   const serialIds = (result.transaction?.entries || [])
     .flatMap(entry => entry.serialIds || []);

@@ -18,15 +18,23 @@ export function apiContext(req, res, next) {
 
   req.requestId = requestId;
   res.locals.requestId = requestId;
+  res.locals.serverTimings = [];
   res.setHeader('X-Request-ID', requestId);
   res.setHeader('Cache-Control', 'no-store');
+  if (process.env.CLIENT_URL) {
+    res.setHeader('Timing-Allow-Origin', process.env.CLIENT_URL);
+  }
 
   const originalJson = res.json.bind(res);
   res.json = (payload) => {
     if (res.headersSent) return originalJson(payload);
 
     const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
-    res.setHeader('Server-Timing', `app;dur=${elapsedMs.toFixed(2)}`);
+    const timings = [
+      ...(res.locals.serverTimings || []),
+      `app;dur=${elapsedMs.toFixed(2)}`,
+    ];
+    res.setHeader('Server-Timing', timings.join(', '));
 
     if (isApiEnvelope(payload)) {
       return originalJson(payload);

@@ -4,6 +4,7 @@ import {
   buildGatewayInventoryV2ReceiptInput,
   gatewayV2IdentityForRecord,
   gatewayV2QuantityForItem,
+  shouldAutoPackGatewayReceipt,
 } from '../services/gatewayInventoryV2Service.js';
 
 const baseRecord = {
@@ -133,4 +134,10 @@ test('gateway records measured Bulk bag weight as catch quantity', () => {
   assert.equal(input.quantity, 1);
   assert.equal(input.catchQuantity, 19.8);
   assert.equal(input.units, undefined);
+});
+
+test('only accepted gateway Blankets are automatically plastic packed', () => {
+  assert.equal(shouldAutoPackGatewayReceipt('BLANKET', { qualityStatus: 'AVAILABLE' }), true);
+  assert.equal(shouldAutoPackGatewayReceipt('BLANKET', { qualityStatus: 'REJECTED' }), false);
+  assert.equal(shouldAutoPackGatewayReceipt('BULK', { qualityStatus: 'AVAILABLE' }), false);
 });

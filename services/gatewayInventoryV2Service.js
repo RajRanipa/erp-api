@@ -2,7 +2,10 @@ import ItemFamily from '../models/ItemFamily.js';
 import ItemMaster from '../models/ItemMaster.js';
 import ProductionBlanketRoll from '../models/ProductionBlanketRoll.js';
 import Warehouse from '../models/Warehouse.js';
-import { postReceipt } from './inventoryV2Service.js';
+import {
+  postGatewayPackedBlanketReceipt,
+  postReceipt,
+} from './inventoryV2Service.js';
 import { AppError } from '../utils/errorHandler.js';
 
 export const GATEWAY_SIZE_CODE_MAP = Object.freeze({
@@ -21,6 +24,10 @@ export const GATEWAY_PRODUCT_FAMILY = Object.freeze({
   4: 'MODULE',
   5: 'ET',
 });
+
+export const shouldAutoPackGatewayReceipt = (familyCode, receiptInput = {}) =>
+  normalizeCode(familyCode) === 'BLANKET'
+  && normalizeCode(receiptInput.qualityStatus) === 'AVAILABLE';
 
 const normalizeCode = value => String(value ?? '')
   .trim()
@@ -285,7 +292,10 @@ export async function postGatewayInventoryV2(input) {
     ...input,
     item: resolved.item,
   });
-  const result = await postReceipt(input.companyId, null, receiptInput);
+  const shouldAutoPack = shouldAutoPackGatewayReceipt(resolved.familyCode, receiptInput);
+  const result = shouldAutoPack
+    ? await postGatewayPackedBlanketReceipt(input.companyId, null, receiptInput)
+    : await postReceipt(input.companyId, null, receiptInput);
   return {
     posted: true,
     status: 'POSTED',

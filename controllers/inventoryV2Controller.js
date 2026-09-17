@@ -8,7 +8,8 @@ import {
   postConversion,
   postIssue,
   postBlanketPacking,
-  postReceipt,
+  postManualProductionReceipt,
+  postOpeningStockAdjustment,
   transitionLotProcess,
   postTransfer,
 } from '../services/inventoryV2Service.js';
@@ -105,7 +106,10 @@ async function post(req, res, operation, message, suppliedInput = null) {
 }
 
 export const createInventoryV2Receipt = (req, res) =>
-  post(req, res, postReceipt, 'Inventory receipt posted');
+  post(req, res, postManualProductionReceipt, 'Manual production receipt posted');
+
+export const createOpeningStockAdjustment = (req, res) =>
+  post(req, res, postOpeningStockAdjustment, 'Opening stock adjustment posted');
 
 export const createInventoryV2Issue = (req, res) =>
   post(req, res, postIssue, 'Inventory issue posted');

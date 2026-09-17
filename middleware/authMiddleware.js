@@ -1,6 +1,54 @@
 import jwt from 'jsonwebtoken';
 import { permissionImplies, resolveAccessContext } from '../services/accessControlService.js';
 
+const authContextCache = new Map();
+const authCacheTtlMs = () => Math.min(
+  Math.max(Number(process.env.AUTH_CONTEXT_CACHE_TTL_MS || 5000), 0),
+  30000,
+);
+const authCacheKey = decoded => [
+  decoded.userId,
+  decoded.companyId || '',
+  Number(decoded.tokenVersion || 0),
+  Number(decoded.membershipVersion || 0),
+].join(':');
+
+async function resolveCachedAccessContext(decoded) {
+  const ttlMs = authCacheTtlMs();
+  if (!ttlMs) {
+    return resolveAccessContext({
+      userId: decoded.userId,
+      companyId: decoded.companyId || null,
+    });
+  }
+  const key = authCacheKey(decoded);
+  const now = Date.now();
+  const cached = authContextCache.get(key);
+  if (cached && cached.expiresAt > now) return cached.promise;
+
+  const promise = resolveAccessContext({
+    userId: decoded.userId,
+    companyId: decoded.companyId || null,
+  });
+  authContextCache.set(key, { expiresAt: now + ttlMs, promise });
+  try {
+    const context = await promise;
+    if (!context) authContextCache.delete(key);
+    if (authContextCache.size > 1000) {
+      for (const [cacheKey, entry] of authContextCache) {
+        if (entry.expiresAt <= now) authContextCache.delete(cacheKey);
+      }
+      while (authContextCache.size > 1000) {
+        authContextCache.delete(authContextCache.keys().next().value);
+      }
+    }
+    return context;
+  } catch (error) {
+    authContextCache.delete(key);
+    throw error;
+  }
+}
+
 const auth = async (req, res, next) => {
   const token = req.cookies?.accessToken;
   if (!token) {
@@ -12,11 +60,11 @@ const auth = async (req, res, next) => {
   }
 
   try {
+    const authStartedAt = process.hrtime.bigint();
     const decoded = jwt.verify(token, process.env.JWT_ACCESS_SECRET);
-    const context = await resolveAccessContext({
-      userId: decoded.userId,
-      companyId: decoded.companyId || null,
-    });
+    const context = await resolveCachedAccessContext(decoded);
+    const authElapsedMs = Number(process.hrtime.bigint() - authStartedAt) / 1e6;
+    res.locals.serverTimings?.push(`auth;dur=${authElapsedMs.toFixed(2)}`);
 
     if (!context?.user) {
       return res.status(401).json({ status: false, code: 'USER_NOT_FOUND', message: 'User not found.' });

@@ -63,7 +63,7 @@ app.use(cors({
     'X-Request-ID',
     'Idempotency-Key',
   ],
-  exposedHeaders: ['X-Request-ID', 'Server-Timing'],
+  exposedHeaders: ['X-Request-ID', 'Server-Timing', 'Timing-Allow-Origin'],
   credentials: true,
 }));
 app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '2mb' }));

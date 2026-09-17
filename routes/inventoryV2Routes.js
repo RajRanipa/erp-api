@@ -4,6 +4,7 @@ import {
   createBlanketPacking,
   createInventoryV2Issue,
   createInventoryV2Receipt,
+  createOpeningStockAdjustment,
   createInventoryV2Transfer,
   getInventoryV2Stock,
   getInventoryV2Summary,
@@ -23,6 +24,11 @@ router.get('/stock', roleAuth('inventory:read'), getInventoryV2Stock);
 router.get('/transactions', roleAuth('inventory:read'), getInventoryV2Transactions);
 router.get('/serials', roleAuth('inventory:read'), getInventoryV2Serials);
 router.post('/receipts', roleAuth('inventory:receipt'), createInventoryV2Receipt);
+router.post(
+  '/opening-stock-adjustments',
+  roleAuth('inventory:adjust'),
+  createOpeningStockAdjustment,
+);
 router.post('/issues', roleAuth('inventory:issue'), createInventoryV2Issue);
 router.post('/transfers', roleAuth('inventory:transfer'), createInventoryV2Transfer);
 router.post('/conversions', roleAuth('inventory:repack'), createInventoryV2Conversion);
