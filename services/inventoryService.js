@@ -875,6 +875,14 @@ export async function postOpeningStockAdjustment(companyId, actorId, input = {})
   });
 }
 
+export const eligibleGatewayPlasticBagItems = (items = []) => items.filter(item =>
+  item?.status === 'active'
+  && item?.familyId?.code === 'PLASTIC_BAG'
+  && item?.itemClassId?.code === 'PACKAGING'
+  && item?.capabilities?.inventory
+  && item?.capabilities?.consumable
+  && normalizeCode(item?.baseUom) === 'NOS');
+
 export async function postGatewayPackedBlanketReceipt(companyId, actorId, input = {}) {
   const result = await idempotentPost(companyId, input.idempotencyKey, async session => {
     const blanket = await ItemMaster.findOne({
@@ -905,71 +913,101 @@ export async function postGatewayPackedBlanketReceipt(companyId, actorId, input 
         { path: 'itemClassId', select: 'code' },
       ],
     }).session(session).lean();
-    if (!recipe) {
-      throw fail(
-        'An active Blanket recipe with Plastic Bag packing is required before gateway stock can post',
-        409,
-        'GATEWAY_BLANKET_RECIPE_REQUIRED',
-      );
-    }
     const manufacturedAt = validDateOrNull(input.manufacturedAt, 'manufacturedAt') || new Date();
-    if (
-      (recipe.effectiveFrom && manufacturedAt < new Date(recipe.effectiveFrom))
-      || (recipe.effectiveTo && manufacturedAt > new Date(recipe.effectiveTo))
-    ) {
-      throw fail(
-        'The active Blanket recipe is not effective at the PLC manufacture time',
-        409,
-        'GATEWAY_BLANKET_RECIPE_NOT_EFFECTIVE',
-      );
+    let normalizedComponents;
+    if (recipe) {
+      if (
+        (recipe.effectiveFrom && manufacturedAt < new Date(recipe.effectiveFrom))
+        || (recipe.effectiveTo && manufacturedAt > new Date(recipe.effectiveTo))
+      ) {
+        throw fail(
+          'The active Blanket recipe is not effective at the PLC manufacture time',
+          409,
+          'GATEWAY_BLANKET_RECIPE_NOT_EFFECTIVE',
+        );
+      }
+      const plasticComponents = (recipe.components || []).filter(component =>
+        normalizeCode(component.stage) === 'PACKING'
+        && component.itemId?.familyId?.code === 'PLASTIC_BAG');
+      if (!plasticComponents.length) {
+        throw fail(
+          'The active Blanket recipe must contain a PLASTIC_BAG component at the PACKING stage',
+          409,
+          'GATEWAY_PLASTIC_BAG_COMPONENT_REQUIRED',
+        );
+      }
+      if (plasticComponents.some(component =>
+        component.itemId?.status !== 'active'
+        || !component.itemId?.capabilities?.inventory
+        || !component.itemId?.capabilities?.consumable
+        || component.itemId?.itemClassId?.code !== 'PACKAGING')) {
+        throw fail(
+          'Gateway Plastic Bag components must be active, inventory-enabled consumable Packaging Items',
+          409,
+          'GATEWAY_PLASTIC_BAG_COMPONENT_INVALID',
+        );
+      }
+      const plasticPerRoll = roundQuantity(plasticComponents.reduce(
+        (total, component) => total + Number(component.quantity || 0) / Number(recipe.basisQuantity),
+        0,
+      ));
+      if (Math.abs(plasticPerRoll - 1) > EPSILON) {
+        throw fail(
+          'The active Blanket recipe must consume exactly one Plastic Bag per roll',
+          409,
+          'GATEWAY_PLASTIC_BAG_QUANTITY_INVALID',
+          { configuredPerRoll: plasticPerRoll },
+        );
+      }
+      const grouped = new Map();
+      for (const component of plasticComponents) {
+        const itemId = String(component.itemId._id);
+        const perRoll = Number(component.quantity) / Number(recipe.basisQuantity);
+        grouped.set(itemId, {
+          quantity: roundQuantity((grouped.get(itemId)?.quantity || 0) + perRoll),
+          item: component.itemId,
+        });
+      }
+      normalizedComponents = [...grouped.entries()]
+        .map(([itemId, value]) => ({
+          itemId,
+          quantity: value.quantity,
+          uom: value.item.baseUom,
+        }))
+        .sort((left, right) => String(left.itemId).localeCompare(String(right.itemId)));
+    } else {
+      const fallbackItems = await ItemMaster.find({
+        companyId,
+        status: 'active',
+        baseUom: 'nos',
+        'capabilities.inventory': true,
+        'capabilities.consumable': true,
+      })
+        .populate('familyId', 'code')
+        .populate('itemClassId', 'code')
+        .session(session)
+        .lean();
+      const eligibleItems = eligibleGatewayPlasticBagItems(fallbackItems);
+      if (!eligibleItems.length) {
+        throw fail(
+          'Create one active inventory-enabled PLASTIC_BAG Item in nos before gateway stock can post',
+          409,
+          'GATEWAY_PLASTIC_BAG_ITEM_REQUIRED',
+        );
+      }
+      if (eligibleItems.length > 1) {
+        throw fail(
+          'Multiple active PLASTIC_BAG Items are available; configure an active Blanket recipe to select one',
+          409,
+          'GATEWAY_PLASTIC_BAG_ITEM_AMBIGUOUS',
+        );
+      }
+      normalizedComponents = [{
+        itemId: eligibleItems[0]._id,
+        quantity: 1,
+        uom: eligibleItems[0].baseUom,
+      }];
     }
-    const plasticComponents = (recipe.components || []).filter(component =>
-      normalizeCode(component.stage) === 'PACKING'
-      && component.itemId?.familyId?.code === 'PLASTIC_BAG');
-    if (!plasticComponents.length) {
-      throw fail(
-        'The active Blanket recipe must contain a PLASTIC_BAG component at the PACKING stage',
-        409,
-        'GATEWAY_PLASTIC_BAG_COMPONENT_REQUIRED',
-      );
-    }
-    if (plasticComponents.some(component =>
-      component.itemId?.status !== 'active'
-      || !component.itemId?.capabilities?.inventory
-      || !component.itemId?.capabilities?.consumable
-      || component.itemId?.itemClassId?.code !== 'PACKAGING')) {
-      throw fail(
-        'Gateway Plastic Bag components must be active, inventory-enabled consumable Packaging Items',
-        409,
-        'GATEWAY_PLASTIC_BAG_COMPONENT_INVALID',
-      );
-    }
-    const plasticPerRoll = roundQuantity(plasticComponents.reduce(
-      (total, component) => total + Number(component.quantity || 0) / Number(recipe.basisQuantity),
-      0,
-    ));
-    if (Math.abs(plasticPerRoll - 1) > EPSILON) {
-      throw fail(
-        'The active Blanket recipe must consume exactly one Plastic Bag per roll',
-        409,
-        'GATEWAY_PLASTIC_BAG_QUANTITY_INVALID',
-        { configuredPerRoll: plasticPerRoll },
-      );
-    }
-    const grouped = new Map();
-    for (const component of plasticComponents) {
-      const itemId = String(component.itemId._id);
-      const perRoll = Number(component.quantity) / Number(recipe.basisQuantity);
-      grouped.set(itemId, roundQuantity((grouped.get(itemId)?.quantity || 0) + perRoll));
-      grouped.get(itemId).item = component.itemId;
-    }
-    const normalizedComponents = [...grouped.entries()]
-      .map(([itemId, value]) => ({
-        itemId,
-        quantity: value.quantity,
-        uom: value.item.baseUom,
-      }))
-      .sort((left, right) => String(left.itemId).localeCompare(String(right.itemId)));
     const packingLabel = 'Plastic Bag';
     const packingKey = `PACK-${crypto.createHash('sha256')
       .update(`${packingLabel.toLowerCase()}|${normalizedComponents

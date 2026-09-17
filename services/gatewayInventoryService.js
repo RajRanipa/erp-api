@@ -317,6 +317,7 @@ const inventoryV2LinkFields = result => ({
   inventoryV2Posted: Boolean(result.posted),
   inventoryV2Status: result.status,
   inventoryV2LastError: result.message || null,
+  inventoryV2LastAttemptAt: new Date(),
   inventoryV2ItemId: result.itemId || null,
   inventoryV2TransactionId: result.transactionId || null,
   inventoryV2SerialId: result.serialId || null,

@@ -6,6 +6,7 @@ import {
   gatewayQuantityForItem,
   shouldAutoPackGatewayReceipt,
 } from '../services/gatewayInventoryService.js';
+import { eligibleGatewayPlasticBagItems } from '../services/inventoryService.js';
 
 const baseRecord = {
   companyId: 'company-1',
@@ -140,4 +141,21 @@ test('only accepted gateway Blankets are automatically plastic packed', () => {
   assert.equal(shouldAutoPackGatewayReceipt('BLANKET', { qualityStatus: 'AVAILABLE' }), true);
   assert.equal(shouldAutoPackGatewayReceipt('BLANKET', { qualityStatus: 'REJECTED' }), false);
   assert.equal(shouldAutoPackGatewayReceipt('BULK', { qualityStatus: 'AVAILABLE' }), false);
+});
+
+test('gateway fallback selects only the valid nos Plastic Bag Item', () => {
+  const common = {
+    status: 'active',
+    familyId: { code: 'PLASTIC_BAG' },
+    itemClassId: { code: 'PACKAGING' },
+    capabilities: { inventory: true, consumable: true },
+  };
+  assert.deepEqual(
+    eligibleGatewayPlasticBagItems([
+      { _id: 'legacy-kg-bag', baseUom: 'kg', ...common },
+      { _id: 'current-nos-bag', baseUom: 'nos', ...common },
+      { _id: 'inactive-bag', baseUom: 'nos', ...common, status: 'archived' },
+    ]).map(item => item._id),
+    ['current-nos-bag'],
+  );
 });

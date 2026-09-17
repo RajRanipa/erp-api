@@ -60,6 +60,7 @@ const ProductionBlanketRollSchema = new Schema(
       index: true,
     },
     inventoryV2LastError: { type: String, default: null },
+    inventoryV2LastAttemptAt: { type: Date, default: null, index: true },
     inventoryV2ItemId: {
       type: Schema.Types.ObjectId,
       ref: "ItemMaster",
@@ -89,5 +90,11 @@ ProductionBlanketRollSchema.index(
   { companyId: 1, gatewayId: 1, recordId: 1, scaleNo: 1 },
   { unique: true }
 );
+ProductionBlanketRollSchema.index({
+  inventoryV2Posted: 1,
+  inventoryV2Status: 1,
+  inventoryV2LastAttemptAt: 1,
+  at: -1,
+});
 
 export default mongoose.model("ProductionBlanketRoll", ProductionBlanketRollSchema);

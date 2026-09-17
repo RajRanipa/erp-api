@@ -348,7 +348,7 @@ export async function reconcilePendingGatewayInventory({ limit = 100 } = {}) {
       { inventoryV2Status: { $exists: false } },
     ],
   })
-    .sort({ at: 1, _id: 1 })
+    .sort({ inventoryV2LastAttemptAt: 1, at: -1, _id: -1 })
     .limit(Math.min(Math.max(Number(limit) || 100, 1), 500))
     .lean();
   const summary = { scanned: documents.length, posted: 0, pending: 0, failed: 0 };
@@ -366,6 +366,18 @@ export async function reconcilePendingGatewayInventory({ limit = 100 } = {}) {
         document,
         warehouseId: warehouseByCompany.get(companyKey),
       });
+      console.info('[gateway:inventory-reconciled]', JSON.stringify({
+        gatewayId: document.gatewayId,
+        recordId: document.recordId,
+        scaleNo: document.scaleNo,
+        productionId: String(document._id),
+        inventoryStatus: result.status,
+        posted: Boolean(result.posted),
+        duplicate: Boolean(result.duplicate),
+        transactionId: result.transactionId ? String(result.transactionId) : null,
+        serialNo: result.serialNo || null,
+        message: result.message || null,
+      }));
       if (result.posted) summary.posted += 1;
       else if (result.status === 'FAILED') summary.failed += 1;
       else summary.pending += 1;
@@ -376,6 +388,7 @@ export async function reconcilePendingGatewayInventory({ limit = 100 } = {}) {
           $set: {
             inventoryV2Status: 'FAILED',
             inventoryV2LastError: String(error?.message || error).slice(0, 1000),
+            inventoryV2LastAttemptAt: new Date(),
           },
         },
       );
