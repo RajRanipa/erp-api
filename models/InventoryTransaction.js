@@ -3,7 +3,7 @@ import mongoose from 'mongoose';
 const { Schema } = mongoose;
 
 const allocationSchema = new Schema({
-  lotId: { type: Schema.Types.ObjectId, ref: 'InventoryLotV2', required: true },
+  lotId: { type: Schema.Types.ObjectId, ref: 'InventoryLot', required: true },
   lotNo: { type: String, required: true },
   qualityStatus: { type: String, trim: true, uppercase: true, required: true },
   processStatus: { type: String, trim: true, uppercase: true, required: true },
@@ -30,13 +30,13 @@ const entrySchema = new Schema({
   catchUom: { type: String, trim: true, lowercase: true, default: null },
   unitCost: { type: Number, required: true, min: 0, default: 0 },
   value: { type: Number, required: true, min: 0, default: 0 },
-  lotId: { type: Schema.Types.ObjectId, ref: 'InventoryLotV2', default: null },
+  lotId: { type: Schema.Types.ObjectId, ref: 'InventoryLot', default: null },
   lotNo: { type: String, trim: true, default: null },
   allocations: { type: [allocationSchema], default: [] },
-  serialIds: [{ type: Schema.Types.ObjectId, ref: 'InventorySerialV2' }],
+  serialIds: [{ type: Schema.Types.ObjectId, ref: 'InventorySerial' }],
 }, { _id: false });
 
-const inventoryTransactionV2Schema = new Schema({
+const inventoryTransactionSchema = new Schema({
   companyId: { type: Schema.Types.ObjectId, ref: 'Company', required: true, index: true },
   transactionNo: { type: String, required: true, trim: true, uppercase: true },
   type: {
@@ -63,19 +63,19 @@ const inventoryTransactionV2Schema = new Schema({
     yieldPercent: { type: Number, min: 0, default: null },
   },
   createdBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
-  reversalOf: { type: Schema.Types.ObjectId, ref: 'InventoryTransactionV2', default: null },
+  reversalOf: { type: Schema.Types.ObjectId, ref: 'InventoryTransaction', default: null },
 }, { timestamps: true, versionKey: false });
 
-inventoryTransactionV2Schema.index(
+inventoryTransactionSchema.index(
   { companyId: 1, transactionNo: 1 },
   { unique: true, name: 'uniq_company_v2_inventory_transaction_no' },
 );
-inventoryTransactionV2Schema.index(
+inventoryTransactionSchema.index(
   { companyId: 1, idempotencyKey: 1 },
   { unique: true, name: 'uniq_company_v2_inventory_idempotency' },
 );
-inventoryTransactionV2Schema.index({ companyId: 1, effectiveAt: -1, _id: -1 });
-inventoryTransactionV2Schema.index({ companyId: 1, 'entries.itemId': 1, effectiveAt: -1 });
+inventoryTransactionSchema.index({ companyId: 1, effectiveAt: -1, _id: -1 });
+inventoryTransactionSchema.index({ companyId: 1, 'entries.itemId': 1, effectiveAt: -1 });
 
 for (const operation of [
   'findOneAndUpdate',
@@ -86,18 +86,18 @@ for (const operation of [
   'deleteOne',
   'deleteMany',
 ]) {
-  inventoryTransactionV2Schema.pre(operation, function rejectMutation() {
-    if (this.getOptions()?.context !== 'inventoryV2Reversal') {
-      throw new Error('Posted Inventory V2 transactions are immutable; post a reversal instead.');
+  inventoryTransactionSchema.pre(operation, function rejectMutation() {
+    if (this.getOptions()?.context !== 'inventoryReversal') {
+      throw new Error('Posted inventory transactions are immutable; post a reversal instead.');
     }
   });
 }
 
-inventoryTransactionV2Schema.pre('save', function rejectExistingSave() {
+inventoryTransactionSchema.pre('save', function rejectExistingSave() {
   if (!this.isNew) {
-    throw new Error('Posted Inventory V2 transactions are immutable; post a reversal instead.');
+    throw new Error('Posted inventory transactions are immutable; post a reversal instead.');
   }
 });
 
-export default mongoose.models.InventoryTransactionV2
-  || mongoose.model('InventoryTransactionV2', inventoryTransactionV2Schema);
+export default mongoose.models.InventoryTransaction
+  || mongoose.model('InventoryTransaction', inventoryTransactionSchema, 'inventorytransactionv2');

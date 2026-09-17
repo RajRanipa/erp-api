@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import Campaign from '../models/Campaign.js';
-import InventoryLotV2 from '../models/InventoryLotV2.js';
-import InventorySerialV2 from '../models/InventorySerialV2.js';
+import InventoryLot from '../models/InventoryLot.js';
+import InventorySerial from '../models/InventorySerial.js';
 import {
   generateInventorySerial,
   generateInventorySerialBatch,
@@ -13,7 +13,7 @@ import {
 import {
   shouldCreateTraceSerials,
   validateManualSerializedUnits,
-} from '../services/inventoryV2Service.js';
+} from '../services/inventoryService.js';
 
 test('inventory serial generator creates numeric, checkable, fixed-length identifiers', () => {
   const serial = generateInventorySerial();
@@ -39,11 +39,11 @@ test('serial trace schema stores production and immutable public context', () =>
     'manualReason',
     'traceSnapshot',
   ]) {
-    assert.ok(InventorySerialV2.schema.path(path), `missing ${path}`);
+    assert.ok(InventorySerial.schema.path(path), `missing ${path}`);
   }
-  assert.ok(InventoryLotV2.schema.path('campaignId'));
+  assert.ok(InventoryLot.schema.path('campaignId'));
   assert.ok(Campaign.schema.path('companyId'));
-  const globalSerialIndex = InventorySerialV2.schema.indexes().find(
+  const globalSerialIndex = InventorySerial.schema.indexes().find(
     ([keys, options]) => keys.serialNo === 1 && options.unique,
   );
   assert.ok(globalSerialIndex, 'serialNo must have a global unique index');

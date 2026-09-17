@@ -68,12 +68,12 @@ const ProductionBlanketRollSchema = new Schema(
     },
     inventoryV2TransactionId: {
       type: Schema.Types.ObjectId,
-      ref: "InventoryTransactionV2",
+      ref: "InventoryTransaction",
       default: null,
     },
     inventoryV2SerialId: {
       type: Schema.Types.ObjectId,
-      ref: "InventorySerialV2",
+      ref: "InventorySerial",
       default: null,
       index: true,
     },

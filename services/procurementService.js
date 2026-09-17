@@ -19,7 +19,7 @@ import Warehouse from '../models/Warehouse.js';
 import {
   postIssueInSession,
   postReceiptInSession,
-} from './inventoryV2Service.js';
+} from './inventoryService.js';
 import { AppError } from '../utils/errorHandler.js';
 
 const EPSILON = 0.000001;

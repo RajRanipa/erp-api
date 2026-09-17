@@ -1,13 +1,13 @@
 import crypto from 'crypto';
 import mongoose from 'mongoose';
-import InventoryBalanceV2 from '../models/InventoryBalanceV2.js';
+import InventoryBalance from '../models/InventoryBalance.js';
 import InventoryCostBalance from '../models/InventoryCostBalance.js';
-import InventoryLotV2 from '../models/InventoryLotV2.js';
-import InventorySerialV2 from '../models/InventorySerialV2.js';
-import InventoryTransactionV2 from '../models/InventoryTransactionV2.js';
+import InventoryLot from '../models/InventoryLot.js';
+import InventorySerial from '../models/InventorySerial.js';
+import InventoryTransaction from '../models/InventoryTransaction.js';
 import ItemFamily from '../models/ItemFamily.js';
 import ItemMaster from '../models/ItemMaster.js';
-import ManufacturingRecipeV2 from '../models/ManufacturingRecipeV2.js';
+import ManufacturingRecipe from '../models/ManufacturingRecipe.js';
 import Warehouse from '../models/Warehouse.js';
 import Campaign from '../models/Campaign.js';
 import Company from '../models/Company.js';
@@ -20,7 +20,7 @@ import {
 const EPSILON = 1e-9;
 const roundQuantity = value => Number(Number(value).toFixed(6));
 const roundMoney = value => Number(Number(value).toFixed(4));
-const fail = (message, statusCode = 400, code = 'INVENTORY_V2_ERROR', details = null) =>
+const fail = (message, statusCode = 400, code = 'INVENTORY_ERROR', details = null) =>
   new AppError(message, { statusCode, code, details });
 const normalizeOptional = value => String(value ?? '').trim() || null;
 const normalizeCode = value => String(value ?? '').trim().toUpperCase();
@@ -121,7 +121,7 @@ async function findExisting(companyId, idempotencyKey, session = null) {
   if (String(idempotencyKey).length > 240) {
     throw fail('idempotencyKey is too long', 400, 'INVALID_IDEMPOTENCY_KEY');
   }
-  const query = InventoryTransactionV2.findOne({ companyId, idempotencyKey });
+  const query = InventoryTransaction.findOne({ companyId, idempotencyKey });
   if (session) query.session(session);
   return query.lean();
 }
@@ -185,7 +185,7 @@ async function applyBalance({
       reserved: 0,
     },
   };
-  const balance = await InventoryBalanceV2.findOneAndUpdate(
+  const balance = await InventoryBalance.findOneAndUpdate(
     filter,
     update,
     {
@@ -300,7 +300,7 @@ async function uniqueSerialBatch(count, session) {
   const output = new Set();
   while (output.size < count) {
     const candidates = generateInventorySerialBatch(count - output.size);
-    const existing = new Set((await InventorySerialV2.find({
+    const existing = new Set((await InventorySerial.find({
       serialNo: { $in: candidates },
     }).session(session).distinct('serialNo')));
     candidates.filter(serialNo => !existing.has(serialNo)).forEach(serialNo => output.add(serialNo));
@@ -439,7 +439,7 @@ async function receiptLine(
     throw fail('Campaign is required for production receipts', 400, 'CAMPAIGN_REQUIRED');
   }
 
-  let lot = await InventoryLotV2.findOne({
+  let lot = await InventoryLot.findOne({
     companyId,
     itemId: item._id,
     warehouseId: input.warehouseId,
@@ -460,7 +460,7 @@ async function receiptLine(
     );
   }
   if (!lot) {
-    [lot] = await InventoryLotV2.create([{
+    [lot] = await InventoryLot.create([{
       companyId,
       itemId: item._id,
       campaignId: input.campaignId || null,
@@ -519,7 +519,7 @@ async function receiptLine(
   if (managesSerials) {
     const trace = await traceContext(companyId, item, input, lot.lotNo, session);
     const generatedSerials = await uniqueSerialBatch(quantity, session);
-    createdSerials = await InventorySerialV2.insertMany(serialUnits.map((unit, index) => ({
+    createdSerials = await InventorySerial.insertMany(serialUnits.map((unit, index) => ({
       companyId,
       itemId: item._id,
       lotId: lot._id,
@@ -582,7 +582,7 @@ async function allocateIssueLots(companyId, item, input, quantity, session) {
       ? null
       : normalizeCode(input.packingKey);
   }
-  const lots = await InventoryLotV2.find(filter)
+  const lots = await InventoryLot.find(filter)
     .sort({ receivedAt: 1, _id: 1 })
     .session(session);
   let remaining = quantity;
@@ -595,7 +595,7 @@ async function allocateIssueLots(companyId, item, input, quantity, session) {
       ? null
       : roundQuantity(lot.onHandCatchQuantity * ratio);
     const physicalValue = roundMoney(lot.remainingValue * ratio);
-    const updated = await InventoryLotV2.findOneAndUpdate(
+    const updated = await InventoryLot.findOneAndUpdate(
       { _id: lot._id, onHandQuantity: { $gte: allocated } },
       {
         $inc: {
@@ -697,7 +697,7 @@ async function createPostedTransaction(companyId, actorId, input, entries, sessi
   const totalValueOut = roundMoney(entries
     .filter(entry => entry.direction === 'OUT')
     .reduce((total, entry) => total + entry.value, 0));
-  const [transaction] = await InventoryTransactionV2.create([{
+  const [transaction] = await InventoryTransaction.create([{
     companyId,
     transactionNo: transactionNo(input.type),
     type: input.type,
@@ -747,7 +747,7 @@ export async function postReceipt(companyId, actorId, input = {}) {
   const serialIds = (result.transaction?.entries || [])
     .flatMap(entry => entry.serialIds || []);
   result.serials = serialIds.length
-    ? await InventorySerialV2.find({ companyId, _id: { $in: serialIds } })
+    ? await InventorySerial.find({ companyId, _id: { $in: serialIds } })
       .select('serialNo catchQuantity catchUom catchSource manufacturedAt traceSnapshot lotId')
       .sort({ createdAt: 1, _id: 1 })
       .lean()
@@ -821,7 +821,7 @@ export async function postManualProductionReceipt(companyId, actorId, input = {}
   const serialIds = (result.transaction?.entries || [])
     .flatMap(entry => entry.serialIds || []);
   result.serials = serialIds.length
-    ? await InventorySerialV2.find({ companyId, _id: { $in: serialIds } })
+    ? await InventorySerial.find({ companyId, _id: { $in: serialIds } })
       .select('serialNo catchQuantity catchUom catchSource manufacturedAt traceSnapshot lotId')
       .sort({ createdAt: 1, _id: 1 })
       .lean()
@@ -893,7 +893,7 @@ export async function postGatewayPackedBlanketReceipt(companyId, actorId, input 
     }
     const quantity = positive(input.quantity, 'quantity');
     enforceWholeUnit(blanket, quantity);
-    const recipe = await ManufacturingRecipeV2.findOne({
+    const recipe = await ManufacturingRecipe.findOne({
       companyId,
       outputItemId: blanket._id,
       status: 'ACTIVE',
@@ -1001,7 +1001,7 @@ export async function postGatewayPackedBlanketReceipt(companyId, actorId, input 
       processStatus: 'PACKED',
       sourceType: 'PROD_GATEWAY',
     }, session);
-    await InventoryLotV2.updateOne(
+    await InventoryLot.updateOne(
       { _id: receipt.lotId, companyId },
       {
         $set: {
@@ -1022,7 +1022,7 @@ export async function postGatewayPackedBlanketReceipt(companyId, actorId, input 
   const serialIds = (result.transaction?.entries || [])
     .flatMap(entry => entry.serialIds || []);
   result.serials = serialIds.length
-    ? await InventorySerialV2.find({ companyId, _id: { $in: serialIds } })
+    ? await InventorySerial.find({ companyId, _id: { $in: serialIds } })
       .select('serialNo catchQuantity catchUom catchSource manufacturedAt traceSnapshot lotId')
       .sort({ createdAt: 1, _id: 1 })
       .lean()
@@ -1204,7 +1204,7 @@ export async function postConversion(companyId, actorId, input = {}) {
   const serialIds = (result.transaction?.entries || [])
     .flatMap(entry => entry.serialIds || []);
   result.serials = serialIds.length
-    ? await InventorySerialV2.find({ companyId, _id: { $in: serialIds } })
+    ? await InventorySerial.find({ companyId, _id: { $in: serialIds } })
       .select('serialNo catchQuantity catchUom catchSource manufacturedAt traceSnapshot lotId')
       .sort({ createdAt: 1, _id: 1 })
       .lean()
@@ -1324,7 +1324,7 @@ export async function postBlanketPacking(companyId, actorId, input = {}) {
       sourceId: input.referenceId || null,
       parentLotIds: blanketIssue.allocations.map(allocation => allocation.lotId),
     }, session, { updateAccounting: false, skipSerials: true });
-    await InventoryLotV2.updateOne(
+    await InventoryLot.updateOne(
       { _id: packedReceipt.lotId, companyId },
       {
         $set: {
@@ -1360,7 +1360,7 @@ const PROCESS_TRANSITIONS = Object.freeze({
 export async function transitionLotProcess(companyId, actorId, input = {}) {
   return idempotentPost(companyId, input.idempotencyKey, async session => {
     objectId(input.lotId, 'lotId');
-    const lot = await InventoryLotV2.findOne({
+    const lot = await InventoryLot.findOne({
       _id: input.lotId,
       companyId,
       status: 'OPEN',
@@ -1454,7 +1454,7 @@ export async function transitionLotProcess(companyId, actorId, input = {}) {
   });
 }
 
-export async function listStockV2(companyId, query = {}) {
+export async function listStock(companyId, query = {}) {
   const limit = Math.min(Math.max(Number(query.limit) || 50, 1), 200);
   const filter = { companyId };
   if (query.search) {
@@ -1478,7 +1478,7 @@ export async function listStockV2(companyId, query = {}) {
   if (query.warehouseId) filter.warehouseId = query.warehouseId;
   if (query.qualityStatus) filter.qualityStatus = normalizeCode(query.qualityStatus);
   if (query.positiveOnly !== 'false') filter.onHand = { $gt: 0 };
-  const rows = await InventoryBalanceV2.find(filter)
+  const rows = await InventoryBalance.find(filter)
     .populate({
       path: 'itemId',
       select: 'sku name baseUom catchUom familyId itemClassId',
@@ -1496,12 +1496,12 @@ export async function listStockV2(companyId, query = {}) {
   return rows;
 }
 
-export async function listTransactionsV2(companyId, query = {}) {
+export async function listTransactions(companyId, query = {}) {
   const limit = Math.min(Math.max(Number(query.limit) || 50, 1), 200);
   const filter = { companyId };
   if (query.type) filter.type = normalizeCode(query.type);
   if (query.itemId) filter['entries.itemId'] = query.itemId;
-  return InventoryTransactionV2.find(filter)
+  return InventoryTransaction.find(filter)
     .populate('entries.itemId', 'sku name')
     .populate('entries.warehouseId', 'code name')
     .sort({ effectiveAt: -1, _id: -1 })
@@ -1509,7 +1509,7 @@ export async function listTransactionsV2(companyId, query = {}) {
     .lean();
 }
 
-export async function listSerialsV2(companyId, query = {}) {
+export async function listSerials(companyId, query = {}) {
   const limit = Math.min(Math.max(Number(query.limit) || 500, 1), 1000);
   const filter = { companyId };
   if (query.state) filter.state = normalizeCode(query.state);
@@ -1530,13 +1530,13 @@ export async function listSerialsV2(companyId, query = {}) {
   if (query.packingKey) {
     const packingKey = normalizeCode(query.packingKey);
     filter.lotId = {
-      $in: await InventoryLotV2.find({
+      $in: await InventoryLot.find({
         companyId,
         packingKey: packingKey === 'UNPACKED' ? null : packingKey,
       }).distinct('_id'),
     };
   }
-  return InventorySerialV2.find(filter)
+  return InventorySerial.find(filter)
     .populate('itemId', 'sku name attributes baseUom catchUom')
     .populate('warehouseId', 'code name')
     .populate('campaignId', 'name startDate endDate status')
@@ -1555,7 +1555,7 @@ export async function publicSerialTrace(serialNo) {
   if (!isValidInventorySerial(normalized)) {
     throw fail('Serial number is invalid', 404, 'SERIAL_NOT_FOUND');
   }
-  const serial = await InventorySerialV2.findOne({ serialNo: normalized })
+  const serial = await InventorySerial.findOne({ serialNo: normalized })
     .select(
       'serialNo state qualityStatus catchQuantity catchUom catchSource manufacturedAt '
       + 'traceSnapshot campaignId lotId itemId companyId parentSerialId'
@@ -1593,9 +1593,9 @@ export async function publicSerialTrace(serialNo) {
   };
 }
 
-export async function inventoryV2Summary(companyId) {
+export async function inventorySummary(companyId) {
   const [stock, costs] = await Promise.all([
-    InventoryBalanceV2.aggregate([
+    InventoryBalance.aggregate([
       { $match: { companyId } },
       {
         $group: {

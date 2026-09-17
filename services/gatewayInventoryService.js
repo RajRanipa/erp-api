@@ -5,7 +5,7 @@ import Warehouse from '../models/Warehouse.js';
 import {
   postGatewayPackedBlanketReceipt,
   postReceipt,
-} from './inventoryV2Service.js';
+} from './inventoryService.js';
 import { AppError } from '../utils/errorHandler.js';
 
 export const GATEWAY_SIZE_CODE_MAP = Object.freeze({
@@ -52,7 +52,7 @@ const finiteNumber = (value, field) => {
 
 const normalizedNumber = (value, field) => String(finiteNumber(value, field));
 
-export function gatewayV2IdentityForRecord({
+export function gatewayIdentityForRecord({
   productCode,
   temperatureValue,
   densityValue,
@@ -92,7 +92,7 @@ export function gatewayV2IdentityForRecord({
   return { familyCode, attributes };
 }
 
-export function gatewayV2QuantityForItem(weightKg, item) {
+export function gatewayQuantityForItem(weightKg, item) {
   const weight = finiteNumber(weightKg, 'weight');
   if (weight <= 0) {
     throw new AppError('weight must be greater than zero', {
@@ -108,11 +108,11 @@ export function gatewayV2QuantityForItem(weightKg, item) {
     .includes(baseUom)) return 1;
   throw new AppError(`Gateway weight cannot be posted to Item Master UOM "${item?.baseUom}"`, {
     statusCode: 409,
-    code: 'GATEWAY_V2_UOM_MISMATCH',
+    code: 'GATEWAY_UOM_MISMATCH',
   });
 }
 
-export function buildGatewayInventoryV2ReceiptInput({
+export function buildGatewayInventoryReceiptInput({
   companyId,
   warehouseId,
   gatewayId,
@@ -135,7 +135,7 @@ export function buildGatewayInventoryV2ReceiptInput({
     });
   }
   const weight = finiteNumber(weightKg, 'weight');
-  const quantity = gatewayV2QuantityForItem(weight, item);
+  const quantity = gatewayQuantityForItem(weight, item);
   const accepted = Boolean(statusOk) || Number(productCode) === 5;
   const qualitySuffix = accepted ? 'OK' : 'REJ';
   const productionDate = manufacturedAt.toISOString().slice(0, 10).replaceAll('-', '');
@@ -150,7 +150,11 @@ export function buildGatewayInventoryV2ReceiptInput({
     warehouseId,
     quantity,
     catchQuantity: hasKgCatch ? weight : undefined,
-    unitCost: Number(process.env.GATEWAY_V2_DEFAULT_UNIT_COST || 0),
+    unitCost: Number(
+      process.env.GATEWAY_DEFAULT_UNIT_COST
+      || process.env.GATEWAY_V2_DEFAULT_UNIT_COST
+      || 0,
+    ),
     lotNo: `${cleanBatchNo}-${qualitySuffix}`.slice(0, 120),
     qualityStatus: accepted ? 'AVAILABLE' : 'REJECTED',
     processStatus: accepted ? 'AVAILABLE' : 'REJECTED',
@@ -207,7 +211,7 @@ export async function resolveGatewayWarehouseId(companyId) {
   return warehouse?._id || null;
 }
 
-export async function resolveGatewayItemV2({
+export async function resolveGatewayItem({
   companyId,
   legacyItemId = null,
   productCode,
@@ -215,7 +219,7 @@ export async function resolveGatewayItemV2({
   densityValue,
   sizeCode,
 }) {
-  const { familyCode, attributes } = gatewayV2IdentityForRecord({
+  const { familyCode, attributes } = gatewayIdentityForRecord({
     productCode,
     temperatureValue,
     densityValue,
@@ -278,8 +282,8 @@ export async function resolveGatewayItemV2({
   return { item, familyCode, status: 'RESOLVED', message: null };
 }
 
-export async function postGatewayInventoryV2(input) {
-  const resolved = await resolveGatewayItemV2(input);
+export async function postGatewayInventory(input) {
+  const resolved = await resolveGatewayItem(input);
   if (!resolved.item) {
     return {
       posted: false,
@@ -288,7 +292,7 @@ export async function postGatewayInventoryV2(input) {
       message: resolved.message,
     };
   }
-  const receiptInput = buildGatewayInventoryV2ReceiptInput({
+  const receiptInput = buildGatewayInventoryReceiptInput({
     ...input,
     item: resolved.item,
   });
@@ -319,7 +323,7 @@ const inventoryV2LinkFields = result => ({
   inventoryV2SerialNo: result.serialNo || null,
 });
 
-export async function postAndLinkGatewayInventoryV2({ document, warehouseId }) {
+export async function postAndLinkGatewayInventory({ document, warehouseId }) {
   if (document.inventoryV2Posted) {
     return {
       posted: true,
@@ -341,7 +345,7 @@ export async function postAndLinkGatewayInventoryV2({ document, warehouseId }) {
     };
   } else {
     try {
-      result = await postGatewayInventoryV2({
+      result = await postGatewayInventory({
         companyId: document.companyId,
         legacyItemId: document.matchedItem || null,
         warehouseId,

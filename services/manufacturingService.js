@@ -1,21 +1,21 @@
 import crypto from 'crypto';
 import mongoose from 'mongoose';
-import InventoryLotV2 from '../models/InventoryLotV2.js';
-import InventoryTransactionV2 from '../models/InventoryTransactionV2.js';
+import InventoryLot from '../models/InventoryLot.js';
+import InventoryTransaction from '../models/InventoryTransaction.js';
 import ItemFamily from '../models/ItemFamily.js';
 import ItemMaster from '../models/ItemMaster.js';
-import ManufacturingRecipeV2 from '../models/ManufacturingRecipeV2.js';
-import ProductionOrderV2 from '../models/ProductionOrderV2.js';
+import ManufacturingRecipe from '../models/ManufacturingRecipe.js';
+import ProductionOrder from '../models/ProductionOrder.js';
 import Warehouse from '../models/Warehouse.js';
 import {
   postConversion,
   postMaterialIssue,
   postReceipt,
   transitionLotProcess,
-} from './inventoryV2Service.js';
+} from './inventoryService.js';
 import { AppError } from '../utils/errorHandler.js';
 
-const fail = (message, statusCode = 400, code = 'MANUFACTURING_V2_ERROR', details = null) =>
+const fail = (message, statusCode = 400, code = 'MANUFACTURING_ERROR', details = null) =>
   new AppError(message, { statusCode, code, details });
 const normalizeCode = value => String(value ?? '').trim().toUpperCase();
 const positive = (value, field) => {
@@ -38,7 +38,7 @@ const populatedOrder = query => query
   .populate('outputLotIds', 'lotNo processStatus qualityStatus onHandQuantity');
 
 const existingInventoryAction = (companyId, idempotencyKey) =>
-  InventoryTransactionV2.findOne({ companyId, idempotencyKey }).lean();
+  InventoryTransaction.findOne({ companyId, idempotencyKey }).lean();
 
 async function activeOutputItem(companyId, itemId) {
   const item = await ItemMaster.findOne({
@@ -129,7 +129,7 @@ export async function createRecipe(companyId, actorId, input = {}) {
     );
   }
   const componentById = new Map(components.map(item => [String(item._id), item]));
-  const recipe = await ManufacturingRecipeV2.create({
+  const recipe = await ManufacturingRecipe.create({
     companyId,
     outputItemId: output._id,
     code: normalizeCode(input.code),
@@ -164,7 +164,7 @@ export async function createRecipe(companyId, actorId, input = {}) {
 }
 
 export async function activateRecipe(companyId, recipeId, actorId) {
-  const recipe = await ManufacturingRecipeV2.findOne({ _id: recipeId, companyId });
+  const recipe = await ManufacturingRecipe.findOne({ _id: recipeId, companyId });
   if (!recipe) throw fail('Recipe was not found', 404, 'RECIPE_NOT_FOUND');
   if (recipe.status !== 'DRAFT') {
     throw fail('Only a Draft recipe can be activated', 409, 'RECIPE_NOT_DRAFT');
@@ -183,7 +183,7 @@ export async function activateRecipe(companyId, recipeId, actorId) {
     recipe.components,
     recipe.basisQuantity,
   );
-  await ManufacturingRecipeV2.updateMany(
+  await ManufacturingRecipe.updateMany(
     {
       companyId,
       outputItemId: recipe.outputItemId,
@@ -202,7 +202,7 @@ export async function listRecipes(companyId, query = {}) {
   const filter = { companyId };
   if (query.status) filter.status = normalizeCode(query.status);
   if (query.outputItemId) filter.outputItemId = query.outputItemId;
-  return ManufacturingRecipeV2.find(filter)
+  return ManufacturingRecipe.find(filter)
     .populate('outputItemId', 'sku name baseUom familyId')
     .populate('components.itemId', 'sku name baseUom')
     .sort({ updatedAt: -1 })
@@ -213,7 +213,7 @@ export async function listRecipes(companyId, query = {}) {
 export async function createProductionOrder(companyId, actorId, input = {}) {
   const plannedQuantity = positive(input.plannedQuantity, 'plannedQuantity');
   const output = await activeOutputItem(companyId, input.outputItemId);
-  const recipe = await ManufacturingRecipeV2.findOne({
+  const recipe = await ManufacturingRecipe.findOne({
     _id: input.recipeId,
     companyId,
     outputItemId: output._id,
@@ -232,7 +232,7 @@ export async function createProductionOrder(companyId, actorId, input = {}) {
     throw fail('Source and output Warehouses must be active', 409, 'INVALID_PRODUCTION_WAREHOUSE');
   }
   const scale = plannedQuantity / recipe.basisQuantity;
-  const order = await ProductionOrderV2.create({
+  const order = await ProductionOrder.create({
     companyId,
     orderNo: normalizeCode(input.orderNo) || makeOrderNo(),
     outputItemId: output._id,
@@ -262,15 +262,15 @@ export async function createProductionOrder(companyId, actorId, input = {}) {
     createdBy: actorId,
     updatedBy: actorId,
   });
-  return populatedOrder(ProductionOrderV2.findById(order._id));
+  return populatedOrder(ProductionOrder.findById(order._id));
 }
 
 export async function releaseProductionOrder(companyId, orderId, actorId, input = {}) {
-  const order = await ProductionOrderV2.findOne({ _id: orderId, companyId });
+  const order = await ProductionOrder.findOne({ _id: orderId, companyId });
   if (!order) throw fail('Production Order was not found', 404, 'PRODUCTION_ORDER_NOT_FOUND');
   if (order.status !== 'DRAFT') {
     if (order.status === 'RELEASED' || order.status === 'IN_PROGRESS') {
-      return populatedOrder(ProductionOrderV2.findById(order._id));
+      return populatedOrder(ProductionOrder.findById(order._id));
     }
     throw fail('Only a Draft Production Order can be released', 409, 'ORDER_NOT_DRAFT');
   }
@@ -296,11 +296,11 @@ export async function releaseProductionOrder(companyId, orderId, actorId, input 
   order.startedAt = new Date();
   order.updatedBy = actorId;
   await order.save();
-  return populatedOrder(ProductionOrderV2.findById(order._id));
+  return populatedOrder(ProductionOrder.findById(order._id));
 }
 
 async function boardOrder(companyId, orderId) {
-  const order = await ProductionOrderV2.findOne({ _id: orderId, companyId })
+  const order = await ProductionOrder.findOne({ _id: orderId, companyId })
     .populate({ path: 'outputItemId', populate: { path: 'familyId', select: 'code' } });
   if (!order) throw fail('Production Order was not found', 404, 'PRODUCTION_ORDER_NOT_FOUND');
   if (order.outputItemId?.familyId?.code !== 'BOARD') {
@@ -322,7 +322,7 @@ export async function drawBoard(companyId, orderId, actorId, input = {}) {
       order.updatedBy = actorId;
       await order.save();
     }
-    return populatedOrder(ProductionOrderV2.findById(order._id));
+    return populatedOrder(ProductionOrder.findById(order._id));
   }
   if (!['RELEASED', 'IN_PROGRESS'].includes(order.status)) {
     throw fail('Board Order must be released before drawing', 409, 'ORDER_NOT_RELEASED');
@@ -352,7 +352,7 @@ export async function drawBoard(companyId, orderId, actorId, input = {}) {
   order.status = 'IN_PROGRESS';
   order.updatedBy = actorId;
   await order.save();
-  return populatedOrder(ProductionOrderV2.findById(order._id));
+  return populatedOrder(ProductionOrder.findById(order._id));
 }
 
 export async function advanceBoardLot(companyId, orderId, actorId, input = {}) {
@@ -368,7 +368,7 @@ export async function advanceBoardLot(companyId, orderId, actorId, input = {}) {
     referenceType: 'PRODUCTION_ORDER',
     referenceId: String(order._id),
   });
-  return populatedOrder(ProductionOrderV2.findById(order._id));
+  return populatedOrder(ProductionOrder.findById(order._id));
 }
 
 export async function inspectBoardLot(companyId, orderId, actorId, input = {}) {
@@ -392,9 +392,9 @@ export async function inspectBoardLot(companyId, orderId, actorId, input = {}) {
     }
     order.updatedBy = actorId;
     await order.save();
-    return populatedOrder(ProductionOrderV2.findById(order._id));
+    return populatedOrder(ProductionOrder.findById(order._id));
   }
-  const lot = await InventoryLotV2.findOne({
+  const lot = await InventoryLot.findOne({
     _id: input.lotId,
     companyId,
     itemId: order.outputItemId._id,
@@ -464,7 +464,7 @@ export async function inspectBoardLot(companyId, orderId, actorId, input = {}) {
   }
   order.updatedBy = actorId;
   await order.save();
-  return populatedOrder(ProductionOrderV2.findById(order._id));
+  return populatedOrder(ProductionOrder.findById(order._id));
 }
 
 export async function packBoardLot(companyId, orderId, actorId, input = {}) {
@@ -497,9 +497,9 @@ export async function packBoardLot(companyId, orderId, actorId, input = {}) {
     order.completedAt ||= new Date();
     order.updatedBy = actorId;
     await order.save();
-    return populatedOrder(ProductionOrderV2.findById(order._id));
+    return populatedOrder(ProductionOrder.findById(order._id));
   }
-  const lot = await InventoryLotV2.findOne({
+  const lot = await InventoryLot.findOne({
     _id: input.lotId,
     companyId,
     itemId: order.outputItemId._id,
@@ -508,7 +508,7 @@ export async function packBoardLot(companyId, orderId, actorId, input = {}) {
     status: 'OPEN',
   }).lean();
   if (!lot) throw fail('Accepted edged Board lot was not found', 409, 'BOARD_LOT_NOT_READY_TO_PACK');
-  const recipe = await ManufacturingRecipeV2.findById(order.recipeId).lean();
+  const recipe = await ManufacturingRecipe.findById(order.recipeId).lean();
   const packingLines = recipe.components.filter(component => component.stage === 'PACKING');
   const scale = lot.onHandQuantity / recipe.basisQuantity;
   const inputs = [{
@@ -558,7 +558,7 @@ export async function packBoardLot(companyId, orderId, actorId, input = {}) {
   order.completedAt = new Date();
   order.updatedBy = actorId;
   await order.save();
-  return populatedOrder(ProductionOrderV2.findById(order._id));
+  return populatedOrder(ProductionOrder.findById(order._id));
 }
 
 const attributeValue = (item, code) =>
@@ -672,12 +672,12 @@ export async function listProductionOrders(companyId, query = {}) {
   if (query.status) filter.status = normalizeCode(query.status);
   if (query.outputItemId) filter.outputItemId = query.outputItemId;
   return populatedOrder(
-    ProductionOrderV2.find(filter).sort({ createdAt: -1 }).limit(200)
+    ProductionOrder.find(filter).sort({ createdAt: -1 }).limit(200)
   ).lean();
 }
 
 export async function getProductionOrder(companyId, orderId) {
-  const order = await populatedOrder(ProductionOrderV2.findOne({ _id: orderId, companyId })).lean();
+  const order = await populatedOrder(ProductionOrder.findOne({ _id: orderId, companyId })).lean();
   if (!order) throw fail('Production Order was not found', 404, 'PRODUCTION_ORDER_NOT_FOUND');
   return order;
 }

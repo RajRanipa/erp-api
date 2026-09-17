@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  buildGatewayInventoryV2ReceiptInput,
-  gatewayV2IdentityForRecord,
-  gatewayV2QuantityForItem,
+  buildGatewayInventoryReceiptInput,
+  gatewayIdentityForRecord,
+  gatewayQuantityForItem,
   shouldAutoPackGatewayReceipt,
-} from '../services/gatewayInventoryV2Service.js';
+} from '../services/gatewayInventoryService.js';
 
 const baseRecord = {
   companyId: 'company-1',
@@ -22,8 +22,8 @@ const baseRecord = {
   at: '2026-08-02T06:08:00.000Z',
 };
 
-test('gateway maps PLC Blanket specifications to Item Master V2 identity', () => {
-  assert.deepEqual(gatewayV2IdentityForRecord({
+test('gateway maps PLC Blanket specifications to Item Master identity', () => {
+  assert.deepEqual(gatewayIdentityForRecord({
     productCode: 1,
     temperatureValue: 1260,
     densityValue: 128,
@@ -41,20 +41,20 @@ test('gateway maps PLC Blanket specifications to Item Master V2 identity', () =>
 });
 
 test('gateway supports direct new-system identities for Bulk, Module and ET', () => {
-  assert.deepEqual(gatewayV2IdentityForRecord({
+  assert.deepEqual(gatewayIdentityForRecord({
     productCode: 2,
     temperatureValue: 1260,
   }), {
     familyCode: 'BULK',
     attributes: [{ code: 'classification_temperature', normalizedValue: '1260' }],
   });
-  assert.equal(gatewayV2IdentityForRecord({
+  assert.equal(gatewayIdentityForRecord({
     productCode: 4,
     temperatureValue: 1260,
     densityValue: 220,
     sizeCode: 2,
   }).familyCode, 'MODULE');
-  assert.deepEqual(gatewayV2IdentityForRecord({
+  assert.deepEqual(gatewayIdentityForRecord({
     productCode: 5,
     temperatureValue: 1260,
   }), {
@@ -65,7 +65,7 @@ test('gateway supports direct new-system identities for Bulk, Module and ET', ()
 
 test('gateway rejects an unknown Blanket size before inventory posting', () => {
   assert.throws(
-    () => gatewayV2IdentityForRecord({
+    () => gatewayIdentityForRecord({
       productCode: 1,
       temperatureValue: 1260,
       densityValue: 128,
@@ -76,7 +76,7 @@ test('gateway rejects an unknown Blanket size before inventory posting', () => {
 });
 
 test('gateway builds one traceable Blanket receipt with authoritative PLC weight', () => {
-  const input = buildGatewayInventoryV2ReceiptInput({
+  const input = buildGatewayInventoryReceiptInput({
     ...baseRecord,
     item: {
       _id: 'blanket-item',
@@ -99,7 +99,7 @@ test('gateway builds one traceable Blanket receipt with authoritative PLC weight
 });
 
 test('gateway uses weight as ET quantity and does not create an ET serial', () => {
-  const input = buildGatewayInventoryV2ReceiptInput({
+  const input = buildGatewayInventoryReceiptInput({
     ...baseRecord,
     productCode: 5,
     statusOk: false,
@@ -124,8 +124,8 @@ test('gateway records measured Bulk bag weight as catch quantity', () => {
     catchUom: 'kg',
     trackingPolicy: { serialTracked: false },
   };
-  assert.equal(gatewayV2QuantityForItem(19.8, item), 1);
-  const input = buildGatewayInventoryV2ReceiptInput({
+  assert.equal(gatewayQuantityForItem(19.8, item), 1);
+  const input = buildGatewayInventoryReceiptInput({
     ...baseRecord,
     productCode: 2,
     weightKg: 19.8,

@@ -4,13 +4,13 @@ import ItemAttributeDefinition from '../models/ItemAttributeDefinition.js';
 import ItemClass from '../models/ItemClass.js';
 import ItemFamily from '../models/ItemFamily.js';
 import ItemMaster, { ITEM_MASTER_STATUSES } from '../models/ItemMaster.js';
-import InventoryBalanceV2 from '../models/InventoryBalanceV2.js';
+import InventoryBalance from '../models/InventoryBalance.js';
 import InventoryCostBalance from '../models/InventoryCostBalance.js';
-import InventoryLotV2 from '../models/InventoryLotV2.js';
-import InventorySerialV2 from '../models/InventorySerialV2.js';
-import InventoryTransactionV2 from '../models/InventoryTransactionV2.js';
-import ManufacturingRecipeV2 from '../models/ManufacturingRecipeV2.js';
-import ProductionOrderV2 from '../models/ProductionOrderV2.js';
+import InventoryLot from '../models/InventoryLot.js';
+import InventorySerial from '../models/InventorySerial.js';
+import InventoryTransaction from '../models/InventoryTransaction.js';
+import ManufacturingRecipe from '../models/ManufacturingRecipe.js';
+import ProductionOrder from '../models/ProductionOrder.js';
 import { AppError } from '../utils/errorHandler.js';
 
 const EDITABLE_STATUSES = new Set(['draft', 'returned']);
@@ -23,6 +23,17 @@ const STATUS_TRANSITIONS = Object.freeze({
   blocked: ['active', 'archived'],
   archived: [],
 });
+
+const itemSetupCache = new Map();
+const itemSetupCacheTtlMs = () => Math.min(
+  Math.max(Number(process.env.ITEM_SETUP_CACHE_TTL_MS || 60000), 0),
+  300000,
+);
+
+export function invalidateItemSetupCache(companyId) {
+  if (companyId) itemSetupCache.delete(String(companyId));
+  else itemSetupCache.clear();
+}
 
 const fail = (message, statusCode = 400, code = 'ITEM_MASTER_ERROR', details = null) =>
   new AppError(message, { statusCode, code, details });
@@ -247,8 +258,14 @@ const populatedItemQuery = query => query
   .populate('createdBy', 'fullName')
   .populate('updatedBy', 'fullName');
 
-export async function familyFormSchema(companyId, familyId) {
-  const family = await loadFamily(companyId, familyId, { allowDraft: true });
+function formSchemaFromSetup(setup, familyId) {
+  const family = (setup.families || []).find(
+    candidate => String(candidate._id) === String(familyId),
+  );
+  if (!family) throw fail('Item Family was not found', 404, 'ITEM_FAMILY_NOT_FOUND');
+  const definitions = new Map(
+    (setup.attributes || []).map(attribute => [String(attribute._id), attribute]),
+  );
   return {
     id: family._id,
     code: family.code,
@@ -260,23 +277,40 @@ export async function familyFormSchema(companyId, familyId) {
     trackingPolicy: family.trackingPolicy,
     attributes: [...(family.attributeRules || [])]
       .sort((left, right) => left.displayOrder - right.displayOrder)
-      .map(rule => ({
-        id: rule.attributeId._id,
-        code: rule.attributeId.code,
-        label: rule.attributeId.label,
-        description: rule.attributeId.description,
-        dataType: rule.attributeId.dataType,
-        unit: rule.attributeId.unit,
-        referenceModel: rule.attributeId.referenceModel,
-        referenceFamilyCode: rule.attributeId.referenceFamilyCode,
-        allowedValues: rule.attributeId.allowedValues,
-        validation: rule.attributeId.validation,
-        required: rule.required,
-        identity: rule.identity,
-        searchable: rule.searchable,
-        defaultValue: rule.defaultValue,
-      })),
+      .map(rule => {
+        const definition = definitions.get(String(rule.attributeId?._id || rule.attributeId));
+        if (!definition) {
+          throw fail(
+            'Item Family contains an inactive attribute definition',
+            409,
+            'FAMILY_CONFIGURATION_INVALID',
+          );
+        }
+        return {
+          id: definition._id,
+          code: definition.code,
+          label: definition.label,
+          description: definition.description,
+          dataType: definition.dataType,
+          unit: definition.unit,
+          referenceModel: definition.referenceModel,
+          referenceFamilyCode: definition.referenceFamilyCode,
+          allowedValues: definition.allowedValues,
+          validation: definition.validation,
+          required: rule.required,
+          identity: rule.identity,
+          searchable: rule.searchable,
+          defaultValue: rule.defaultValue,
+        };
+      }),
   };
+}
+
+export async function familyFormSchema(companyId, familyId) {
+  if (!mongoose.isValidObjectId(familyId)) {
+    throw fail('A valid Item Family is required', 400, 'INVALID_ITEM_FAMILY');
+  }
+  return formSchemaFromSetup(await listItemSetup(companyId), familyId);
 }
 
 export async function createItemMaster(companyId, actorId, input = {}) {
@@ -436,12 +470,15 @@ export async function getItemMaster(companyId, itemId) {
 }
 
 export async function getItemMasterEditContext(companyId, itemId) {
-  const item = await getItemMaster(companyId, itemId);
-  const familyId = item.familyId?._id || item.familyId;
-  const [setup, form] = await Promise.all([
+  if (!mongoose.isValidObjectId(itemId)) throw fail('Invalid Item id', 400, 'INVALID_ITEM_ID');
+  const [rawItem, setup] = await Promise.all([
+    ItemMaster.findOne({ _id: itemId, companyId }).lean(),
     listItemSetup(companyId),
-    familyFormSchema(companyId, familyId),
   ]);
+  if (!rawItem) throw fail('Item was not found', 404, 'ITEM_MASTER_NOT_FOUND');
+  const item = hydrateItemRelations(rawItem, setup);
+  const familyId = item.familyId?._id || item.familyId;
+  const form = formSchemaFromSetup(setup, familyId);
 
   const referenceAttributes = form.attributes.filter(
     attribute => attribute.dataType === 'reference' && attribute.referenceFamilyCode,
@@ -467,7 +504,7 @@ const deletionDependencyChecks = Object.freeze([
   {
     code: 'INVENTORY_TRANSACTIONS',
     label: 'Posted inventory transactions',
-    count: (companyId, itemId) => InventoryTransactionV2.countDocuments({
+    count: (companyId, itemId) => InventoryTransaction.countDocuments({
       companyId,
       'entries.itemId': itemId,
     }),
@@ -475,12 +512,12 @@ const deletionDependencyChecks = Object.freeze([
   {
     code: 'INVENTORY_LOTS',
     label: 'Inventory lots',
-    count: (companyId, itemId) => InventoryLotV2.countDocuments({ companyId, itemId }),
+    count: (companyId, itemId) => InventoryLot.countDocuments({ companyId, itemId }),
   },
   {
     code: 'PACKAGING_USAGE',
     label: 'Inventory lots packed with this Item',
-    count: (companyId, itemId) => InventoryLotV2.countDocuments({
+    count: (companyId, itemId) => InventoryLot.countDocuments({
       companyId,
       'packagingComponents.itemId': itemId,
     }),
@@ -488,12 +525,12 @@ const deletionDependencyChecks = Object.freeze([
   {
     code: 'INVENTORY_BALANCES',
     label: 'Inventory balance records',
-    count: (companyId, itemId) => InventoryBalanceV2.countDocuments({ companyId, itemId }),
+    count: (companyId, itemId) => InventoryBalance.countDocuments({ companyId, itemId }),
   },
   {
     code: 'INVENTORY_SERIALS',
     label: 'Inventory serial or barcode records',
-    count: (companyId, itemId) => InventorySerialV2.countDocuments({ companyId, itemId }),
+    count: (companyId, itemId) => InventorySerial.countDocuments({ companyId, itemId }),
   },
   {
     code: 'INVENTORY_VALUATION',
@@ -503,7 +540,7 @@ const deletionDependencyChecks = Object.freeze([
   {
     code: 'MANUFACTURING_RECIPES',
     label: 'Manufacturing recipes or BOMs',
-    count: (companyId, itemId) => ManufacturingRecipeV2.countDocuments({
+    count: (companyId, itemId) => ManufacturingRecipe.countDocuments({
       companyId,
       $or: [
         { outputItemId: itemId },
@@ -516,7 +553,7 @@ const deletionDependencyChecks = Object.freeze([
   {
     code: 'PRODUCTION_ORDERS',
     label: 'Production orders',
-    count: (companyId, itemId) => ProductionOrderV2.countDocuments({
+    count: (companyId, itemId) => ProductionOrder.countDocuments({
       companyId,
       $or: [
         { outputItemId: itemId },
@@ -626,11 +663,13 @@ export async function listItemMasters(companyId, query = {}) {
     if (token) filter.searchTokens = token.slice(0, 24);
   }
 
-  const rows = await populatedItemQuery(
-    ItemMaster.find(filter).sort({ _id: -1 }).limit(limit + 1)
-  ).lean();
+  const [rows, setup] = await Promise.all([
+    ItemMaster.find(filter).sort({ _id: -1 }).limit(limit + 1).lean(),
+    listItemSetup(companyId),
+  ]);
   const hasMore = rows.length > limit;
-  const data = hasMore ? rows.slice(0, limit) : rows;
+  const page = hasMore ? rows.slice(0, limit) : rows;
+  const data = page.map(item => hydrateItemRelations(item, setup));
   return {
     data,
     meta: {
@@ -677,13 +716,63 @@ export async function listItemMasterOptions(companyId, query = {}) {
 }
 
 export async function listItemSetup(companyId) {
-  const [classes, families, attributes] = await Promise.all([
-    ItemClass.find({ companyId, status: 'active' }).sort({ name: 1 }).lean(),
-    ItemFamily.find({ companyId, status: { $ne: 'archived' } })
-      .populate('itemClassId', 'code name')
-      .sort({ name: 1 })
-      .lean(),
-    ItemAttributeDefinition.find({ companyId, status: 'active' }).sort({ label: 1 }).lean(),
-  ]);
-  return { classes, families, attributes };
+  const key = String(companyId);
+  const ttlMs = itemSetupCacheTtlMs();
+  const now = Date.now();
+  const cached = itemSetupCache.get(key);
+  if (ttlMs && cached?.expiresAt > now) return cached.promise;
+
+  const promise = (async () => {
+    const [classes, rawFamilies, attributes] = await Promise.all([
+      ItemClass.find({ companyId, status: 'active' }).sort({ name: 1 }).lean(),
+      ItemFamily.find({ companyId, status: { $ne: 'archived' } }).sort({ name: 1 }).lean(),
+      ItemAttributeDefinition.find({ companyId, status: 'active' }).sort({ label: 1 }).lean(),
+    ]);
+    const classesById = new Map(classes.map(itemClass => [String(itemClass._id), itemClass]));
+    const families = rawFamilies.map(family => ({
+      ...family,
+      itemClassId: classesById.get(String(family.itemClassId)) || family.itemClassId,
+    }));
+    return { classes, families, attributes };
+  })();
+
+  if (ttlMs) itemSetupCache.set(key, { expiresAt: now + ttlMs, promise });
+  try {
+    return await promise;
+  } catch (error) {
+    itemSetupCache.delete(key);
+    throw error;
+  }
+}
+
+function hydrateItemRelations(item, setup) {
+  const itemClass = (setup.classes || []).find(
+    candidate => String(candidate._id) === String(item.itemClassId?._id || item.itemClassId),
+  );
+  const family = (setup.families || []).find(
+    candidate => String(candidate._id) === String(item.familyId?._id || item.familyId),
+  );
+  return {
+    ...item,
+    itemClassId: itemClass
+      ? {
+          _id: itemClass._id,
+          code: itemClass.code,
+          name: itemClass.name,
+          capabilities: itemClass.capabilities,
+          status: itemClass.status,
+        }
+      : item.itemClassId,
+    familyId: family
+      ? {
+          _id: family._id,
+          code: family.code,
+          name: family.name,
+          uomPolicy: family.uomPolicy,
+          trackingPolicy: family.trackingPolicy,
+          capabilities: family.capabilities,
+          status: family.status,
+        }
+      : item.familyId,
+  };
 }

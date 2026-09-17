@@ -3,9 +3,9 @@ import mongoose from 'mongoose';
 import XLSX from 'xlsx';
 import Campaign from '../models/Campaign.js';
 import Company from '../models/Company.js';
-import InventoryBalanceV2 from '../models/InventoryBalanceV2.js';
-import InventoryLotV2 from '../models/InventoryLotV2.js';
-import InventorySerialV2 from '../models/InventorySerialV2.js';
+import InventoryBalance from '../models/InventoryBalance.js';
+import InventoryLot from '../models/InventoryLot.js';
+import InventorySerial from '../models/InventorySerial.js';
 import ItemMaster from '../models/ItemMaster.js';
 import Warehouse from '../models/Warehouse.js';
 import { generateInventorySerialBatch } from '../utils/serialNumber.js';
@@ -90,7 +90,7 @@ try {
         throw new Error('Active Item/Warehouse pair was not found in one company');
       }
       if (!item.trackingPolicy?.serialTracked) throw new Error('Item is not configured for serial tracking');
-      const lot = await InventoryLotV2.findOne({
+      const lot = await InventoryLot.findOne({
         companyId: item.companyId,
         itemId: item._id,
         warehouseId: warehouse._id,
@@ -101,7 +101,7 @@ try {
       if (Math.abs(Number(lot.originalQuantity) - Number(lot.onHandQuantity)) > 0.000001) {
         throw new Error('Lot has historical issues; automatic opening-stock backfill is unsafe');
       }
-      const activeSerialCount = await InventorySerialV2.countDocuments({
+      const activeSerialCount = await InventorySerial.countDocuments({
         companyId: item.companyId,
         lotId: lot._id,
         state: { $in: ['AVAILABLE', 'RESERVED'] },
@@ -110,7 +110,7 @@ try {
       if (unitRows.length !== missingUnits) {
         throw new Error(`File has ${unitRows.length} rows but lot requires exactly ${missingUnits}`);
       }
-      const balances = await InventoryBalanceV2.find({
+      const balances = await InventoryBalance.find({
         companyId: item.companyId,
         lotId: lot._id,
         onHand: { $gt: 0 },
@@ -139,7 +139,7 @@ try {
       const session = await mongoose.startSession();
       try {
         await session.withTransaction(async () => {
-          await InventorySerialV2.insertMany(unitRows.map((row, index) => ({
+          await InventorySerial.insertMany(unitRows.map((row, index) => ({
             companyId: item.companyId,
             itemId: item._id,
             lotId: lot._id,
@@ -167,7 +167,7 @@ try {
               specifications,
             },
           })), { session, ordered: true });
-          await InventoryLotV2.updateOne(
+          await InventoryLot.updateOne(
             { _id: lot._id },
             { $set: {
               campaignId: campaign?._id || lot.campaignId || null,
@@ -176,7 +176,7 @@ try {
             } },
             { session },
           );
-          await InventoryBalanceV2.updateOne(
+          await InventoryBalance.updateOne(
             { _id: balances[0]._id },
             { $set: { catchOnHand: totalWeight, catchUom: item.catchUom || 'kg' } },
             { session },

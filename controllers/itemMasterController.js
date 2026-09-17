@@ -11,6 +11,7 @@ import {
   familyFormSchema,
   getItemMaster,
   getItemMasterEditContext,
+  invalidateItemSetupCache,
   listItemMasters,
   listItemMasterOptions,
   listItemSetup,
@@ -78,6 +79,7 @@ export async function createItemClass(req, res) {
       createdBy: actorIdFromRequest(req),
       updatedBy: actorIdFromRequest(req),
     });
+    invalidateItemSetupCache(companyId);
     return sendCreated(res, { data: created, message: 'Item Class created' });
   } catch (error) {
     return handleError(res, duplicateError(error, 'Item Class'), req);
@@ -127,6 +129,7 @@ export async function createAttributeDefinition(req, res) {
       createdBy: actorIdFromRequest(req),
       updatedBy: actorIdFromRequest(req),
     });
+    invalidateItemSetupCache(companyId);
     return sendCreated(res, { data: created, message: 'Item attribute created' });
   } catch (error) {
     return handleError(res, duplicateError(error, 'Attribute'), req);
@@ -237,6 +240,7 @@ export async function createItemFamily(req, res) {
       createdBy: actorIdFromRequest(req),
       updatedBy: actorIdFromRequest(req),
     });
+    invalidateItemSetupCache(payload.companyId);
     return sendCreated(res, { data: created, message: 'Item Family created' });
   } catch (error) {
     return handleError(res, duplicateError(error, 'Item Family'), req);
@@ -260,6 +264,7 @@ export async function updateItemFamily(req, res) {
       family.status = req.body.status;
     }
     await family.save();
+    invalidateItemSetupCache(companyId);
     return sendSuccess(res, { data: family, message: 'Item Family updated' });
   } catch (error) {
     return handleError(res, duplicateError(error, 'Item Family'), req);

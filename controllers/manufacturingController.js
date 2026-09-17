@@ -12,11 +12,11 @@ import {
   packBoardLot,
   processChopping,
   releaseProductionOrder,
-} from '../services/manufacturingV2Service.js';
+} from '../services/manufacturingService.js';
 import { sendCreated, sendSuccess } from '../utils/apiResponse.js';
 import { AppError, handleError } from '../utils/errorHandler.js';
 
-const fail = (message, statusCode = 400, code = 'MANUFACTURING_V2_REQUEST_INVALID') =>
+const fail = (message, statusCode = 400, code = 'MANUFACTURING_REQUEST_INVALID') =>
   new AppError(message, { statusCode, code });
 const companyIdFromRequest = req => {
   const companyId = req.user?.companyId || req.user?.company?._id || req.user?.company;

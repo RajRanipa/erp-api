@@ -15,7 +15,7 @@ import {
 
 const id = () => new mongoose.Types.ObjectId();
 
-test('Item V2 catalog references valid classes and attributes', () => {
+test('Item catalog references valid classes and attributes', () => {
   const classCodes = new Set(ITEM_CLASS_CATALOG.map(entry => entry.code));
   const attributeCodes = new Set(ITEM_ATTRIBUTE_CATALOG.map(entry => entry.code));
   assert.equal(classCodes.size, ITEM_CLASS_CATALOG.length);

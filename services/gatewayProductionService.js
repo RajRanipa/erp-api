@@ -2,9 +2,9 @@ import Campaign from '../models/Campaign.js';
 import GatewayIngestBatch from '../models/GatewayIngestBatch.js';
 import ProductionBlanketRoll from '../models/ProductionBlanketRoll.js';
 import {
-  postAndLinkGatewayInventoryV2,
+  postAndLinkGatewayInventory,
   resolveGatewayWarehouseId,
-} from './gatewayInventoryV2Service.js';
+} from './gatewayInventoryService.js';
 import { AppError } from '../utils/errorHandler.js';
 
 const SUPPORTED_PRODUCT_CODES = new Set([1, 2, 3, 4, 5]);
@@ -231,7 +231,7 @@ export async function ingestBlanketBatch({ companyId, payload }) {
       }
       result.accepted = true;
       result.retryable = false;
-      const inventory = await postAndLinkGatewayInventoryV2({ document, warehouseId });
+      const inventory = await postAndLinkGatewayInventory({ document, warehouseId });
       result.inventoryStatus = inventory.status;
       result.code = inventory.posted || inventory.status === 'NOT_APPLICABLE'
         ? null
@@ -362,7 +362,7 @@ export async function reconcilePendingGatewayInventory({ limit = 100 } = {}) {
       );
     }
     try {
-      const result = await postAndLinkGatewayInventoryV2({
+      const result = await postAndLinkGatewayInventory({
         document,
         warehouseId: warehouseByCompany.get(companyKey),
       });

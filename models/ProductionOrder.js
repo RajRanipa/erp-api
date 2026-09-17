@@ -25,11 +25,11 @@ const operationSnapshotSchema = new Schema({
   completedBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
 }, { _id: false });
 
-const productionOrderV2Schema = new Schema({
+const productionOrderSchema = new Schema({
   companyId: { type: Schema.Types.ObjectId, ref: 'Company', required: true, index: true },
   orderNo: { type: String, required: true, trim: true, uppercase: true },
   outputItemId: { type: Schema.Types.ObjectId, ref: 'ItemMaster', required: true, index: true },
-  recipeId: { type: Schema.Types.ObjectId, ref: 'ManufacturingRecipeV2', required: true },
+  recipeId: { type: Schema.Types.ObjectId, ref: 'ManufacturingRecipe', required: true },
   recipeRevision: { type: Number, required: true },
   plannedQuantity: { type: Number, required: true, min: 0.000001 },
   outputUom: { type: String, required: true, trim: true, lowercase: true },
@@ -45,13 +45,13 @@ const productionOrderV2Schema = new Schema({
   operations: { type: [operationSnapshotSchema], default: [] },
   materialIssueTransactionId: {
     type: Schema.Types.ObjectId,
-    ref: 'InventoryTransactionV2',
+    ref: 'InventoryTransaction',
     default: null,
   },
   materialValue: { type: Number, min: 0, default: 0 },
   actualOutputQuantity: { type: Number, min: 0, default: 0 },
   rejectedQuantity: { type: Number, min: 0, default: 0 },
-  outputLotIds: [{ type: Schema.Types.ObjectId, ref: 'InventoryLotV2' }],
+  outputLotIds: [{ type: Schema.Types.ObjectId, ref: 'InventoryLot' }],
   startedAt: { type: Date, default: null },
   completedAt: { type: Date, default: null },
   notes: { type: String, trim: true, maxlength: 2000, default: '' },
@@ -59,12 +59,12 @@ const productionOrderV2Schema = new Schema({
   updatedBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
 }, { timestamps: true, optimisticConcurrency: true });
 
-productionOrderV2Schema.index(
+productionOrderSchema.index(
   { companyId: 1, orderNo: 1 },
   { unique: true, name: 'uniq_company_v2_production_order_no' },
 );
-productionOrderV2Schema.index({ companyId: 1, status: 1, createdAt: -1 });
-productionOrderV2Schema.index({ companyId: 1, outputItemId: 1, createdAt: -1 });
+productionOrderSchema.index({ companyId: 1, status: 1, createdAt: -1 });
+productionOrderSchema.index({ companyId: 1, outputItemId: 1, createdAt: -1 });
 
-export default mongoose.models.ProductionOrderV2
-  || mongoose.model('ProductionOrderV2', productionOrderV2Schema);
+export default mongoose.models.ProductionOrder
+  || mongoose.model('ProductionOrder', productionOrderSchema, 'productionorderv2');

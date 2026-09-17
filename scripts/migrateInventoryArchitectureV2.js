@@ -3,8 +3,8 @@ import mongoose from 'mongoose';
 import InventorySnapshot from '../models/InventorySnapshot.js';
 import Item from '../models/Item.js';
 import ItemFamily from '../models/ItemFamily.js';
-import InventoryTransactionV2 from '../models/InventoryTransactionV2.js';
-import { postReceipt } from '../services/inventoryV2Service.js';
+import InventoryTransactionV2 from '../models/InventoryTransaction.js';
+import { postReceipt } from '../services/inventoryService.js';
 import { resolveLegacyItemReference } from '../services/legacyReferenceResolver.js';
 
 dotenv.config();

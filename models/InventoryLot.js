@@ -8,7 +8,7 @@ const packagingComponentSchema = new Schema({
   uom: { type: String, required: true, trim: true, lowercase: true },
 }, { _id: false });
 
-const inventoryLotV2Schema = new Schema({
+const inventoryLotSchema = new Schema({
   companyId: {
     type: Schema.Types.ObjectId,
     ref: 'Company',
@@ -74,7 +74,7 @@ const inventoryLotV2Schema = new Schema({
   },
   sourceType: { type: String, trim: true, uppercase: true, default: null },
   sourceId: { type: String, trim: true, default: null },
-  parentLotIds: [{ type: Schema.Types.ObjectId, ref: 'InventoryLotV2' }],
+  parentLotIds: [{ type: Schema.Types.ObjectId, ref: 'InventoryLot' }],
   packingLabel: { type: String, trim: true, maxlength: 180, default: null },
   packingKey: { type: String, trim: true, uppercase: true, maxlength: 240, default: null },
   packagingComponents: { type: [packagingComponentSchema], default: [] },
@@ -83,11 +83,11 @@ const inventoryLotV2Schema = new Schema({
   optimisticConcurrency: true,
 });
 
-inventoryLotV2Schema.index(
+inventoryLotSchema.index(
   { companyId: 1, itemId: 1, warehouseId: 1, lotNo: 1 },
   { unique: true, name: 'uniq_v2_inventory_lot_location' },
 );
-inventoryLotV2Schema.index({
+inventoryLotSchema.index({
   companyId: 1,
   itemId: 1,
   warehouseId: 1,
@@ -95,7 +95,7 @@ inventoryLotV2Schema.index({
   status: 1,
   receivedAt: 1,
 });
-inventoryLotV2Schema.index({ companyId: 1, packingKey: 1, status: 1 });
+inventoryLotSchema.index({ companyId: 1, packingKey: 1, status: 1 });
 
-export default mongoose.models.InventoryLotV2
-  || mongoose.model('InventoryLotV2', inventoryLotV2Schema);
+export default mongoose.models.InventoryLot
+  || mongoose.model('InventoryLot', inventoryLotSchema, 'inventorylotv2');

@@ -50,6 +50,15 @@ test('public trace API is mounted before authenticated Item Master APIs', () => 
   assert.ok(publicTrace < authenticatedApi, 'public trace must precede authenticated APIs');
 });
 
+test('only final inventory and manufacturing API names are mounted', () => {
+  const serverPath = path.resolve(dirname, '../server.js');
+  const source = fs.readFileSync(serverPath, 'utf8');
+  assert.match(source, /app\.use\('\/api\/inventory', inventoryRoutes\)/);
+  assert.match(source, /app\.use\('\/api\/manufacturing', manufacturingRoutes\)/);
+  assert.doesNotMatch(source, /\/api\/inventory-v2/);
+  assert.doesNotMatch(source, /\/api\/manufacturing-v2/);
+});
+
 test('default owner role is protected and receives the complete catalogue', () => {
   const owner = DEFAULT_ROLE_TEMPLATES.find((role) => role.key === 'owner');
   assert.equal(owner.isOwner, true);

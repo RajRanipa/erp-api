@@ -6,9 +6,9 @@ import ItemMaster from '../models/ItemMaster.js';
 import ProductionBlanketRoll from '../models/ProductionBlanketRoll.js';
 import {
   GATEWAY_PRODUCT_FAMILY,
-  resolveGatewayItemV2,
+  resolveGatewayItem,
   resolveGatewayWarehouseId,
-} from '../services/gatewayInventoryV2Service.js';
+} from '../services/gatewayInventoryService.js';
 
 dotenv.config();
 
@@ -64,7 +64,7 @@ try {
   }
   const mappings = [];
   for (const record of uniqueRecords.values()) {
-    const resolved = await resolveGatewayItemV2({
+    const resolved = await resolveGatewayItem({
       companyId,
       legacyItemId: record.matchedItem,
       productCode: record.productCode,
@@ -92,7 +92,7 @@ try {
     warehouseId,
     runningCampaignReady: Boolean(campaign),
     runningCampaign: campaign,
-    inventoryRuntime: 'V2_ONLY',
+    inventoryRuntime: 'CURRENT_ONLY',
     configuredItems,
     recentSpecificationMappings: mappings,
     ready: Boolean(warehouseId)

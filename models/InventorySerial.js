@@ -18,10 +18,10 @@ const traceSnapshotSchema = new Schema({
   specifications: { type: [traceSpecificationSchema], default: [] },
 }, { _id: false });
 
-const inventorySerialV2Schema = new Schema({
+const inventorySerialSchema = new Schema({
   companyId: { type: Schema.Types.ObjectId, ref: 'Company', required: true, index: true },
   itemId: { type: Schema.Types.ObjectId, ref: 'ItemMaster', required: true, index: true },
-  lotId: { type: Schema.Types.ObjectId, ref: 'InventoryLotV2', required: true, index: true },
+  lotId: { type: Schema.Types.ObjectId, ref: 'InventoryLot', required: true, index: true },
   campaignId: { type: Schema.Types.ObjectId, ref: 'Campaign', default: null, index: true },
   serialNo: { type: String, required: true, trim: true, maxlength: 120 },
   legacySerialNo: { type: String, trim: true, uppercase: true, maxlength: 120, default: null },
@@ -51,16 +51,16 @@ const inventorySerialV2Schema = new Schema({
   measuredAt: { type: Date, default: null },
   manualReason: { type: String, trim: true, maxlength: 500, default: null },
   traceSnapshot: { type: traceSnapshotSchema, default: null },
-  parentSerialId: { type: Schema.Types.ObjectId, ref: 'InventorySerialV2', default: null },
+  parentSerialId: { type: Schema.Types.ObjectId, ref: 'InventorySerial', default: null },
   sourceType: { type: String, trim: true, uppercase: true, default: null },
   sourceId: { type: String, trim: true, default: null },
 }, { timestamps: true, optimisticConcurrency: true });
 
-inventorySerialV2Schema.index(
+inventorySerialSchema.index(
   { serialNo: 1 },
   { unique: true, name: 'uniq_global_v2_inventory_serial' },
 );
-inventorySerialV2Schema.index(
+inventorySerialSchema.index(
   { companyId: 1, legacySerialNo: 1 },
   {
     unique: true,
@@ -68,8 +68,8 @@ inventorySerialV2Schema.index(
     partialFilterExpression: { legacySerialNo: { $type: 'string' } },
   },
 );
-inventorySerialV2Schema.index({ companyId: 1, itemId: 1, state: 1, createdAt: 1 });
-inventorySerialV2Schema.index({ companyId: 1, parentSerialId: 1 });
+inventorySerialSchema.index({ companyId: 1, itemId: 1, state: 1, createdAt: 1 });
+inventorySerialSchema.index({ companyId: 1, parentSerialId: 1 });
 
-export default mongoose.models.InventorySerialV2
-  || mongoose.model('InventorySerialV2', inventorySerialV2Schema);
+export default mongoose.models.InventorySerial
+  || mongoose.model('InventorySerial', inventorySerialSchema, 'inventoryserialv2');

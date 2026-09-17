@@ -33,8 +33,10 @@
     "audit:procurement-module": "node scripts/migrateProcurementModule.js",
     "migrate:procurement-module": "node scripts/migrateProcurementModule.js --apply",
     "audit:gateway-module": "node scripts/migrateGatewayModule.js",
-    "audit:gateway-inventory-v2": "node scripts/auditGatewayInventoryV2.js",
-    "migrate:gateway-module": "node scripts/migrateGatewayModule.js --apply"
+    "audit:gateway-inventory": "node scripts/auditGatewayInventory.js",
+    "migrate:gateway-module": "node scripts/migrateGatewayModule.js --apply",
+    "audit:legacy-retirement": "node scripts/retireLegacyArchitecture.js",
+    "retire:legacy-architecture": "node scripts/retireLegacyArchitecture.js --apply"
   },
   "keywords": [],
   "author": "Raj",

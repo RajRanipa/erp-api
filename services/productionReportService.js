@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import { DateTime } from 'luxon';
 import ProductionBlanketRoll from '../models/ProductionBlanketRoll.js';
-import ProductionOrderV2 from '../models/ProductionOrderV2.js';
+import ProductionOrder from '../models/ProductionOrder.js';
 import generatePdfFromHtml from '../utils/generatePdfFromHtml.js';
 import sendMail from '../utils/sendMail.js';
 import { sendProductionReport } from './whatsappService.js';
@@ -143,7 +143,7 @@ export async function fetchproductionALL(start, end, companyId) {
 
 export async function fetchBatchReport(start, end, companyId) {
   validateRange(start, end);
-  const orders = await ProductionOrderV2.find({
+  const orders = await ProductionOrder.find({
     companyId: reportCompanyId(companyId),
     createdAt: { $gte: start, $lt: end },
   })

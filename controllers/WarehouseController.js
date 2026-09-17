@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import Warehouse from '../models/Warehouse.js';
-import InventoryBalanceV2 from '../models/InventoryBalanceV2.js';
-import InventoryTransactionV2 from '../models/InventoryTransactionV2.js';
+import InventoryBalance from '../models/InventoryBalance.js';
+import InventoryTransaction from '../models/InventoryTransaction.js';
 import { AppError, handleError } from '../utils/errorHandler.js';
 import { applyAuditCreate, applyAuditUpdate } from '../utils/auditHelper.js';
 
@@ -159,11 +159,11 @@ export const deleteWarehouse = async (req, res) => {
     if (!warehouse) throw fail('Warehouse not found', 404, 'WAREHOUSE_NOT_FOUND');
 
     const [transactionCount, stockCount] = await Promise.all([
-      InventoryTransactionV2.countDocuments({
+      InventoryTransaction.countDocuments({
         companyId,
         'entries.warehouseId': warehouse._id,
       }),
-      InventoryBalanceV2.countDocuments({
+      InventoryBalance.countDocuments({
         companyId,
         warehouseId: warehouse._id,
         $or: [{ onHand: { $ne: 0 } }, { reserved: { $ne: 0 } }],

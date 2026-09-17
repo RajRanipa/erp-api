@@ -1,5 +1,5 @@
 import express from 'express';
-import { publicSerialTrace } from '../services/inventoryV2Service.js';
+import { publicSerialTrace } from '../services/inventoryService.js';
 import { rateLimit } from '../middleware/rateLimitMiddleware.js';
 import { sendSuccess } from '../utils/apiResponse.js';
 import { handleError } from '../utils/errorHandler.js';

@@ -1,7 +1,7 @@
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
 import ItemMaster from '../models/ItemMaster.js';
-import { resolveGatewayItemV2 } from '../services/gatewayInventoryV2Service.js';
+import { resolveGatewayItem } from '../services/gatewayInventoryService.js';
 import { resolveLegacyItemReference } from '../services/legacyReferenceResolver.js';
 
 dotenv.config();
@@ -158,7 +158,7 @@ try {
     const { companyId, ...specification } = group._id;
     let resolved;
     try {
-      resolved = await resolveGatewayItemV2({ companyId, ...specification });
+      resolved = await resolveGatewayItem({ companyId, ...specification });
     } catch (error) {
       resolved = { status: 'FAILED', message: error.message, item: null };
     }

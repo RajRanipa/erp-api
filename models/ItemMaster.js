@@ -142,6 +142,8 @@ itemMasterSchema.index({ companyId: 1, status: 1, familyId: 1, name: 1 });
 itemMasterSchema.index({ companyId: 1, itemClassId: 1, status: 1, name: 1 });
 itemMasterSchema.index({ companyId: 1, searchText: 1 });
 itemMasterSchema.index({ companyId: 1, searchTokens: 1, status: 1 });
+itemMasterSchema.index({ companyId: 1, _id: -1 });
+itemMasterSchema.index({ companyId: 1, searchTokens: 1, _id: -1 });
 
 export default mongoose.models.ItemMaster
   || mongoose.model('ItemMaster', itemMasterSchema);

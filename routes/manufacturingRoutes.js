@@ -12,7 +12,7 @@ import {
   packBoard,
   recordBoardInspection,
   releaseManufacturingOrder,
-} from '../controllers/manufacturingV2Controller.js';
+} from '../controllers/manufacturingController.js';
 import auth, { roleAuth } from '../middleware/authMiddleware.js';
 
 const router = express.Router();

@@ -26,7 +26,7 @@ const operationSchema = new Schema({
   qualityGate: { type: Boolean, default: false },
 }, { _id: false });
 
-const manufacturingRecipeV2Schema = new Schema({
+const manufacturingRecipeSchema = new Schema({
   companyId: { type: Schema.Types.ObjectId, ref: 'Company', required: true, index: true },
   outputItemId: { type: Schema.Types.ObjectId, ref: 'ItemMaster', required: true, index: true },
   code: { type: String, required: true, trim: true, uppercase: true, maxlength: 80 },
@@ -57,11 +57,11 @@ const manufacturingRecipeV2Schema = new Schema({
   updatedBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
 }, { timestamps: true, optimisticConcurrency: true });
 
-manufacturingRecipeV2Schema.index(
+manufacturingRecipeSchema.index(
   { companyId: 1, code: 1, revision: 1 },
   { unique: true, name: 'uniq_company_recipe_revision' },
 );
-manufacturingRecipeV2Schema.index(
+manufacturingRecipeSchema.index(
   { companyId: 1, outputItemId: 1, status: 1 },
   {
     unique: true,
@@ -70,5 +70,5 @@ manufacturingRecipeV2Schema.index(
   },
 );
 
-export default mongoose.models.ManufacturingRecipeV2
-  || mongoose.model('ManufacturingRecipeV2', manufacturingRecipeV2Schema);
+export default mongoose.models.ManufacturingRecipe
+  || mongoose.model('ManufacturingRecipe', manufacturingRecipeSchema, 'manufacturingrecipev2');

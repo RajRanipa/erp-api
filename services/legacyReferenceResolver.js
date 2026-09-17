@@ -1,6 +1,6 @@
 import ItemMaster from '../models/ItemMaster.js';
 import ProductionBlanketRoll from '../models/ProductionBlanketRoll.js';
-import { resolveGatewayItemV2 } from './gatewayInventoryV2Service.js';
+import { resolveGatewayItem } from './gatewayInventoryService.js';
 
 const cache = new Map();
 const key = (companyId, legacyItemId) => `${companyId}:${legacyItemId}`;
@@ -8,7 +8,7 @@ const key = (companyId, legacyItemId) => `${companyId}:${legacyItemId}`;
 /**
  * Resolves an orphaned legacy Item ID without guessing. A direct
  * ItemMaster.legacyItemId wins. Otherwise, historical PLC specifications are
- * accepted only when every resolvable specification points to one V2 Item.
+ * accepted only when every resolvable specification points to one Item Master record.
  */
 export async function resolveLegacyItemReference(companyId, legacyItemId) {
   const cacheKey = key(companyId, legacyItemId);
@@ -41,7 +41,7 @@ export async function resolveLegacyItemReference(companyId, legacyItemId) {
   const resolvedItems = new Map();
   const unresolved = [];
   for (const row of specifications) {
-    const resolved = await resolveGatewayItemV2({
+    const resolved = await resolveGatewayItem({
       companyId,
       legacyItemId,
       ...row._id,

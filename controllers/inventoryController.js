@@ -1,10 +1,10 @@
 import mongoose from 'mongoose';
 import {
-  inventoryV2Summary,
+  inventorySummary,
   inventoryReceiptContext,
-  listStockV2,
-  listTransactionsV2,
-  listSerialsV2,
+  listStock,
+  listTransactions,
+  listSerials,
   postConversion,
   postIssue,
   postBlanketPacking,
@@ -12,11 +12,11 @@ import {
   postOpeningStockAdjustment,
   transitionLotProcess,
   postTransfer,
-} from '../services/inventoryV2Service.js';
+} from '../services/inventoryService.js';
 import { sendCreated, sendSuccess } from '../utils/apiResponse.js';
 import { AppError, handleError } from '../utils/errorHandler.js';
 
-const fail = (message, statusCode = 400, code = 'INVENTORY_V2_REQUEST_INVALID') =>
+const fail = (message, statusCode = 400, code = 'INVENTORY_REQUEST_INVALID') =>
   new AppError(message, { statusCode, code });
 
 const companyIdFromRequest = req => {
@@ -37,40 +37,40 @@ const idempotencyInput = req => ({
   ).trim(),
 });
 
-export async function getInventoryV2Stock(req, res) {
+export async function getInventoryStock(req, res) {
   try {
     return sendSuccess(res, {
-      data: await listStockV2(companyIdFromRequest(req), req.query),
+      data: await listStock(companyIdFromRequest(req), req.query),
     });
   } catch (error) {
     return handleError(res, error, req);
   }
 }
 
-export async function getInventoryV2Transactions(req, res) {
+export async function getInventoryTransactions(req, res) {
   try {
     return sendSuccess(res, {
-      data: await listTransactionsV2(companyIdFromRequest(req), req.query),
+      data: await listTransactions(companyIdFromRequest(req), req.query),
     });
   } catch (error) {
     return handleError(res, error, req);
   }
 }
 
-export async function getInventoryV2Serials(req, res) {
+export async function getInventorySerials(req, res) {
   try {
     return sendSuccess(res, {
-      data: await listSerialsV2(companyIdFromRequest(req), req.query),
+      data: await listSerials(companyIdFromRequest(req), req.query),
     });
   } catch (error) {
     return handleError(res, error, req);
   }
 }
 
-export async function getInventoryV2Summary(req, res) {
+export async function getInventorySummary(req, res) {
   try {
     return sendSuccess(res, {
-      data: await inventoryV2Summary(companyIdFromRequest(req)),
+      data: await inventorySummary(companyIdFromRequest(req)),
     });
   } catch (error) {
     return handleError(res, error, req);
@@ -105,19 +105,19 @@ async function post(req, res, operation, message, suppliedInput = null) {
   }
 }
 
-export const createInventoryV2Receipt = (req, res) =>
+export const createInventoryReceipt = (req, res) =>
   post(req, res, postManualProductionReceipt, 'Manual production receipt posted');
 
 export const createOpeningStockAdjustment = (req, res) =>
   post(req, res, postOpeningStockAdjustment, 'Opening stock adjustment posted');
 
-export const createInventoryV2Issue = (req, res) =>
+export const createInventoryIssue = (req, res) =>
   post(req, res, postIssue, 'Inventory issue posted');
 
-export const createInventoryV2Transfer = (req, res) =>
+export const createInventoryTransfer = (req, res) =>
   post(req, res, postTransfer, 'Inventory transfer posted');
 
-export const createInventoryV2Conversion = (req, res) =>
+export const createInventoryConversion = (req, res) =>
   post(req, res, postConversion, 'Inventory conversion posted');
 
 export const createBlanketPacking = (req, res) =>

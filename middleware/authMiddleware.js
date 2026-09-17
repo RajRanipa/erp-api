@@ -3,7 +3,7 @@ import { permissionImplies, resolveAccessContext } from '../services/accessContr
 
 const authContextCache = new Map();
 const authCacheTtlMs = () => Math.min(
-  Math.max(Number(process.env.AUTH_CONTEXT_CACHE_TTL_MS || 5000), 0),
+  Math.max(Number(process.env.AUTH_CONTEXT_CACHE_TTL_MS || 30000), 0),
   30000,
 );
 const authCacheKey = decoded => [

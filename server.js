@@ -12,9 +12,9 @@ import campaignRoutes from './routes/campaignRoutes.js';
 import partyRouter from './routes/partyRoutes.js';
 import warehouseRoutes from './routes/warehouseRoutes.js'
 import itemMasterRoutes from './routes/itemMasterRoutes.js';
-import inventoryV2Routes from './routes/inventoryV2Routes.js';
+import inventoryRoutes from './routes/inventoryRoutes.js';
 import publicTraceRoutes from './routes/publicTraceRoutes.js';
-import manufacturingV2Routes from './routes/manufacturingV2Routes.js';
+import manufacturingRoutes from './routes/manufacturingRoutes.js';
 import companyRoutes from './routes/companyRoutes.js'
 import uploadRoutes from './routes/uploadRoutes.js';
 import procurementRoutes from './routes/procurementRoutes.js';
@@ -88,8 +88,8 @@ app.use('/api/campaigns', campaignRoutes);
 app.use('/api/parties', partyRouter);
 app.use('/api/warehouses', warehouseRoutes);
 app.use('/api/item-master', itemMasterRoutes);
-app.use('/api/inventory-v2', inventoryV2Routes);
-app.use('/api/manufacturing-v2', manufacturingV2Routes);
+app.use('/api/inventory', inventoryRoutes);
+app.use('/api/manufacturing', manufacturingRoutes);
 app.use('/api/company', companyRoutes);
 app.use('/api/uploads', uploadRoutes);
 app.use('/api/procurement', procurementRoutes);

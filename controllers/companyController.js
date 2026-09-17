@@ -9,6 +9,32 @@ import { generateAccessToken } from '../utils/tokenUtils.js';
 import { ensureCompanyRoles, findCompanyRole } from '../services/accessControlService.js';
 import { setAuthCookies } from '../utils/authCookies.js';
 
+const companyReadCache = new Map();
+const COMPANY_READ_CACHE_TTL_MS = 60000;
+
+function invalidateCompanyReadCache(companyId) {
+  if (companyId) companyReadCache.delete(String(companyId));
+}
+
+async function findCompanyCached(companyId) {
+  const key = String(companyId);
+  const now = Date.now();
+  const cached = companyReadCache.get(key);
+  if (cached?.expiresAt > now) return cached.promise;
+
+  const promise = Company.findById(companyId).lean();
+  companyReadCache.set(key, {
+    expiresAt: now + COMPANY_READ_CACHE_TTL_MS,
+    promise,
+  });
+  try {
+    return await promise;
+  } catch (error) {
+    companyReadCache.delete(key);
+    throw error;
+  }
+}
+
 // Helper: ensure the authenticated user can access the given company
 function assertCompanyAccess(req, companyDoc) {
   if (!companyDoc) return false;
@@ -77,7 +103,7 @@ export async function getCompanyMe(req, res) {
     if (!user.companyId) {
       return res.status(404).json({ status: false, message: 'No company linked to this user' });
     }
-    const company = await Company.findById(user.companyId);
+    const company = await findCompanyCached(user.companyId);
     if (!company) {
       return res.status(404).json({ status: false, message: 'Company not found' });
     }
@@ -104,6 +130,7 @@ export async function updateCompanyMe(req, res) {
 
     applyCompanyUpdates(company, req.body || {});
     const saved = await company.save();
+    invalidateCompanyReadCache(saved._id);
     return res.status(200).json({ status: true, message: 'Company updated', data: saved });
   } catch (error) {
     return handleError(res, error);
@@ -164,6 +191,7 @@ export async function finishCompanySetup(req, res) {
     company.setupStepCompleted = completed;
 
     const saved = await company.save();
+    invalidateCompanyReadCache(saved._id);
     return res.status(200).json({ status: true, message: 'Company setup finished', data: saved });
   } catch (error) {
     return handleError(res, error);
@@ -249,6 +277,7 @@ export async function createCompany(req, res) {
       fiscalYearStart: (fiscalYearStart || 'April').trim(),
       logoUrl: logoUrl || undefined,
     });
+    invalidateCompanyReadCache(company._id);
 
     const userId = user.userId || user.id || user._id;
     const companyRoles = await ensureCompanyRoles(company._id, userId);
@@ -301,8 +330,8 @@ export async function getCompanies(req, res) {
       return res.status(200).json({ status: true, data: [] });
     }
 
-    const companies = await Company.find({ _id: user.companyId });
-    return res.status(200).json({ status: true, data: companies });
+    const company = await findCompanyCached(user.companyId);
+    return res.status(200).json({ status: true, data: company ? [company] : [] });
   } catch (error) {
     return handleError(res, error);
   }
@@ -391,6 +420,7 @@ export async function updateCompany(req, res) {
     }
 
     const saved = await company.save();
+    invalidateCompanyReadCache(saved._id);
     return res.status(200).json({ status: true, message: 'Company updated', data: saved });
   } catch (error) {
     return handleError(res, error);
@@ -415,6 +445,7 @@ export async function deleteCompany(req, res) {
     }
 
     await Company.findByIdAndDelete(id);
+    invalidateCompanyReadCache(id);
 
     // Unlink the requesting user (and optionally all users of this tenant)
     await User.updateMany({ companyId: id }, { $unset: { companyId: 1 } });
@@ -489,6 +520,7 @@ export async function finishCompany(req, res) {
     company.setupStepCompleted = completed;
 
     const saved = await company.save();
+    invalidateCompanyReadCache(saved._id);
 
     // Mirror isSetupCompleted to the User document (true at this point)
     try {

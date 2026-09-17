@@ -10,6 +10,7 @@ import {
   ACCESS_TOKEN_EXPIRE_MINUTES,
   REFRESH_TOKEN_EXPIRE_DAYS,
   generateAccessToken,
+  generateAccessTokenFromContext,
   generateRefreshToken,
 } from '../utils/tokenUtils.js';
 import { clearAuthCookies, setAuthCookies } from '../utils/authCookies.js';
@@ -146,7 +147,7 @@ async function issueSession(req, res, user, { companyId = null, isSetupCompleted
     tokenVersion: user.tokenVersion || 0,
     isSetupCompleted: isSetupCompleted ?? user.isSetupCompleted,
   };
-  const accessToken = await generateAccessToken(tokenSource);
+  const accessToken = generateAccessTokenFromContext(context, tokenSource);
   const refreshToken = generateRefreshToken(tokenSource);
   const decodedRefresh = jwt.decode(refreshToken);
   const expiresAt = new Date(Date.now() + REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60 * 1000);
@@ -304,12 +305,21 @@ export async function refreshToken(req, res) {
   try {
     const decoded = jwt.verify(rawToken, process.env.JWT_REFRESH_SECRET);
     if (decoded.type !== 'refresh') throw new Error('Invalid token type');
-    const stored = await RefreshToken.findMatchingToken(rawToken, decoded.userId);
+    const [stored, context, company] = await Promise.all([
+      RefreshToken.findMatchingToken(rawToken, decoded.userId),
+      resolveAccessContext({
+        userId: decoded.userId,
+        companyId: decoded.companyId || null,
+      }),
+      decoded.companyId
+        ? Company.findById(decoded.companyId).select('isSetupCompleted').lean()
+        : Promise.resolve(null),
+    ]);
     if (!stored || stored.expiresAt <= new Date() || stored.sessionId !== decoded.sessionId) {
       clearAuthCookies(res);
       return res.status(401).json({ status: false, code: 'REFRESH_INVALID', message: 'Session is no longer valid.' });
     }
-    const user = await User.findById(decoded.userId);
+    const user = context?.user;
     if (!user || user.status !== 'active' || !user.isVerified) {
       await RefreshToken.deleteOne({ _id: stored._id });
       clearAuthCookies(res);
@@ -320,10 +330,10 @@ export async function refreshToken(req, res) {
       clearAuthCookies(res);
       return res.status(401).json({ status: false, code: 'SESSION_REVOKED', message: 'Session was revoked.' });
     }
-    const context = await resolveAccessContext({
-      userId: user._id,
-      companyId: decoded.companyId || user.companyId,
-    });
+    if (!context) {
+      clearAuthCookies(res);
+      return res.status(401).json({ status: false, code: 'REFRESH_INVALID', message: 'Session is no longer valid.' });
+    }
     if (context.companyId && context.membership?.status !== 'active') {
       await RefreshToken.deleteOne({ _id: stored._id });
       clearAuthCookies(res);
@@ -344,13 +354,12 @@ export async function refreshToken(req, res) {
       membershipId: context.membership?._id || null,
       membershipVersion: context.membership?.accessVersion || 0,
       tokenVersion: user.tokenVersion || 0,
-      isSetupCompleted: await companySetupStatus(user),
+      isSetupCompleted: company?.isSetupCompleted ?? user.isSetupCompleted ?? false,
     };
-    const accessToken = await generateAccessToken(tokenSource);
+    const accessToken = generateAccessTokenFromContext(context, tokenSource);
     const nextRefreshToken = generateRefreshToken(tokenSource);
     const nextDecoded = jwt.decode(nextRefreshToken);
-    const nextSession = await RefreshToken.create({
-      userId: user._id,
+    Object.assign(stored, {
       companyId: context.companyId,
       membershipId: context.membership?._id || null,
       tokenVersion: user.tokenVersion || 0,
@@ -361,7 +370,7 @@ export async function refreshToken(req, res) {
       device: deviceLabel(req.headers['user-agent']),
       expiresAt: new Date(Date.now() + REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60 * 1000),
     });
-    await RefreshToken.deleteOne({ _id: stored._id });
+    const nextSession = await stored.save();
     setAuthCookies(res, { accessToken, refreshToken: nextRefreshToken });
     return res.json({
       status: true,
@@ -376,10 +385,14 @@ export async function refreshToken(req, res) {
 }
 
 export async function checkAuth(req, res) {
-  const user = await User.findById(req.user.userId).select('fullName email preferences lastSeenAt').lean();
-  const company = req.user.companyId
-    ? await Company.findById(req.user.companyId).select('companyName isSetupCompleted enabledModules').lean()
-    : null;
+  const [user, company] = await Promise.all([
+    User.findById(req.user.userId).select('fullName email preferences lastSeenAt').lean(),
+    req.user.companyId
+      ? Company.findById(req.user.companyId)
+        .select('companyName isSetupCompleted enabledModules')
+        .lean()
+      : Promise.resolve(null),
+  ]);
   return res.json({
     status: true,
     user: {

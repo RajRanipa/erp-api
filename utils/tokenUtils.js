@@ -15,14 +15,8 @@ export const REFRESH_TOKEN_EXPIRE_DAYS = 7;
 //   );
 // };
 
-export const generateAccessToken = async (user) => {
-  const userId = user?._id || user?.id || user?.userId;
-  const context = await resolveAccessContext({
-    userId,
-    companyId: user?.companyId || null,
-  });
-  if (!context) throw new Error('Cannot generate token for an unknown user');
-
+export const generateAccessTokenFromContext = (context, user = {}) => {
+  if (!context?.user) throw new Error('Cannot generate token without an access context');
   const payload = {
     userId: context.user._id,
     companyId: context.companyId || null,
@@ -38,6 +32,16 @@ export const generateAccessToken = async (user) => {
   return jwt.sign(payload, process.env.JWT_ACCESS_SECRET, {
     expiresIn: `${ACCESS_TOKEN_EXPIRE_MINUTES}m`,
   });
+};
+
+export const generateAccessToken = async (user) => {
+  const userId = user?._id || user?.id || user?.userId;
+  const context = await resolveAccessContext({
+    userId,
+    companyId: user?.companyId || null,
+  });
+  if (!context) throw new Error('Cannot generate token for an unknown user');
+  return generateAccessTokenFromContext(context, user);
 };
 
 // Generate refresh token (long-lived)
