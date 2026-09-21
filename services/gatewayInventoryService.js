@@ -145,15 +145,13 @@ export function buildGatewayInventoryReceiptInput({
   const createsUnitTrace = Boolean(item.trackingPolicy?.serialTracked);
 
   return {
-    idempotencyKey: `PROD_GATEWAY_V2:${companyId}:${gatewayId}:${recordId}:${scaleNo}`,
+    idempotencyKey: `PROD_GATEWAY:${companyId}:${gatewayId}:${recordId}:${scaleNo}`,
     itemId: item._id,
     warehouseId,
     quantity,
     catchQuantity: hasKgCatch ? weight : undefined,
     unitCost: Number(
-      process.env.GATEWAY_DEFAULT_UNIT_COST
-      || process.env.GATEWAY_V2_DEFAULT_UNIT_COST
-      || 0,
+      process.env.GATEWAY_DEFAULT_UNIT_COST || 0,
     ),
     lotNo: `${cleanBatchNo}-${qualitySuffix}`.slice(0, 120),
     qualityStatus: accepted ? 'AVAILABLE' : 'REJECTED',
@@ -213,7 +211,6 @@ export async function resolveGatewayWarehouseId(companyId) {
 
 export async function resolveGatewayItem({
   companyId,
-  legacyItemId = null,
   productCode,
   temperatureValue,
   densityValue,
@@ -261,16 +258,7 @@ export async function resolveGatewayItem({
         + 'add a gateway discriminator or keep only one matching active Item',
     };
   }
-  let item = directMatches[0] || null;
-  if (!item && legacyItemId) {
-    item = await ItemMaster.findOne({
-      companyId,
-      legacyItemId,
-      familyId: family._id,
-      status: 'active',
-      'capabilities.inventory': true,
-    }).lean();
-  }
+  const item = directMatches[0] || null;
   if (!item) {
     return {
       item: null,
@@ -313,26 +301,26 @@ export async function postGatewayInventory(input) {
   };
 }
 
-const inventoryV2LinkFields = result => ({
-  inventoryV2Posted: Boolean(result.posted),
-  inventoryV2Status: result.status,
-  inventoryV2LastError: result.message || null,
-  inventoryV2LastAttemptAt: new Date(),
-  inventoryV2ItemId: result.itemId || null,
-  inventoryV2TransactionId: result.transactionId || null,
-  inventoryV2SerialId: result.serialId || null,
-  inventoryV2SerialNo: result.serialNo || null,
+const inventoryLinkFields = result => ({
+  inventoryPosted: Boolean(result.posted),
+  inventoryStatus: result.status,
+  inventoryLastError: result.message || null,
+  inventoryLastAttemptAt: new Date(),
+  itemId: result.itemId || null,
+  inventoryTransactionId: result.transactionId || null,
+  inventorySerialId: result.serialId || null,
+  inventorySerialNo: result.serialNo || null,
 });
 
 export async function postAndLinkGatewayInventory({ document, warehouseId }) {
-  if (document.inventoryV2Posted) {
+  if (document.inventoryPosted) {
     return {
       posted: true,
       status: 'POSTED',
-      itemId: document.inventoryV2ItemId || null,
-      transactionId: document.inventoryV2TransactionId || null,
-      serialId: document.inventoryV2SerialId || null,
-      serialNo: document.inventoryV2SerialNo || null,
+      itemId: document.itemId || null,
+      transactionId: document.inventoryTransactionId || null,
+      serialId: document.inventorySerialId || null,
+      serialNo: document.inventorySerialNo || null,
       duplicate: true,
       message: null,
     };
@@ -348,7 +336,6 @@ export async function postAndLinkGatewayInventory({ document, warehouseId }) {
     try {
       result = await postGatewayInventory({
         companyId: document.companyId,
-        legacyItemId: document.matchedItem || null,
         warehouseId,
         gatewayId: document.gatewayId,
         recordId: document.recordId,
@@ -374,7 +361,7 @@ export async function postAndLinkGatewayInventory({ document, warehouseId }) {
   }
   await ProductionBlanketRoll.updateOne(
     { _id: document._id },
-    { $set: inventoryV2LinkFields(result) },
+    { $set: inventoryLinkFields(result) },
   );
   return result;
 }

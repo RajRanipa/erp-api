@@ -71,4 +71,4 @@ manufacturingRecipeSchema.index(
 );
 
 export default mongoose.models.ManufacturingRecipe
-  || mongoose.model('ManufacturingRecipe', manufacturingRecipeSchema, 'manufacturingrecipev2');
+  || mongoose.model('ManufacturingRecipe', manufacturingRecipeSchema, 'manufacturingrecipes');

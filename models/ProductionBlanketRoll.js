@@ -24,61 +24,34 @@ const ProductionBlanketRollSchema = new Schema(
     // normalized bool
     statusOk: { type: Boolean, required: true, index: true },
 
-    // resolved references
-    productType: { type: Schema.Types.ObjectId, ref: "ProductType" },
-    temperature: { type: Schema.Types.ObjectId, ref: "Temperature" },
-    density: { type: Schema.Types.ObjectId, ref: "Density" },
-    dimension: { type: Schema.Types.ObjectId, ref: "Dimension" },
-    packingItem: { type: Schema.Types.ObjectId, ref: "Item" },
-    matchedItem: { type: Schema.Types.ObjectId, ref: "Item" },
-    itemCategory: { type: Schema.Types.ObjectId, ref: "Category" },
-    itemCategoryKey: {
-      type: String,
-      enum: ["FG", "RAW", "PACKING", "NC"],
-    },
-    resolveErrors: [{ type: String }],
-
-    // inventory linkage
+    // Final Item Master and inventory linkage.
     inventoryPosted: { type: Boolean, default: false, index: true },
     inventoryStatus: {
-      type: String,
-      enum: ["PENDING", "POSTED", "NOT_APPLICABLE", "FAILED"],
-      default: "PENDING",
-      index: true,
-    },
-    inventoryLastError: { type: String, default: null },
-    inventoryLastAttemptAt: { type: Date, default: null },
-    inventoryRef: {
-      ledgerId: { type: Schema.Types.ObjectId, ref: "InventoryLedger" },
-      snapshotId: { type: Schema.Types.ObjectId, ref: "InventorySnapshot" },
-    },
-    inventoryV2Posted: { type: Boolean, default: false, index: true },
-    inventoryV2Status: {
       type: String,
       enum: ["PENDING_MAPPING", "POSTED", "FAILED", "NOT_APPLICABLE"],
       default: "PENDING_MAPPING",
       index: true,
     },
-    inventoryV2LastError: { type: String, default: null },
-    inventoryV2LastAttemptAt: { type: Date, default: null, index: true },
-    inventoryV2ItemId: {
+    inventoryLastError: { type: String, default: null },
+    inventoryLastAttemptAt: { type: Date, default: null, index: true },
+    itemId: {
       type: Schema.Types.ObjectId,
       ref: "ItemMaster",
       default: null,
       index: true,
     },
-    inventoryV2TransactionId: {
+    inventoryTransactionId: {
       type: Schema.Types.ObjectId,
       ref: "InventoryTransaction",
       default: null,
     },
-    inventoryV2SerialId: {
+    inventorySerialId: {
       type: Schema.Types.ObjectId,
       ref: "InventorySerial",
       default: null,
       index: true,
     },
-    inventoryV2SerialNo: { type: String, default: null, index: true },
+    inventorySerialNo: { type: String, default: null, index: true },
 
     ingestBatchId: { type: Schema.Types.ObjectId, ref: "GatewayIngestBatch" },
   },
@@ -91,9 +64,9 @@ ProductionBlanketRollSchema.index(
   { unique: true }
 );
 ProductionBlanketRollSchema.index({
-  inventoryV2Posted: 1,
-  inventoryV2Status: 1,
-  inventoryV2LastAttemptAt: 1,
+  inventoryPosted: 1,
+  inventoryStatus: 1,
+  inventoryLastAttemptAt: 1,
   at: -1,
 });
 

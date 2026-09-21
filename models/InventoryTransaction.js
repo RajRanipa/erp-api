@@ -68,11 +68,11 @@ const inventoryTransactionSchema = new Schema({
 
 inventoryTransactionSchema.index(
   { companyId: 1, transactionNo: 1 },
-  { unique: true, name: 'uniq_company_v2_inventory_transaction_no' },
+  { unique: true, name: 'uniq_company_inventory_transaction_no' },
 );
 inventoryTransactionSchema.index(
   { companyId: 1, idempotencyKey: 1 },
-  { unique: true, name: 'uniq_company_v2_inventory_idempotency' },
+  { unique: true, name: 'uniq_company_inventory_idempotency' },
 );
 inventoryTransactionSchema.index({ companyId: 1, effectiveAt: -1, _id: -1 });
 inventoryTransactionSchema.index({ companyId: 1, 'entries.itemId': 1, effectiveAt: -1 });
@@ -100,4 +100,4 @@ inventoryTransactionSchema.pre('save', function rejectExistingSave() {
 });
 
 export default mongoose.models.InventoryTransaction
-  || mongoose.model('InventoryTransaction', inventoryTransactionSchema, 'inventorytransactionv2');
+  || mongoose.model('InventoryTransaction', inventoryTransactionSchema, 'inventorytransactions');

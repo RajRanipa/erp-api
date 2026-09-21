@@ -61,10 +61,10 @@ const productionOrderSchema = new Schema({
 
 productionOrderSchema.index(
   { companyId: 1, orderNo: 1 },
-  { unique: true, name: 'uniq_company_v2_production_order_no' },
+  { unique: true, name: 'uniq_company_production_order_no' },
 );
 productionOrderSchema.index({ companyId: 1, status: 1, createdAt: -1 });
 productionOrderSchema.index({ companyId: 1, outputItemId: 1, createdAt: -1 });
 
 export default mongoose.models.ProductionOrder
-  || mongoose.model('ProductionOrder', productionOrderSchema, 'productionorderv2');
+  || mongoose.model('ProductionOrder', productionOrderSchema, 'productionorders');

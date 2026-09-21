@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import Campaign from '../models/Campaign.js';
 import ItemFamily from '../models/ItemFamily.js';
 import ItemMaster from '../models/ItemMaster.js';
+import ManufacturingRecipe from '../models/ManufacturingRecipe.js';
 import ProductionBlanketRoll from '../models/ProductionBlanketRoll.js';
 import {
   GATEWAY_PRODUCT_FAMILY,
@@ -21,25 +22,38 @@ if (!mongoUri || !mongoose.isValidObjectId(companyId)) {
 
 await mongoose.connect(mongoUri, { autoIndex: false });
 try {
-  const [warehouseId, campaign, families, items, recentRecords] = await Promise.all([
+  const [warehouseId, campaign, families, items, recipes, recentRecords] = await Promise.all([
     resolveGatewayWarehouseId(companyId),
     Campaign.findOne({ companyId, status: 'RUNNING' }).select('_id name').lean(),
     ItemFamily.find({
       companyId,
-      code: { $in: Object.values(GATEWAY_PRODUCT_FAMILY) },
+      code: { $in: [...Object.values(GATEWAY_PRODUCT_FAMILY), 'PLASTIC_BAG'] },
       status: 'active',
     }).select('_id code').lean(),
     ItemMaster.find({
       companyId,
       'capabilities.inventory': true,
-    }).select('_id familyId sku name status attributes baseUom catchUom trackingPolicy').lean(),
+    }).select(
+      '_id familyId sku name status attributes baseUom catchUom trackingPolicy capabilities',
+    ).lean(),
+    ManufacturingRecipe.find({ companyId, status: 'ACTIVE' })
+      .select('outputItemId components')
+      .lean(),
     ProductionBlanketRoll.find({ companyId })
       .sort({ at: -1, _id: -1 })
       .limit(200)
-      .select('productCode temperatureValue densityValue sizeCode matchedItem')
+      .select('productCode temperatureValue densityValue sizeCode itemId')
       .lean(),
   ]);
   const familyCodeById = new Map(families.map(family => [String(family._id), family.code]));
+  const itemById = new Map(items.map(item => [String(item._id), item]));
+  const plasticBagItems = items.filter(item => (
+    familyCodeById.get(String(item.familyId)) === 'PLASTIC_BAG'
+    && item.status === 'active'
+    && item.baseUom === 'nos'
+    && item.capabilities?.inventory === true
+    && item.capabilities?.consumable === true
+  ));
   const configuredItems = items
     .filter(item => familyCodeById.has(String(item.familyId)))
     .map(item => ({
@@ -66,7 +80,6 @@ try {
   for (const record of uniqueRecords.values()) {
     const resolved = await resolveGatewayItem({
       companyId,
-      legacyItemId: record.matchedItem,
       productCode: record.productCode,
       temperatureValue: record.temperatureValue,
       densityValue: record.densityValue,
@@ -86,6 +99,28 @@ try {
       message: resolved.message,
     });
   }
+  const blanketItemIds = new Set(
+    mappings
+      .filter(mapping => mapping.familyCode === 'BLANKET' && mapping.status === 'RESOLVED')
+      .map(mapping => String(mapping.itemId)),
+  );
+  const recipePackedBlanketIds = new Set(
+    recipes
+      .filter(recipe => blanketItemIds.has(String(recipe.outputItemId)))
+      .filter(recipe => recipe.components.some(component => {
+        const item = itemById.get(String(component.itemId));
+        return component.stage === 'PACKING'
+          && familyCodeById.get(String(item?.familyId)) === 'PLASTIC_BAG'
+          && item?.status === 'active'
+          && item?.baseUom === 'nos'
+          && item?.capabilities?.inventory === true
+          && item?.capabilities?.consumable === true;
+      }))
+      .map(recipe => String(recipe.outputItemId)),
+  );
+  const blanketPackingReady = [...blanketItemIds].every(itemId => (
+    recipePackedBlanketIds.has(itemId) || plasticBagItems.length === 1
+  ));
   console.log(JSON.stringify({
     gatewayCompanyId: companyId,
     warehouseReady: Boolean(warehouseId),
@@ -94,9 +129,19 @@ try {
     runningCampaign: campaign,
     inventoryRuntime: 'CURRENT_ONLY',
     configuredItems,
+    mandatoryPlasticBagPacking: {
+      ready: blanketPackingReady,
+      eligibleFallbackItems: plasticBagItems.map(item => ({
+        itemId: item._id,
+        sku: item.sku,
+        name: item.name,
+      })),
+      blanketItemsWithActivePackingRecipe: [...recipePackedBlanketIds],
+    },
     recentSpecificationMappings: mappings,
     ready: Boolean(warehouseId)
       && Boolean(campaign)
+      && blanketPackingReady
       && mappings.every(mapping => ['RESOLVED', 'NOT_APPLICABLE'].includes(mapping.status)),
   }, null, 2));
 } finally {

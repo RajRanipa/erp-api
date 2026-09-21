@@ -108,13 +108,6 @@ const itemMasterSchema = new Schema({
     index: true,
   },
   statusHistory: { type: [statusHistorySchema], default: [] },
-  legacyItemId: {
-    type: Schema.Types.ObjectId,
-    ref: 'Item',
-    default: null,
-    index: true,
-  },
-  schemaVersion: { type: Number, default: 2, immutable: true },
   createdBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
   updatedBy: { type: Schema.Types.ObjectId, ref: 'User', default: null },
 }, {
@@ -129,14 +122,6 @@ itemMasterSchema.index(
 itemMasterSchema.index(
   { companyId: 1, familyId: 1, attributeFingerprint: 1 },
   { unique: true, name: 'uniq_company_family_attribute_identity' },
-);
-itemMasterSchema.index(
-  { companyId: 1, legacyItemId: 1 },
-  {
-    unique: true,
-    name: 'uniq_company_legacy_item_mapping',
-    partialFilterExpression: { legacyItemId: { $type: 'objectId' } },
-  },
 );
 itemMasterSchema.index({ companyId: 1, status: 1, familyId: 1, name: 1 });
 itemMasterSchema.index({ companyId: 1, itemClassId: 1, status: 1, name: 1 });

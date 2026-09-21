@@ -45,7 +45,7 @@ inventoryBalanceSchema.index(
     qualityStatus: 1,
     processStatus: 1,
   },
-  { unique: true, name: 'uniq_v2_inventory_balance_bucket' },
+  { unique: true, name: 'uniq_inventory_balance_bucket' },
 );
 inventoryBalanceSchema.index({
   companyId: 1,
@@ -55,4 +55,4 @@ inventoryBalanceSchema.index({
 });
 
 export default mongoose.models.InventoryBalance
-  || mongoose.model('InventoryBalance', inventoryBalanceSchema, 'inventorybalancev2');
+  || mongoose.model('InventoryBalance', inventoryBalanceSchema, 'inventorybalances');

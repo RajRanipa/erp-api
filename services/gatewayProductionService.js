@@ -342,13 +342,13 @@ export async function ingestBlanketBatch({ companyId, payload }) {
 
 export async function reconcilePendingGatewayInventory({ limit = 100 } = {}) {
   const documents = await ProductionBlanketRoll.find({
-    inventoryV2Posted: false,
+    inventoryPosted: false,
     $or: [
-      { inventoryV2Status: { $in: ['PENDING_MAPPING', 'FAILED'] } },
-      { inventoryV2Status: { $exists: false } },
+      { inventoryStatus: { $in: ['PENDING_MAPPING', 'FAILED'] } },
+      { inventoryStatus: { $exists: false } },
     ],
   })
-    .sort({ inventoryV2LastAttemptAt: 1, at: -1, _id: -1 })
+    .sort({ inventoryLastAttemptAt: 1, at: -1, _id: -1 })
     .limit(Math.min(Math.max(Number(limit) || 100, 1), 500))
     .lean();
   const summary = { scanned: documents.length, posted: 0, pending: 0, failed: 0 };
@@ -383,12 +383,12 @@ export async function reconcilePendingGatewayInventory({ limit = 100 } = {}) {
       else summary.pending += 1;
     } catch (error) {
       await ProductionBlanketRoll.updateOne(
-        { _id: document._id, inventoryV2Posted: false },
+        { _id: document._id, inventoryPosted: false },
         {
           $set: {
-            inventoryV2Status: 'FAILED',
-            inventoryV2LastError: String(error?.message || error).slice(0, 1000),
-            inventoryV2LastAttemptAt: new Date(),
+            inventoryStatus: 'FAILED',
+            inventoryLastError: String(error?.message || error).slice(0, 1000),
+            inventoryLastAttemptAt: new Date(),
           },
         },
       );

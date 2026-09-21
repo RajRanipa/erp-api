@@ -13,7 +13,7 @@ const inventoryCostBalanceSchema = new Schema({
 
 inventoryCostBalanceSchema.index(
   { companyId: 1, itemId: 1 },
-  { unique: true, name: 'uniq_company_item_v2_cost_balance' },
+  { unique: true, name: 'uniq_company_item_cost_balance' },
 );
 
 export default mongoose.models.InventoryCostBalance

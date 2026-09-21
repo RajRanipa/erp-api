@@ -83,10 +83,10 @@ async function productionRows(start, end, companyId) {
     .select(
       'companyId campaign gatewayId recordId ingestBatchId at weightKg statusOk '
       + 'productCode temperatureValue densityValue sizeCode batchNo scaleNo '
-      + 'resolveErrors inventoryV2ItemId createdAt updatedAt',
+      + 'itemId inventoryStatus inventoryLastError createdAt updatedAt',
     )
     .populate({
-      path: 'inventoryV2ItemId',
+      path: 'itemId',
       select: 'sku name familyId attributes baseUom catchUom',
       populate: { path: 'familyId', select: 'code name' },
     })
@@ -95,15 +95,15 @@ async function productionRows(start, end, companyId) {
 }
 
 function shapeProduction(row) {
-  const item = row.inventoryV2ItemId || null;
+  const item = row.itemId || null;
   return {
     ...row,
-    matchedItem: item || {
+    item: item || {
       _id: null,
       sku: 'UNMAPPED',
       name: `${PRODUCT_NAMES[row.productCode] || `Product ${row.productCode}`} (unmapped)`,
     },
-    productType: item?.familyId || {
+    family: item?.familyId || {
       _id: String(row.productCode || ''),
       name: PRODUCT_NAMES[row.productCode] || `Product ${row.productCode}`,
     },
@@ -114,7 +114,7 @@ function shapeProduction(row) {
       ? { value: Number(row.densityValue), unit: 'kg/m³' }
       : null,
     dimension: GATEWAY_SIZE_MAP[row.sizeCode] || null,
-    packingItem: null,
+    packing: null,
   };
 }
 
@@ -123,7 +123,7 @@ export async function fetchproduction(start, end, companyId) {
   for (const raw of await productionRows(start, end, companyId)) {
     const row = shapeProduction(raw);
     const key = [
-      row.inventoryV2ItemId?._id,
+      row.itemId?._id,
       row.statusOk,
       row.temperatureValue,
       row.densityValue,
@@ -242,8 +242,8 @@ function buildReportHtml(rows, shift, range, batchReport) {
   const detailRows = rows.map((row, index) => `
     <tr>
       <td>${index + 1}</td>
-      <td><strong>${escapeHtml(row.matchedItem?.name || '-')}</strong><br>${escapeHtml(row.matchedItem?.sku || '')}</td>
-      <td>${escapeHtml(row.productType?.name || '-')}</td>
+      <td><strong>${escapeHtml(row.item?.name || '-')}</strong><br>${escapeHtml(row.item?.sku || '')}</td>
+      <td>${escapeHtml(row.family?.name || '-')}</td>
       <td>${escapeHtml(row.temperature ? `${row.temperature.value} ${row.temperature.unit}` : '-')}</td>
       <td>${escapeHtml(row.density ? `${row.density.value} ${row.density.unit}` : '-')}</td>
       <td>${escapeHtml(row.dimension ? `${row.dimension.length} × ${row.dimension.width} × ${row.dimension.thickness} ${row.dimension.unit}` : '-')}</td>

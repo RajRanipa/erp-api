@@ -24,7 +24,6 @@ const inventorySerialSchema = new Schema({
   lotId: { type: Schema.Types.ObjectId, ref: 'InventoryLot', required: true, index: true },
   campaignId: { type: Schema.Types.ObjectId, ref: 'Campaign', default: null, index: true },
   serialNo: { type: String, required: true, trim: true, maxlength: 120 },
-  legacySerialNo: { type: String, trim: true, uppercase: true, maxlength: 120, default: null },
   warehouseId: { type: Schema.Types.ObjectId, ref: 'Warehouse', required: true, index: true },
   bin: { type: String, trim: true, default: null },
   state: {
@@ -58,18 +57,10 @@ const inventorySerialSchema = new Schema({
 
 inventorySerialSchema.index(
   { serialNo: 1 },
-  { unique: true, name: 'uniq_global_v2_inventory_serial' },
-);
-inventorySerialSchema.index(
-  { companyId: 1, legacySerialNo: 1 },
-  {
-    unique: true,
-    name: 'uniq_company_v2_legacy_inventory_serial',
-    partialFilterExpression: { legacySerialNo: { $type: 'string' } },
-  },
+  { unique: true, name: 'uniq_global_inventory_serial' },
 );
 inventorySerialSchema.index({ companyId: 1, itemId: 1, state: 1, createdAt: 1 });
 inventorySerialSchema.index({ companyId: 1, parentSerialId: 1 });
 
 export default mongoose.models.InventorySerial
-  || mongoose.model('InventorySerial', inventorySerialSchema, 'inventoryserialv2');
+  || mongoose.model('InventorySerial', inventorySerialSchema, 'inventoryserials');

@@ -90,6 +90,7 @@ test('gateway builds one traceable Blanket receipt with authoritative PLC weight
   assert.equal(input.catchQuantity, 14.2);
   assert.equal(input.lotNo, 'BATCH-AUG-26-OK');
   assert.equal(input.sourceType, 'PROD_GATEWAY');
+  assert.equal(input.idempotencyKey, 'PROD_GATEWAY:company-1:pi-gateway-1:record-1:1');
   assert.equal(input.receiptMode, 'PRODUCTION');
   assert.deepEqual(input.units, [{
     catchQuantity: 14.2,

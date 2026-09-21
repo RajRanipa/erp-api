@@ -85,7 +85,7 @@ const inventoryLotSchema = new Schema({
 
 inventoryLotSchema.index(
   { companyId: 1, itemId: 1, warehouseId: 1, lotNo: 1 },
-  { unique: true, name: 'uniq_v2_inventory_lot_location' },
+  { unique: true, name: 'uniq_inventory_lot_location' },
 );
 inventoryLotSchema.index({
   companyId: 1,
@@ -98,4 +98,4 @@ inventoryLotSchema.index({
 inventoryLotSchema.index({ companyId: 1, packingKey: 1, status: 1 });
 
 export default mongoose.models.InventoryLot
-  || mongoose.model('InventoryLot', inventoryLotSchema, 'inventorylotv2');
+  || mongoose.model('InventoryLot', inventoryLotSchema, 'inventorylots');
