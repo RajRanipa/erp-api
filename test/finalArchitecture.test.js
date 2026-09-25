@@ -83,3 +83,15 @@ test('item and serial schemas do not contain migration-only identity fields', ()
   assert.equal(ItemMaster.schema.path('schemaVersion'), undefined);
   assert.equal(InventorySerial.schema.path('legacySerialNo'), undefined);
 });
+
+test('Campaign deletion protects manufacturing and inventory trace references', () => {
+  const controller = fs.readFileSync(
+    path.resolve(dirname, '../controllers/campaignController.js'),
+    'utf8',
+  );
+  assert.match(controller, /RUNNING_CAMPAIGN_DELETE_FORBIDDEN/);
+  assert.match(controller, /CAMPAIGN_IN_USE/);
+  assert.match(controller, /ProductionBlanketRoll\.countDocuments/);
+  assert.match(controller, /InventorySerial\.countDocuments/);
+  assert.doesNotMatch(controller, /Campaign\.findOneAndDelete/);
+});

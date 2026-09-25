@@ -19,7 +19,6 @@ import {
   listPendingGatewayInventory,
   replayGatewayInventory,
 } from '../services/gatewayProductionService.js';
-import Campaign from '../models/Campaign.js';
 
 const fail = (message, statusCode = 400, code = 'INVENTORY_REQUEST_INVALID') =>
   new AppError(message, { statusCode, code });
@@ -95,9 +94,8 @@ export async function getInventoryReceiptContext(req, res) {
 
 export async function getGatewayInventoryRecovery(req, res) {
   try {
-    const campaign = await Campaign.findOne({ companyId: companyIdFromRequest(req), status: 'RUNNING' }).lean();
     return sendSuccess(res, {
-      data: await listPendingGatewayInventory(companyIdFromRequest(req),campaign, req.query),
+      data: await listPendingGatewayInventory(companyIdFromRequest(req), req.query),
     });
   } catch (error) {
     return handleError(res, error, req);

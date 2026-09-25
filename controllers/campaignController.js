@@ -1,5 +1,9 @@
 import Campaign from '../models/Campaign.js';
-import { handleError } from '../utils/errorHandler.js';
+import GatewayIngestBatch from '../models/GatewayIngestBatch.js';
+import InventoryLot from '../models/InventoryLot.js';
+import InventorySerial from '../models/InventorySerial.js';
+import ProductionBlanketRoll from '../models/ProductionBlanketRoll.js';
+import { AppError, handleError } from '../utils/errorHandler.js';
 
 const companyIdFromRequest = req =>
   req.user?.companyId || req.user?.company?._id || req.user?.company;
@@ -197,11 +201,32 @@ export const updateCampaign = async (req, res) => {
 export const deleteCampaign = async (req, res) => {
   try {
     const { id } = req.params;
-    const deleted = await Campaign.findOneAndDelete({
+    const companyId = companyIdFromRequest(req);
+    const campaign = await Campaign.findOne({
       _id: id,
-      companyId: companyIdFromRequest(req),
-    });
-    if (!deleted) return res.status(404).json({ success: false, message: 'Campaign not found' });
+      companyId,
+    }).select('_id name status').lean();
+    if (!campaign) return res.status(404).json({ success: false, message: 'Campaign not found' });
+    if (campaign.status === 'RUNNING') {
+      throw new AppError(
+        'A running Campaign cannot be deleted. Complete it before starting another Campaign.',
+        { statusCode: 409, code: 'RUNNING_CAMPAIGN_DELETE_FORBIDDEN' },
+      );
+    }
+    const [productionRecords, ingestBatches, inventoryLots, inventorySerials] = await Promise.all([
+      ProductionBlanketRoll.countDocuments({ companyId, campaign: campaign._id }),
+      GatewayIngestBatch.countDocuments({ companyId, campaign: campaign._id }),
+      InventoryLot.countDocuments({ companyId, campaignId: campaign._id }),
+      InventorySerial.countDocuments({ companyId, campaignId: campaign._id }),
+    ]);
+    const references = { productionRecords, ingestBatches, inventoryLots, inventorySerials };
+    if (Object.values(references).some(Boolean)) {
+      throw new AppError(
+        'This Campaign has manufacturing or inventory history and cannot be deleted. Keep it as Completed for traceability.',
+        { statusCode: 409, code: 'CAMPAIGN_IN_USE', details: references },
+      );
+    }
+    await Campaign.deleteOne({ _id: campaign._id, companyId });
     return res.status(200).json({ success: true, message: 'Campaign deleted' });
   } catch (err) {
     return handleError(res, err, req);
