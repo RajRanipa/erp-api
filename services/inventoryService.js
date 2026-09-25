@@ -1557,6 +1557,10 @@ export async function listSerials(companyId, query = {}) {
   if (query.itemId) filter.itemId = query.itemId;
   if (query.warehouseId) filter.warehouseId = query.warehouseId;
   if (query.serialNo) filter.serialNo = String(query.serialNo).trim();
+  if (query.sku) {
+    const item = await ItemMaster.findOne({ companyId, sku: normalizeCode(query.sku) }).select('_id').lean();
+    filter.itemId = item ? item._id : null;
+  }
   if (query.familyCode) {
     const family = await ItemFamily.findOne({
       companyId,
