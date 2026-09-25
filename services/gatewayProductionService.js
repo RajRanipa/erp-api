@@ -6,6 +6,7 @@ import {
   resolveGatewayWarehouseId,
 } from './gatewayInventoryService.js';
 import { AppError } from '../utils/errorHandler.js';
+import mongoose from 'mongoose';
 
 const SUPPORTED_PRODUCT_CODES = new Set([1, 2, 3, 4, 5]);
 const SUPPORTED_SCALES = new Set([1, 2, 3]);
@@ -340,16 +341,195 @@ export async function ingestBlanketBatch({ companyId, payload }) {
   };
 }
 
-export async function reconcilePendingGatewayInventory({ limit = 100 } = {}) {
+const pendingInventoryFilter = companyId => ({
+  ...(companyId ? { companyId } : {}),
+  inventoryPosted: false,
+  $or: [
+    { inventoryStatus: { $in: ['PENDING_MAPPING', 'FAILED'] } },
+    { inventoryStatus: { $exists: false } },
+  ],
+});
+
+const boundedLimit = (value, fallback = 100) =>
+  Math.min(Math.max(Number(value) || fallback, 1), 500);
+
+const roundWeight = value => Number(Number(value || 0).toFixed(3));
+
+export async function listPendingGatewayInventory(companyId, { limit = 100 } = {}) {
+  const filter = pendingInventoryFilter(companyId);
+  const [documents, total] = await Promise.all([
+    ProductionBlanketRoll.find(filter)
+      .populate({ path: 'campaign', match: { companyId }, select: 'name status' })
+      .populate('itemId', 'sku name attributes baseUom catchUom')
+      .sort({ at: -1, _id: -1 })
+      .limit(boundedLimit(limit))
+      .lean(),
+    ProductionBlanketRoll.countDocuments(filter),
+  ]);
+  return {
+    total,
+    records: documents.map(document => ({
+      ...document,
+      weightKg: roundWeight(document.weightKg),
+      requiresCampaign: !document.campaign?._id,
+    })),
+  };
+}
+
+async function replayCampaign(document, companyId, validCampaignIds, fallbackCampaign, actorId) {
+  const originalCampaignId = document.campaign?._id || document.campaign;
+  if (validCampaignIds.has(String(originalCampaignId))) return document;
+  if (!fallbackCampaign) {
+    const message = 'Original Campaign is unavailable; select a running Campaign before retrying';
+    await ProductionBlanketRoll.updateOne(
+      { _id: document._id, companyId, inventoryPosted: false },
+      {
+        $set: {
+          inventoryStatus: 'FAILED',
+          inventoryLastError: message,
+          inventoryLastAttemptAt: new Date(),
+          'inventoryRecovery.lastReplayAt': new Date(),
+          'inventoryRecovery.lastReplayBy': actorId || null,
+        },
+      },
+    );
+    return { ...document, recoveryError: message };
+  }
+  const now = new Date();
+  await ProductionBlanketRoll.updateOne(
+    { _id: document._id, companyId, inventoryPosted: false },
+    {
+      $set: {
+        campaign: fallbackCampaign._id,
+        'inventoryRecovery.campaignReassignedAt': now,
+        'inventoryRecovery.campaignReassignedBy': actorId || null,
+        'inventoryRecovery.campaignReassignedFrom': mongoose.isValidObjectId(originalCampaignId)
+          ? originalCampaignId
+          : null,
+        'inventoryRecovery.campaignReassignedTo': fallbackCampaign._id,
+      },
+    },
+  );
+  return { ...document, campaign: fallbackCampaign._id };
+}
+
+export async function replayGatewayInventory({
+  companyId,
+  actorId = null,
+  productionIds = [],
+  fallbackCampaignId = null,
+} = {}) {
+  const uniqueIds = [...new Set((productionIds || []).map(String))];
+  if (!uniqueIds.length || uniqueIds.length > 100 || uniqueIds.some(id => !mongoose.isValidObjectId(id))) {
+    throw new AppError('Select between 1 and 100 valid gateway production records', {
+      statusCode: 400,
+      code: 'INVALID_GATEWAY_RECOVERY_SELECTION',
+    });
+  }
+  let fallbackCampaign = null;
+  if (fallbackCampaignId) {
+    if (!mongoose.isValidObjectId(fallbackCampaignId)) {
+      throw new AppError('Recovery Campaign is invalid', {
+        statusCode: 400,
+        code: 'INVALID_RECOVERY_CAMPAIGN',
+      });
+    }
+    fallbackCampaign = await Campaign.findOne({
+      _id: fallbackCampaignId,
+      companyId,
+      status: 'RUNNING',
+    }).select('_id name').lean();
+    if (!fallbackCampaign) {
+      throw new AppError('Select a running Campaign for gateway recovery', {
+        statusCode: 409,
+        code: 'RUNNING_CAMPAIGN_REQUIRED',
+      });
+    }
+  }
   const documents = await ProductionBlanketRoll.find({
+    _id: { $in: uniqueIds },
+    companyId,
     inventoryPosted: false,
-    $or: [
-      { inventoryStatus: { $in: ['PENDING_MAPPING', 'FAILED'] } },
-      { inventoryStatus: { $exists: false } },
-    ],
+  }).lean();
+  const byId = new Map(documents.map(document => [String(document._id), document]));
+  const campaignIds = documents
+    .map(document => document.campaign)
+    .filter(campaignId => mongoose.isValidObjectId(campaignId));
+  const validCampaignIds = new Set((await Campaign.find({
+    _id: { $in: campaignIds },
+    companyId,
+  }).distinct('_id')).map(String));
+  const warehouseId = await resolveGatewayWarehouseId(companyId);
+  const results = [];
+  for (const productionId of uniqueIds) {
+    const stored = byId.get(productionId);
+    if (!stored) {
+      results.push({
+        productionId,
+        posted: false,
+        status: 'NOT_FOUND',
+        message: 'Gateway production record was not found or is already posted',
+      });
+      continue;
+    }
+    const document = await replayCampaign(
+      stored,
+      companyId,
+      validCampaignIds,
+      fallbackCampaign,
+      actorId,
+    );
+    if (document.recoveryError) {
+      results.push({
+        productionId,
+        recordId: document.recordId,
+        posted: false,
+        status: 'FAILED',
+        message: document.recoveryError,
+      });
+      continue;
+    }
+    await ProductionBlanketRoll.updateOne(
+      { _id: document._id, companyId, inventoryPosted: false },
+      {
+        $set: {
+          'inventoryRecovery.lastReplayAt': new Date(),
+          'inventoryRecovery.lastReplayBy': actorId || null,
+        },
+      },
+    );
+    const result = await postAndLinkGatewayInventory({ document, warehouseId });
+    results.push({
+      productionId,
+      recordId: document.recordId,
+      posted: Boolean(result.posted),
+      status: result.status,
+      duplicate: Boolean(result.duplicate),
+      transactionId: result.transactionId || null,
+      serialNo: result.serialNo || null,
+      message: result.message || null,
+    });
+  }
+  const summary = results.reduce((totals, result) => ({
+    requested: totals.requested + 1,
+    posted: totals.posted + (result.posted ? 1 : 0),
+    failed: totals.failed + (!result.posted ? 1 : 0),
+  }), { requested: 0, posted: 0, failed: 0 });
+  console.info('[gateway:inventory-recovery]', JSON.stringify({
+    companyId: String(companyId),
+    actorId: actorId ? String(actorId) : null,
+    fallbackCampaignId: fallbackCampaign?._id ? String(fallbackCampaign._id) : null,
+    ...summary,
+  }));
+  return { summary, results };
+}
+
+export async function reconcilePendingGatewayInventory({ limit = 100, companyId = null } = {}) {
+  const documents = await ProductionBlanketRoll.find({
+    ...pendingInventoryFilter(companyId),
   })
     .sort({ inventoryLastAttemptAt: 1, at: -1, _id: -1 })
-    .limit(Math.min(Math.max(Number(limit) || 100, 1), 500))
+    .limit(boundedLimit(limit))
     .lean();
   const summary = { scanned: documents.length, posted: 0, pending: 0, failed: 0 };
   const warehouseByCompany = new Map();

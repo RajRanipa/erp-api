@@ -11,6 +11,8 @@ import {
   getInventoryReceiptContext,
   getInventorySerials,
   getInventoryTransactions,
+  getGatewayInventoryRecovery,
+  replayGatewayInventoryRecords,
   rejectInventoryLot,
 } from '../controllers/inventoryController.js';
 import auth, { roleAuth } from '../middleware/authMiddleware.js';
@@ -20,6 +22,12 @@ const router = express.Router();
 router.use(auth);
 router.get('/summary', roleAuth('inventory:read'), getInventorySummary);
 router.get('/receipt-context', roleAuth('inventory:receipt'), getInventoryReceiptContext);
+router.get('/gateway-recovery', roleAuth('inventory:receipt'), getGatewayInventoryRecovery);
+router.post(
+  '/gateway-recovery/replay',
+  roleAuth('inventory:receipt'),
+  replayGatewayInventoryRecords,
+);
 router.get('/stock', roleAuth('inventory:read'), getInventoryStock);
 router.get('/transactions', roleAuth('inventory:read'), getInventoryTransactions);
 router.get('/serials', roleAuth('inventory:read'), getInventorySerials);

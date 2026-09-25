@@ -15,6 +15,10 @@ import {
 } from '../services/inventoryService.js';
 import { sendCreated, sendSuccess } from '../utils/apiResponse.js';
 import { AppError, handleError } from '../utils/errorHandler.js';
+import {
+  listPendingGatewayInventory,
+  replayGatewayInventory,
+} from '../services/gatewayProductionService.js';
 
 const fail = (message, statusCode = 400, code = 'INVENTORY_REQUEST_INVALID') =>
   new AppError(message, { statusCode, code });
@@ -82,6 +86,35 @@ export async function getInventoryReceiptContext(req, res) {
   try {
     return sendSuccess(res, {
       data: await inventoryReceiptContext(companyIdFromRequest(req)),
+    });
+  } catch (error) {
+    return handleError(res, error, req);
+  }
+}
+
+export async function getGatewayInventoryRecovery(req, res) {
+  try {
+    return sendSuccess(res, {
+      data: await listPendingGatewayInventory(companyIdFromRequest(req), req.query),
+    });
+  } catch (error) {
+    return handleError(res, error, req);
+  }
+}
+
+export async function replayGatewayInventoryRecords(req, res) {
+  try {
+    const result = await replayGatewayInventory({
+      companyId: companyIdFromRequest(req),
+      actorId: actorIdFromRequest(req),
+      productionIds: req.body?.productionIds,
+      fallbackCampaignId: req.body?.fallbackCampaignId || null,
+    });
+    return sendSuccess(res, {
+      data: result,
+      message: result.summary.failed
+        ? `${result.summary.posted} gateway record(s) posted; ${result.summary.failed} still need attention`
+        : `${result.summary.posted} gateway record(s) posted to inventory`,
     });
   } catch (error) {
     return handleError(res, error, req);

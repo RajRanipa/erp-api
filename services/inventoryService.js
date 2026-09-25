@@ -1519,7 +1519,7 @@ export async function listStock(companyId, query = {}) {
   const rows = await InventoryBalance.find(filter)
     .populate({
       path: 'itemId',
-      select: 'sku name baseUom catchUom familyId itemClassId',
+      select: 'sku name attributes baseUom catchUom familyId itemClassId',
       populate: { path: 'familyId', select: 'code name' },
     })
     .populate('warehouseId', 'code name')
@@ -1531,7 +1531,15 @@ export async function listStock(companyId, query = {}) {
     .sort({ updatedAt: -1, _id: -1 })
     .limit(limit)
     .lean();
-  return rows;
+  return rows.map(row => ({
+    ...row,
+    onHand: roundQuantity(row.onHand),
+    available: roundQuantity(row.available),
+    reserved: roundQuantity(row.reserved || 0),
+    catchOnHand: row.catchOnHand === null || row.catchOnHand === undefined
+      ? null
+      : Number(Number(row.catchOnHand).toFixed(3)),
+  }));
 }
 
 export async function listTransactions(companyId, query = {}) {

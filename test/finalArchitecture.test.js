@@ -47,6 +47,10 @@ test('gateway records expose only final inventory linkage fields', () => {
     'inventoryTransactionId',
     'inventorySerialId',
     'inventorySerialNo',
+    'inventoryRecovery.lastReplayAt',
+    'inventoryRecovery.lastReplayBy',
+    'inventoryRecovery.campaignReassignedFrom',
+    'inventoryRecovery.campaignReassignedTo',
   ]) {
     assert.ok(ProductionBlanketRoll.schema.path(field), `${field} must exist`);
   }

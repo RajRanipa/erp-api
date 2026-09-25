@@ -53,6 +53,18 @@ const ProductionBlanketRollSchema = new Schema(
     },
     inventorySerialNo: { type: String, default: null, index: true },
 
+    // Manual recovery never creates stock directly. It records who requested a
+    // replay of the normal gateway posting path and, when an old Campaign was
+    // deleted, which running Campaign was explicitly selected as its repair.
+    inventoryRecovery: {
+      lastReplayAt: { type: Date, default: null },
+      lastReplayBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
+      campaignReassignedAt: { type: Date, default: null },
+      campaignReassignedBy: { type: Schema.Types.ObjectId, ref: "User", default: null },
+      campaignReassignedFrom: { type: Schema.Types.ObjectId, ref: "Campaign", default: null },
+      campaignReassignedTo: { type: Schema.Types.ObjectId, ref: "Campaign", default: null },
+    },
+
     ingestBatchId: { type: Schema.Types.ObjectId, ref: "GatewayIngestBatch" },
   },
   { timestamps: true }
