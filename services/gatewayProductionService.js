@@ -355,8 +355,9 @@ const boundedLimit = (value, fallback = 100) =>
 
 const roundWeight = value => Number(Number(value || 0).toFixed(3));
 
-export async function listPendingGatewayInventory(companyId, { limit = 100 } = {}) {
-  const filter = pendingInventoryFilter(companyId);
+export async function listPendingGatewayInventory(company_Id, campaign, { limit = 100 } = {}) {
+  const companyId = pendingInventoryFilter(company_Id);
+  const filter = { companyId: companyId, campaign: campaign};
   const [documents, total] = await Promise.all([
     ProductionBlanketRoll.find(filter)
       .populate({ path: 'campaign', match: { companyId }, select: 'name status' })
