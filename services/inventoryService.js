@@ -1549,6 +1549,8 @@ export async function listTransactions(companyId, query = {}) {
 
 export async function listSerials(companyId, query = {}) {
   const limit = Math.min(Math.max(Number(query.limit) || 500, 1), 1000);
+  console.log("limit", limit)
+  console.log("query", query)
   const filter = { companyId };
   if (query.state) filter.state = normalizeCode(query.state);
   if (query.qualityStatus) filter.qualityStatus = normalizeCode(query.qualityStatus);
@@ -1564,6 +1566,15 @@ export async function listSerials(companyId, query = {}) {
     filter.itemId = family
       ? { $in: await ItemMaster.find({ companyId, familyId: family._id }).distinct('_id') }
       : { $in: [] };
+  }
+  if (query.date) {
+    const startOfDay = new Date(query.date);
+    startOfDay.setUTCHours(0, 0, 0, 0);
+
+    const endOfDay = new Date(query.date);
+    endOfDay.setUTCHours(23, 59, 59, 999);
+
+    filter.manufacturedAt = { $gte: startOfDay, $lte: endOfDay };
   }
   if (query.packingKey) {
     const packingKey = normalizeCode(query.packingKey);

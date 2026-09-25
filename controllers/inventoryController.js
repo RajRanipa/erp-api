@@ -59,6 +59,7 @@ export async function getInventoryTransactions(req, res) {
 
 export async function getInventorySerials(req, res) {
   try {
+    // console.log("req - ", req.query, companyIdFromRequest(req));
     return sendSuccess(res, {
       data: await listSerials(companyIdFromRequest(req), req.query),
     });
