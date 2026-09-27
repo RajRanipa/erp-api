@@ -65,6 +65,31 @@ function getTodayNightShiftRange(date = null) {
   };
 }
 
+export function getSelectedShiftRange(date, shift) {
+  const selectedDay = reportDay(date);
+  const normalizedShift = String(shift || '').trim().toUpperCase();
+  if (!['DAY', 'NIGHT'].includes(normalizedShift)) {
+    throw new Error('shift must be DAY or NIGHT');
+  }
+
+  const start = normalizedShift === 'DAY'
+    ? selectedDay.set({ hour: 7, minute: 30 })
+    : selectedDay.set({ hour: 19, minute: 30 });
+  const end = normalizedShift === 'DAY'
+    ? selectedDay.set({ hour: 19, minute: 30 })
+    : selectedDay.plus({ days: 1 }).set({ hour: 7, minute: 30 });
+
+  return {
+    shift: normalizedShift,
+    date: selectedDay.toISODate(),
+    timezone: REPORT_TIMEZONE,
+    start: start.toUTC().toJSDate(),
+    end: end.toUTC().toJSDate(),
+    startIST: start.toISO(),
+    endIST: end.toISO(),
+  };
+}
+
 function validateRange(start, end) {
   if (!(start instanceof Date) || Number.isNaN(start.getTime())) {
     throw new Error('Valid start date is required');
@@ -74,16 +99,20 @@ function validateRange(start, end) {
   }
 }
 
-async function productionRows(start, end, companyId) {
+async function productionRows(start, end, companyId, filters = {}) {
   validateRange(start, end);
-  return ProductionBlanketRoll.find({
+  const query = {
     companyId: reportCompanyId(companyId),
     at: { $gte: start, $lt: end },
-  })
+  };
+  if (filters.campaignId) query.campaign = filters.campaignId;
+  if (typeof filters.statusOk === 'boolean') query.statusOk = filters.statusOk;
+
+  return ProductionBlanketRoll.find(query)
     .select(
       'companyId campaign gatewayId recordId ingestBatchId at weightKg statusOk '
       + 'productCode temperatureValue densityValue sizeCode batchNo scaleNo '
-      + 'itemId inventoryStatus inventoryLastError createdAt updatedAt',
+      + 'itemId inventoryStatus inventoryLastError inventorySerialNo createdAt updatedAt',
     )
     .populate({
       path: 'itemId',
@@ -135,6 +164,140 @@ export async function fetchproduction(start, end, companyId) {
     grouped.set(key, current);
   }
   return [...grouped.values()].sort((left, right) => right.totalWeight - left.totalWeight);
+}
+
+function groupRows(rows) {
+  const grouped = new Map();
+  for (const row of rows) {
+    const key = [
+      row.item?._id || 'unmapped',
+      row.productCode,
+      row.statusOk,
+      row.temperatureValue,
+      row.densityValue,
+      row.sizeCode,
+    ].join(':');
+    const current = grouped.get(key) || { ...row, totalRolls: 0, totalWeight: 0 };
+    current.totalRolls += 1;
+    current.totalWeight += Number(row.weightKg || 0);
+    grouped.set(key, current);
+  }
+  return [...grouped.values()]
+    .map(row => ({ ...row, totalWeight: Number(row.totalWeight.toFixed(3)) }))
+    .sort((left, right) => right.totalWeight - left.totalWeight);
+}
+
+function productionSummary(rows) {
+  const summary = rows.reduce((value, row) => {
+    const weight = Number(row.weightKg || 0);
+    value.totalUnits += 1;
+    value.totalWeightKg += weight;
+    if (row.statusOk) {
+      value.acceptedUnits += 1;
+      value.acceptedWeightKg += weight;
+    } else {
+      value.rejectedUnits += 1;
+      value.rejectedWeightKg += weight;
+    }
+    if (row.item?._id) value.mappedUnits += 1;
+    else value.unmappedUnits += 1;
+    if (row.inventorySerialNo) value.serializedUnits += 1;
+    return value;
+  }, {
+    totalUnits: 0,
+    totalWeightKg: 0,
+    acceptedUnits: 0,
+    acceptedWeightKg: 0,
+    rejectedUnits: 0,
+    rejectedWeightKg: 0,
+    mappedUnits: 0,
+    unmappedUnits: 0,
+    serializedUnits: 0,
+  });
+
+  for (const key of ['totalWeightKg', 'acceptedWeightKg', 'rejectedWeightKg']) {
+    summary[key] = Number(summary[key].toFixed(3));
+  }
+  summary.averageWeightKg = summary.totalUnits
+    ? Number((summary.totalWeightKg / summary.totalUnits).toFixed(3))
+    : 0;
+  summary.acceptanceRate = summary.totalUnits
+    ? Number(((summary.acceptedUnits / summary.totalUnits) * 100).toFixed(2))
+    : 0;
+  return summary;
+}
+
+export async function getCampaignProductionReport({
+  campaignId,
+  companyId,
+  date,
+  shift = 'DAY',
+  quality = 'ALL',
+  familyId = '',
+  page = 1,
+  limit = 50,
+}) {
+  const range = getSelectedShiftRange(date, shift);
+  const normalizedQuality = String(quality || 'ALL').trim().toUpperCase();
+  if (!['ALL', 'OK', 'REJECTED'].includes(normalizedQuality)) {
+    throw new Error('quality must be ALL, OK or REJECTED');
+  }
+
+  const allRows = (await productionRows(range.start, range.end, companyId, {
+    campaignId,
+  })).map(shapeProduction);
+
+  const availableFamilies = [...new Map(
+    allRows
+      .filter(row => row.family?._id)
+      .map(row => [String(row.family._id), {
+        _id: row.family._id,
+        code: row.family.code || '',
+        name: row.family.name || 'Unnamed family',
+      }]),
+  ).values()].sort((left, right) => left.name.localeCompare(right.name));
+
+  const filteredRows = allRows.filter(row => {
+    if (normalizedQuality === 'OK' && !row.statusOk) return false;
+    if (normalizedQuality === 'REJECTED' && row.statusOk) return false;
+    if (familyId && String(row.family?._id || '') !== String(familyId)) return false;
+    return true;
+  });
+
+  const safePage = Math.max(1, Number.parseInt(page, 10) || 1);
+  const safeLimit = Math.min(200, Math.max(10, Number.parseInt(limit, 10) || 50));
+  const total = filteredRows.length;
+  const pages = Math.max(1, Math.ceil(total / safeLimit));
+  const currentPage = Math.min(safePage, pages);
+  const startIndex = (currentPage - 1) * safeLimit;
+  const records = filteredRows.slice(startIndex, startIndex + safeLimit).map(row => ({
+    ...row,
+    serialNo: row.inventorySerialNo || null,
+  }));
+
+  return {
+    range: {
+      shift: range.shift,
+      date: range.date,
+      timezone: range.timezone,
+      startIST: range.startIST,
+      endIST: range.endIST,
+    },
+    appliedFilters: {
+      quality: normalizedQuality,
+      familyId: familyId || null,
+    },
+    filterOptions: { families: availableFamilies },
+    summary: productionSummary(filteredRows),
+    grouped: groupRows(filteredRows),
+    records,
+    pagination: {
+      page: currentPage,
+      limit: safeLimit,
+      total,
+      pages,
+    },
+  };
 }
 
 export async function fetchproductionALL(start, end, companyId) {

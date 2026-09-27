@@ -81,5 +81,12 @@ ProductionBlanketRollSchema.index({
   inventoryLastAttemptAt: 1,
   at: -1,
 });
+ProductionBlanketRollSchema.index({
+  companyId: 1,
+  campaign: 1,
+  at: -1,
+  statusOk: 1,
+  itemId: 1,
+});
 
 export default mongoose.model("ProductionBlanketRoll", ProductionBlanketRollSchema);

@@ -1,8 +1,11 @@
+import mongoose from 'mongoose';
+import { DateTime } from 'luxon';
 import Campaign from '../models/Campaign.js';
 import GatewayIngestBatch from '../models/GatewayIngestBatch.js';
 import InventoryLot from '../models/InventoryLot.js';
 import InventorySerial from '../models/InventorySerial.js';
 import ProductionBlanketRoll from '../models/ProductionBlanketRoll.js';
+import { getCampaignProductionReport } from '../services/productionReportService.js';
 import { AppError, handleError } from '../utils/errorHandler.js';
 
 const companyIdFromRequest = req =>
@@ -153,6 +156,120 @@ export const listCampaigns = async (req, res) => {
       .sort({ startDate: -1, createdAt: -1 }).lean();
     // console.log(rows);
     return res.status(200).json(rows);
+  } catch (err) {
+    return handleError(res, err, req);
+  }
+};
+
+export const campaignOverview = async (req, res) => {
+  try {
+    const companyId = companyIdFromRequest(req);
+    if (!mongoose.isValidObjectId(companyId)) {
+      throw new AppError('A valid company is required', {
+        statusCode: 400,
+        code: 'INVALID_COMPANY',
+      });
+    }
+
+    const [campaigns, productionStats] = await Promise.all([
+      Campaign.find({ companyId })
+        .sort({ status: 1, startDate: -1, createdAt: -1 })
+        .lean(),
+      ProductionBlanketRoll.aggregate([
+        { $match: { companyId: new mongoose.Types.ObjectId(String(companyId)) } },
+        {
+          $group: {
+            _id: '$campaign',
+            totalUnits: { $sum: 1 },
+            totalWeightKg: { $sum: '$weightKg' },
+            acceptedUnits: { $sum: { $cond: ['$statusOk', 1, 0] } },
+            acceptedWeightKg: { $sum: { $cond: ['$statusOk', '$weightKg', 0] } },
+            rejectedUnits: { $sum: { $cond: ['$statusOk', 0, 1] } },
+            rejectedWeightKg: { $sum: { $cond: ['$statusOk', 0, '$weightKg'] } },
+            lastProductionAt: { $max: '$at' },
+          },
+        },
+      ]),
+    ]);
+
+    const statsByCampaign = new Map(productionStats.map(row => [String(row._id), row]));
+    const rows = campaigns.map(campaign => {
+      const stats = statsByCampaign.get(String(campaign._id)) || {};
+      return {
+        ...campaign,
+        productionSummary: {
+          totalUnits: Number(stats.totalUnits || 0),
+          totalWeightKg: Number(Number(stats.totalWeightKg || 0).toFixed(3)),
+          acceptedUnits: Number(stats.acceptedUnits || 0),
+          acceptedWeightKg: Number(Number(stats.acceptedWeightKg || 0).toFixed(3)),
+          rejectedUnits: Number(stats.rejectedUnits || 0),
+          rejectedWeightKg: Number(Number(stats.rejectedWeightKg || 0).toFixed(3)),
+          lastProductionAt: stats.lastProductionAt || null,
+        },
+      };
+    });
+
+    return res.status(200).json(rows);
+  } catch (err) {
+    return handleError(res, err, req);
+  }
+};
+
+export const campaignProductionReport = async (req, res) => {
+  try {
+    const companyId = companyIdFromRequest(req);
+    const { id } = req.params;
+    const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+    const shift = String(req.query.shift || 'DAY').toUpperCase();
+    const quality = String(req.query.quality || 'ALL').toUpperCase();
+    if (!mongoose.isValidObjectId(id)) {
+      throw new AppError('Invalid Campaign identifier', {
+        statusCode: 400,
+        code: 'INVALID_CAMPAIGN_ID',
+      });
+    }
+    const reportDate = String(req.query.date || '');
+    if (!datePattern.test(reportDate) || !DateTime.fromISO(reportDate).isValid) {
+      throw new AppError('date must use YYYY-MM-DD format', {
+        statusCode: 400,
+        code: 'INVALID_REPORT_DATE',
+      });
+    }
+    if (!['DAY', 'NIGHT'].includes(shift)) {
+      throw new AppError('shift must be DAY or NIGHT', {
+        statusCode: 400,
+        code: 'INVALID_REPORT_SHIFT',
+      });
+    }
+    if (!['ALL', 'OK', 'REJECTED'].includes(quality)) {
+      throw new AppError('quality must be ALL, OK or REJECTED', {
+        statusCode: 400,
+        code: 'INVALID_REPORT_QUALITY',
+      });
+    }
+    const campaign = await Campaign.findOne({ _id: id, companyId }).lean();
+    if (!campaign) {
+      throw new AppError('Campaign not found', {
+        statusCode: 404,
+        code: 'CAMPAIGN_NOT_FOUND',
+      });
+    }
+
+    const report = await getCampaignProductionReport({
+      campaignId: campaign._id,
+      companyId,
+      date: req.query.date,
+      shift,
+      quality,
+      familyId: req.query.familyId,
+      page: req.query.page,
+      limit: req.query.limit,
+    });
+
+    return res.status(200).json({
+      data: { campaign, ...report },
+      pagination: report.pagination,
+    });
   } catch (err) {
     return handleError(res, err, req);
   }

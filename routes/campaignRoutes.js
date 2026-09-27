@@ -8,7 +8,9 @@ import {
   updateCampaign,
   deleteCampaign,
   validateCampaign,
-  activeCampaigns
+  activeCampaigns,
+  campaignOverview,
+  campaignProductionReport,
 } from '../controllers/campaignController.js';
 import auth, { roleAuth } from '../middleware/authMiddleware.js';
 
@@ -17,7 +19,15 @@ router.use(auth);
 // GET /api/campaigns
 router.get('/active', roleAuth('campaigns:read'), activeCampaigns);
 
+router.get('/overview', roleAuth('campaigns:read'), campaignOverview);
+
 router.get('/', roleAuth('campaigns:read'), listCampaigns);
+
+router.get(
+  '/:id/production-report',
+  roleAuth('campaigns:read', 'production:read'),
+  campaignProductionReport,
+);
 
 // GET /api/campaigns/:id
 router.get('/:id', roleAuth('campaigns:read'), getCampaignById);
