@@ -227,53 +227,31 @@ function productionSummary(rows) {
   return summary;
 }
 
-export async function getCampaignProductionReport({
+async function campaignReportRows({
   campaignId,
   companyId,
   date,
   shift = 'DAY',
   quality = 'ALL',
   familyId = '',
-  page = 1,
-  limit = 50,
 }) {
   const range = getSelectedShiftRange(date, shift);
   const normalizedQuality = String(quality || 'ALL').trim().toUpperCase();
   if (!['ALL', 'OK', 'REJECTED'].includes(normalizedQuality)) {
     throw new Error('quality must be ALL, OK or REJECTED');
   }
+  const normalizedFamilyId = String(familyId || '').trim();
 
   const allRows = (await productionRows(range.start, range.end, companyId, {
     campaignId,
   })).map(shapeProduction);
 
-  const availableFamilies = [...new Map(
-    allRows
-      .filter(row => row.family?._id)
-      .map(row => [String(row.family._id), {
-        _id: row.family._id,
-        code: row.family.code || '',
-        name: row.family.name || 'Unnamed family',
-      }]),
-  ).values()].sort((left, right) => left.name.localeCompare(right.name));
-
   const filteredRows = allRows.filter(row => {
     if (normalizedQuality === 'OK' && !row.statusOk) return false;
     if (normalizedQuality === 'REJECTED' && row.statusOk) return false;
-    if (familyId && String(row.family?._id || '') !== String(familyId)) return false;
+    if (normalizedFamilyId && String(row.family?._id || '') !== normalizedFamilyId) return false;
     return true;
   });
-
-  const safePage = Math.max(1, Number.parseInt(page, 10) || 1);
-  const safeLimit = Math.min(200, Math.max(10, Number.parseInt(limit, 10) || 50));
-  const total = filteredRows.length;
-  const pages = Math.max(1, Math.ceil(total / safeLimit));
-  const currentPage = Math.min(safePage, pages);
-  const startIndex = (currentPage - 1) * safeLimit;
-  const records = filteredRows.slice(startIndex, startIndex + safeLimit).map(row => ({
-    ...row,
-    serialNo: row.inventorySerialNo || null,
-  }));
 
   return {
     range: {
@@ -285,11 +263,63 @@ export async function getCampaignProductionReport({
     },
     appliedFilters: {
       quality: normalizedQuality,
-      familyId: familyId || null,
+      familyId: normalizedFamilyId || null,
     },
+    allRows,
+    filteredRows,
+  };
+}
+
+export async function getCampaignProductionReport(options) {
+  const {
+    range,
+    appliedFilters,
+    allRows,
+    filteredRows,
+  } = await campaignReportRows(options);
+  const availableFamilies = [...new Map(
+    allRows
+      .filter(row => row.family?._id)
+      .map(row => [String(row.family._id), {
+        _id: row.family._id,
+        code: row.family.code || '',
+        name: row.family.name || 'Unnamed family',
+      }]),
+  ).values()].sort((left, right) => left.name.localeCompare(right.name));
+
+  return {
+    range,
+    appliedFilters,
     filterOptions: { families: availableFamilies },
     summary: productionSummary(filteredRows),
     grouped: groupRows(filteredRows),
+  };
+}
+
+export async function getCampaignProductionRecords({
+  page = 1,
+  limit = 1000,
+  ...options
+}) {
+  const {
+    range,
+    appliedFilters,
+    filteredRows,
+  } = await campaignReportRows(options);
+  const safePage = Math.max(1, Number.parseInt(page, 10) || 1);
+  const safeLimit = Math.min(1000, Math.max(10, Number.parseInt(limit, 10) || 1000));
+  const total = filteredRows.length;
+  const pages = Math.max(1, Math.ceil(total / safeLimit));
+  const currentPage = Math.min(safePage, pages);
+  const startIndex = (currentPage - 1) * safeLimit;
+  const records = filteredRows.slice(startIndex, startIndex + safeLimit).map(row => ({
+    ...row,
+    serialNo: row.inventorySerialNo || null,
+  }));
+
+  return {
+    range,
+    appliedFilters,
     records,
     pagination: {
       page: currentPage,

@@ -11,6 +11,7 @@ import {
   activeCampaigns,
   campaignOverview,
   campaignProductionReport,
+  campaignProductionRecords,
 } from '../controllers/campaignController.js';
 import auth, { roleAuth } from '../middleware/authMiddleware.js';
 
@@ -27,6 +28,12 @@ router.get(
   '/:id/production-report',
   roleAuth('campaigns:read', 'production:read'),
   campaignProductionReport,
+);
+
+router.get(
+  '/:id/production-records',
+  roleAuth('campaigns:read', 'production:read'),
+  campaignProductionRecords,
 );
 
 // GET /api/campaigns/:id

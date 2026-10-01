@@ -5,7 +5,10 @@ import GatewayIngestBatch from '../models/GatewayIngestBatch.js';
 import InventoryLot from '../models/InventoryLot.js';
 import InventorySerial from '../models/InventorySerial.js';
 import ProductionBlanketRoll from '../models/ProductionBlanketRoll.js';
-import { getCampaignProductionReport } from '../services/productionReportService.js';
+import {
+  getCampaignProductionRecords,
+  getCampaignProductionReport,
+} from '../services/productionReportService.js';
 import { AppError, handleError } from '../utils/errorHandler.js';
 
 const companyIdFromRequest = req =>
@@ -215,59 +218,91 @@ export const campaignOverview = async (req, res) => {
   }
 };
 
-export const campaignProductionReport = async (req, res) => {
-  try {
-    const companyId = companyIdFromRequest(req);
-    const { id } = req.params;
-    const datePattern = /^\d{4}-\d{2}-\d{2}$/;
-    const shift = String(req.query.shift || 'DAY').toUpperCase();
-    const quality = String(req.query.quality || 'ALL').toUpperCase();
-    if (!mongoose.isValidObjectId(id)) {
-      throw new AppError('Invalid Campaign identifier', {
-        statusCode: 400,
-        code: 'INVALID_CAMPAIGN_ID',
-      });
-    }
-    const reportDate = String(req.query.date || '');
-    if (!datePattern.test(reportDate) || !DateTime.fromISO(reportDate).isValid) {
-      throw new AppError('date must use YYYY-MM-DD format', {
-        statusCode: 400,
-        code: 'INVALID_REPORT_DATE',
-      });
-    }
-    if (!['DAY', 'NIGHT'].includes(shift)) {
-      throw new AppError('shift must be DAY or NIGHT', {
-        statusCode: 400,
-        code: 'INVALID_REPORT_SHIFT',
-      });
-    }
-    if (!['ALL', 'OK', 'REJECTED'].includes(quality)) {
-      throw new AppError('quality must be ALL, OK or REJECTED', {
-        statusCode: 400,
-        code: 'INVALID_REPORT_QUALITY',
-      });
-    }
-    const campaign = await Campaign.findOne({ _id: id, companyId }).lean();
-    if (!campaign) {
-      throw new AppError('Campaign not found', {
-        statusCode: 404,
-        code: 'CAMPAIGN_NOT_FOUND',
-      });
-    }
+async function campaignReportContext(req) {
+  const companyId = companyIdFromRequest(req);
+  const { id } = req.params;
+  const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+  const reportDate = String(req.query.date || '');
+  const shift = String(req.query.shift || 'DAY').trim().toUpperCase();
+  const quality = String(req.query.quality || 'ALL').trim().toUpperCase();
 
-    const report = await getCampaignProductionReport({
+  if (!mongoose.isValidObjectId(companyId)) {
+    throw new AppError('A valid company is required', {
+      statusCode: 400,
+      code: 'INVALID_COMPANY',
+    });
+  }
+  if (!mongoose.isValidObjectId(id)) {
+    throw new AppError('Invalid Campaign identifier', {
+      statusCode: 400,
+      code: 'INVALID_CAMPAIGN_ID',
+    });
+  }
+  if (!datePattern.test(reportDate) || !DateTime.fromISO(reportDate).isValid) {
+    throw new AppError('date must use YYYY-MM-DD format', {
+      statusCode: 400,
+      code: 'INVALID_REPORT_DATE',
+    });
+  }
+  if (!['DAY', 'NIGHT'].includes(shift)) {
+    throw new AppError('shift must be DAY or NIGHT', {
+      statusCode: 400,
+      code: 'INVALID_REPORT_SHIFT',
+    });
+  }
+  if (!['ALL', 'OK', 'REJECTED'].includes(quality)) {
+    throw new AppError('quality must be ALL, OK or REJECTED', {
+      statusCode: 400,
+      code: 'INVALID_REPORT_QUALITY',
+    });
+  }
+
+  const campaign = await Campaign.findOne({ _id: id, companyId }).lean();
+  if (!campaign) {
+    throw new AppError('Campaign not found', {
+      statusCode: 404,
+      code: 'CAMPAIGN_NOT_FOUND',
+    });
+  }
+
+  return {
+    campaign,
+    reportQuery: {
       campaignId: campaign._id,
       companyId,
-      date: req.query.date,
+      date: reportDate,
       shift,
       quality,
       familyId: req.query.familyId,
+    },
+  };
+}
+
+export const campaignProductionReport = async (req, res) => {
+  try {
+    const { campaign, reportQuery } = await campaignReportContext(req);
+    const report = await getCampaignProductionReport(reportQuery);
+    return res.status(200).json({ data: { campaign, ...report } });
+  } catch (err) {
+    return handleError(res, err, req);
+  }
+};
+
+export const campaignProductionRecords = async (req, res) => {
+  try {
+    const { campaign, reportQuery } = await campaignReportContext(req);
+    const report = await getCampaignProductionRecords({
+      ...reportQuery,
       page: req.query.page,
       limit: req.query.limit,
     });
-
     return res.status(200).json({
-      data: { campaign, ...report },
+      data: {
+        campaignId: campaign._id,
+        range: report.range,
+        appliedFilters: report.appliedFilters,
+        records: report.records,
+      },
       pagination: report.pagination,
     });
   } catch (err) {
