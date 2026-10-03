@@ -13,6 +13,13 @@ import Campaign from '../models/Campaign.js';
 import Company from '../models/Company.js';
 import { AppError } from '../utils/errorHandler.js';
 import {
+  flushInventoryFailureAlerts,
+  flushInventoryTransactionAlerts,
+  queueInsufficientAccountingStockAlert,
+  queueInventoryTransactionAlerts,
+  resetInventoryTransactionAlerts,
+} from './inventoryAlertService.js';
+import {
   generateInventorySerialBatch,
   isValidInventorySerial,
 } from '../utils/serialNumber.js';
@@ -130,10 +137,17 @@ async function runTransaction(work) {
   const session = await mongoose.startSession();
   try {
     let output;
-    await session.withTransaction(async () => {
-      output = await work(session);
-    });
-    return output;
+    try {
+      await session.withTransaction(async () => {
+        resetInventoryTransactionAlerts(session);
+        output = await work(session);
+      });
+      await flushInventoryTransactionAlerts(session);
+      return output;
+    } catch (error) {
+      await flushInventoryFailureAlerts(session);
+      throw error;
+    }
   } finally {
     await session.endSession();
   }
@@ -226,10 +240,30 @@ async function addAccountingValue(companyId, itemId, quantity, value, session) {
   return balance;
 }
 
-async function currentAverageCost(companyId, itemId, quantity, session) {
+async function currentAverageCost(companyId, item, quantity, session, context = {}) {
+  const itemId = item._id;
   const balance = await InventoryCostBalance.findOne({ companyId, itemId }).session(session).lean();
   if (!balance || balance.quantity + EPSILON < quantity) {
-    throw fail('Accounting stock is insufficient for this issue', 409, 'INSUFFICIENT_COST_BALANCE');
+    queueInsufficientAccountingStockAlert(session, {
+      companyId,
+      item,
+      itemId,
+      requestedQuantity: quantity,
+      balance,
+      context,
+    });
+    throw fail(
+      'Accounting stock is insufficient for this issue',
+      409,
+      'INSUFFICIENT_COST_BALANCE',
+      {
+        itemId,
+        requestedQuantity: quantity,
+        accountingQuantity: Number(balance?.quantity || 0),
+        shortage: roundQuantity(Math.max(0, quantity - Number(balance?.quantity || 0))),
+        baseUom: item.baseUom,
+      },
+    );
   }
   return Number(balance.movingAverageCost || 0);
 }
@@ -656,7 +690,12 @@ async function issueLine(
   const item = await loadContext(companyId, input.itemId, input.warehouseId, session);
   const quantity = positive(input.quantity, 'quantity');
   enforceWholeUnit(item, quantity);
-  const accountingUnitCost = await currentAverageCost(companyId, item._id, quantity, session);
+  const accountingUnitCost = await currentAverageCost(companyId, item, quantity, session, {
+    warehouseId: input.warehouseId,
+    operation: normalizeCode(input.referenceType) || 'INVENTORY_ISSUE',
+    referenceType: input.referenceType,
+    referenceId: input.referenceId,
+  });
   const value = roundMoney(quantity * accountingUnitCost);
   const allocations = await allocateIssueLots(companyId, item, input, quantity, session);
   const catchQuantity = allocations.some(allocation => allocation.catchQuantity !== null)
@@ -714,6 +753,7 @@ async function createPostedTransaction(companyId, actorId, input, entries, sessi
     processMetrics: input.processMetrics || undefined,
     createdBy: actorId,
   }], { session });
+  queueInventoryTransactionAlerts(session, transaction);
   return transaction;
 }
 

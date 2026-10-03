@@ -20,6 +20,11 @@ import {
   postIssueInSession,
   postReceiptInSession,
 } from './inventoryService.js';
+import {
+  flushInventoryFailureAlerts,
+  flushInventoryTransactionAlerts,
+  resetInventoryTransactionAlerts,
+} from './inventoryAlertService.js';
 import { AppError } from '../utils/errorHandler.js';
 
 const EPSILON = 0.000001;
@@ -162,10 +167,17 @@ async function withTransaction(work) {
   const session = await mongoose.startSession();
   try {
     let result;
-    await session.withTransaction(async () => {
-      result = await work(session);
-    });
-    return result;
+    try {
+      await session.withTransaction(async () => {
+        resetInventoryTransactionAlerts(session);
+        result = await work(session);
+      });
+      await flushInventoryTransactionAlerts(session);
+      return result;
+    } catch (error) {
+      await flushInventoryFailureAlerts(session);
+      throw error;
+    }
   } finally {
     await session.endSession();
   }
