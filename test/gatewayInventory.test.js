@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   buildGatewayInventoryReceiptInput,
+  buildGatewayPrintJob,
   gatewayIdentityForRecord,
   gatewayQuantityForItem,
   shouldAutoPackGatewayReceipt,
@@ -159,4 +160,56 @@ test('gateway fallback selects only the valid nos Plastic Bag Item', () => {
     ]).map(item => item._id),
     ['current-nos-bag'],
   );
+});
+
+test('accepted Blanket response exposes an idempotent printer-ready label job', () => {
+  const printJob = buildGatewayPrintJob({
+    document: {
+      _id: 'production-1',
+      recordId: 'record-1',
+      productCode: 1,
+      statusOk: true,
+      weightKg: 14.2,
+      at: '2026-08-02T06:08:00.000Z',
+    },
+    serial: {
+      serialNo: '2809188586113070',
+      catchQuantity: 14.2,
+      catchUom: 'kg',
+      manufacturedAt: '2026-08-02T06:08:00.000Z',
+      qualityStatus: 'ACCEPTED',
+      traceSnapshot: {
+        manufacturerName: 'OCFL',
+        productName: 'orewool blanket',
+        sku: 'ITEM_ORE_001',
+        lotNo: 'GW-20260802-OK-PB',
+        specifications: [{ code: 'density', label: 'Density', value: '128', unit: 'kg/m³' }],
+      },
+    },
+    publicBaseUrl: 'https://erp.orientfibertech.com/',
+  });
+
+  assert.equal(printJob.schemaVersion, '1.0');
+  assert.equal(printJob.jobId, 'SERIAL_LABEL:2809188586113070');
+  assert.equal(printJob.template, 'BLANKET_ROLL_TRACE_V1');
+  assert.equal(printJob.copies, 1);
+  assert.equal(printJob.data.serialNo, '2809188586113070');
+  assert.deepEqual(printJob.data.weight, { value: 14.2, uom: 'kg' });
+  assert.equal(
+    printJob.traceUrl,
+    'https://erp.orientfibertech.com/trace/2809188586113070',
+  );
+  assert.equal(printJob.qr.value, printJob.traceUrl);
+});
+
+test('rejected Blanket and non-Blanket records do not request customer labels', () => {
+  const serial = { serialNo: '2809188586113070' };
+  assert.equal(buildGatewayPrintJob({
+    document: { productCode: 1, statusOk: false },
+    serial,
+  }), null);
+  assert.equal(buildGatewayPrintJob({
+    document: { productCode: 2, statusOk: true },
+    serial,
+  }), null);
 });

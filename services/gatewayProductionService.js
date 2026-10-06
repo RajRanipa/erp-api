@@ -162,6 +162,8 @@ export async function ingestBlanketBatch({ companyId, payload }) {
     postedToInventory: 0,
     inventorySkipped: 0,
     inventoryPending: 0,
+    printJobsReady: 0,
+    printJobsUnavailable: 0,
     failed: 0,
     errors: [],
     warnings: [],
@@ -183,6 +185,8 @@ export async function ingestBlanketBatch({ companyId, payload }) {
       retryable: true,
       storageStatus: 'REJECTED',
       inventoryStatus: 'NOT_ATTEMPTED',
+      printStatus: 'NOT_APPLICABLE',
+      printJob: null,
       code: null,
       message: null,
     };
@@ -238,6 +242,15 @@ export async function ingestBlanketBatch({ companyId, payload }) {
         ? null
         : inventory.status;
       result.message = inventory.message;
+      result.printStatus = inventory.printStatus || 'NOT_APPLICABLE';
+      result.printJob = inventory.printJob || null;
+      if (result.printStatus === 'READY') summary.printJobsReady += 1;
+      if (result.printStatus === 'UNAVAILABLE') {
+        summary.printJobsUnavailable += 1;
+        summary.warnings.push(
+          `recordId ${record.recordId} scale ${record.scaleNo}: inventory posted but label data is unavailable`,
+        );
+      }
       console.info('[gateway:inventory-result]', JSON.stringify({
         gatewayId: String(gatewayId),
         batchId: String(batch._id),
@@ -247,6 +260,8 @@ export async function ingestBlanketBatch({ companyId, payload }) {
         inventoryStatus: inventory.status,
         posted: Boolean(inventory.posted),
         duplicate: Boolean(inventory.duplicate),
+        printStatus: result.printStatus,
+        printJobId: result.printJob?.jobId || null,
         message: inventory.message || null,
       }));
       if (inventory.posted) {
@@ -267,6 +282,9 @@ export async function ingestBlanketBatch({ companyId, payload }) {
         result.accepted = true;
         result.retryable = false;
         result.inventoryStatus = 'FAILED';
+        result.printStatus = record?.productCode === 1 && record?.statusOk === true
+          ? 'PENDING'
+          : 'NOT_APPLICABLE';
         summary.inventoryPending += 1;
         summary.warnings.push(`recordId ${result.recordId}: ${message}`);
         console.warn('[gateway:inventory-failed]', JSON.stringify({
@@ -310,6 +328,8 @@ export async function ingestBlanketBatch({ companyId, payload }) {
     postedToInventory: summary.postedToInventory,
     inventoryPending: summary.inventoryPending,
     failed: summary.failed,
+    printJobsReady: summary.printJobsReady,
+    printJobsUnavailable: summary.printJobsUnavailable,
   }));
   if (Object.values(campaignSummary).some(Boolean)) {
     const updated = await Campaign.updateOne(
@@ -331,6 +351,10 @@ export async function ingestBlanketBatch({ companyId, payload }) {
       });
     }
   }
+  const printJobs = summary.recordResults
+    .map(row => row.printJob)
+    .filter(Boolean);
+    
   return {
     ok: true,
     gatewayId: String(gatewayId),
@@ -338,6 +362,7 @@ export async function ingestBlanketBatch({ companyId, payload }) {
     status,
     summary,
     recordResults: summary.recordResults,
+    printJobs,
   };
 }
 
@@ -507,6 +532,8 @@ export async function replayGatewayInventory({
       duplicate: Boolean(result.duplicate),
       transactionId: result.transactionId || null,
       serialNo: result.serialNo || null,
+      printStatus: result.printStatus || 'NOT_APPLICABLE',
+      printJob: result.printJob || null,
       message: result.message || null,
     });
   }

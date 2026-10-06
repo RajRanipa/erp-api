@@ -1,5 +1,6 @@
 import ItemFamily from '../models/ItemFamily.js';
 import ItemMaster from '../models/ItemMaster.js';
+import InventorySerial from '../models/InventorySerial.js';
 import ProductionBlanketRoll from '../models/ProductionBlanketRoll.js';
 import Warehouse from '../models/Warehouse.js';
 import {
@@ -28,6 +29,83 @@ export const GATEWAY_PRODUCT_FAMILY = Object.freeze({
 export const shouldAutoPackGatewayReceipt = (familyCode, receiptInput = {}) =>
   normalizeCode(familyCode) === 'BLANKET'
   && normalizeCode(receiptInput.qualityStatus) === 'AVAILABLE';
+
+const gatewayLabelBaseUrl = () => String(
+  process.env.GATEWAY_LABEL_PUBLIC_BASE_URL
+  || process.env.ERP_PUBLIC_URL
+  || 'https://erp.orientfibertech.com',
+).trim().replace(/\/+$/, '');
+
+const labelWeight = value => Number(Number(value || 0).toFixed(3));
+
+export function buildGatewayPrintJob({
+  document,
+  serial,
+  publicBaseUrl = gatewayLabelBaseUrl(),
+}) {
+  const familyCode = GATEWAY_PRODUCT_FAMILY[Number(document?.productCode)];
+  if (familyCode !== 'BLANKET' || document?.statusOk !== true || !serial?.serialNo) {
+    return null;
+  }
+  const serialNo = String(serial.serialNo);
+  const manufacturedAt = serial.manufacturedAt || document.at;
+  const traceUrl = `${String(publicBaseUrl).replace(/\/+$/, '')}/trace/${encodeURIComponent(serialNo)}`;
+  const snapshot = serial.traceSnapshot || {};
+  return {
+    schemaVersion: '1.0',
+    jobId: `SERIAL_LABEL:${serialNo}`,
+    kind: 'SERIAL_LABEL',
+    template: 'BLANKET_ROLL_TRACE_V1',
+    copies: 1,
+    data: {
+      manufacturerName: snapshot.manufacturerName || null,
+      productName: snapshot.productName || null,
+      serialNo,
+      sku: snapshot.sku || null,
+      lotNo: snapshot.lotNo || null,
+      weight: {
+        value: labelWeight(serial.catchQuantity ?? document.weightKg),
+        uom: serial.catchUom || 'kg',
+      },
+      manufacturedAt: manufacturedAt ? new Date(manufacturedAt).toISOString() : null,
+      qualityStatus: serial.qualityStatus || 'ACCEPTED',
+      specifications: snapshot.specifications || [],
+      productionRecordId: String(document._id || ''),
+      gatewayRecordId: String(document.recordId || ''),
+    },
+    qr: {
+      format: 'QR_CODE',
+      value: traceUrl,
+    },
+    traceUrl,
+  };
+}
+
+async function attachGatewayPrintJob(document, result) {
+  const required = GATEWAY_PRODUCT_FAMILY[Number(document.productCode)] === 'BLANKET'
+    && document.statusOk === true;
+  if (!required) {
+    return { ...result, printStatus: 'NOT_APPLICABLE', printJob: null };
+  }
+  if (!result.posted) {
+    return { ...result, printStatus: 'PENDING', printJob: null };
+  }
+  const serialFilter = result.serialId
+    ? { _id: result.serialId }
+    : { serialNo: result.serialNo };
+  const serial = await InventorySerial.findOne({
+    ...serialFilter,
+    companyId: document.companyId,
+  })
+    .select('serialNo catchQuantity catchUom manufacturedAt qualityStatus traceSnapshot')
+    .lean();
+  const printJob = buildGatewayPrintJob({ document, serial });
+  return {
+    ...result,
+    printStatus: printJob ? 'READY' : 'UNAVAILABLE',
+    printJob,
+  };
+}
 
 const normalizeCode = value => String(value ?? '')
   .trim()
@@ -314,7 +392,7 @@ const inventoryLinkFields = result => ({
 
 export async function postAndLinkGatewayInventory({ document, warehouseId }) {
   if (document.inventoryPosted) {
-    return {
+    return attachGatewayPrintJob(document, {
       posted: true,
       status: 'POSTED',
       itemId: document.itemId || null,
@@ -323,7 +401,7 @@ export async function postAndLinkGatewayInventory({ document, warehouseId }) {
       serialNo: document.inventorySerialNo || null,
       duplicate: true,
       message: null,
-    };
+    });
   }
   let result;
   if (!warehouseId) {
@@ -363,5 +441,5 @@ export async function postAndLinkGatewayInventory({ document, warehouseId }) {
     { _id: document._id },
     { $set: inventoryLinkFields(result) },
   );
-  return result;
+  return attachGatewayPrintJob(document, result);
 }
