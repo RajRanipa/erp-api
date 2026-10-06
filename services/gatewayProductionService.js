@@ -11,6 +11,22 @@ import mongoose from 'mongoose';
 const SUPPORTED_PRODUCT_CODES = new Set([1, 2, 3, 4, 5]);
 const SUPPORTED_SCALES = new Set([1, 2, 3]);
 
+export function buildGatewayBatchResponse({
+  gatewayId,
+  batchId,
+  status,
+  summary,
+  recordResults,
+}) {
+  return {
+    gatewayId: String(gatewayId),
+    batchId,
+    status,
+    summary,
+    recordResults,
+  };
+}
+
 function safeDate(value) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date;
@@ -167,8 +183,8 @@ export async function ingestBlanketBatch({ companyId, payload }) {
     failed: 0,
     errors: [],
     warnings: [],
-    recordResults: [],
   };
+  const recordResults = [];
   const campaignSummary = {
     blanketRolls: 0,
     bulkKg: 0,
@@ -190,7 +206,7 @@ export async function ingestBlanketBatch({ companyId, payload }) {
       code: null,
       message: null,
     };
-    summary.recordResults.push(result);
+    recordResults.push(result);
     let record;
     let document;
     try {
@@ -309,13 +325,18 @@ export async function ingestBlanketBatch({ companyId, payload }) {
     }
   }
 
-  const accepted = summary.recordResults.filter(row => row.accepted).length;
+  const accepted = recordResults.filter(row => row.accepted).length;
   const status = accepted === 0
     ? 'FAILED'
     : (summary.failed || summary.inventoryPending ? 'PARTIAL' : 'PROCESSED');
   await GatewayIngestBatch.updateOne(
     { _id: batch._id },
-    { $set: { processingStatus: status, processingSummary: summary } },
+    {
+      $set: {
+        processingStatus: status,
+        processingSummary: { ...summary, recordResults },
+      },
+    },
   );
   console.info('[gateway:batch-completed]', JSON.stringify({
     gatewayId: String(gatewayId),
@@ -351,19 +372,13 @@ export async function ingestBlanketBatch({ companyId, payload }) {
       });
     }
   }
-  const printJobs = summary.recordResults
-    .map(row => row.printJob)
-    .filter(Boolean);
-    
-  return {
-    ok: true,
-    gatewayId: String(gatewayId),
+  return buildGatewayBatchResponse({
+    gatewayId,
     batchId: batch._id,
     status,
     summary,
-    recordResults: summary.recordResults,
-    printJobs,
-  };
+    recordResults,
+  });
 }
 
 const pendingInventoryFilter = companyId => ({
